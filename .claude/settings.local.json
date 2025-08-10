@@ -46,7 +46,8 @@
       "Bash(grep:*)",
       "Bash(tskill:*)",
       "Bash(chmod:*)",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }

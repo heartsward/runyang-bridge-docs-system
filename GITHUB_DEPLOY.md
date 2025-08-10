@@ -119,41 +119,236 @@ VITE_API_BASE_URL=http://your-backend-server:8002
 - [ ] 能正常上传和搜索文档
 - [ ] LibreOffice文档提取功能正常工作
 
-## 🔄 版本更新
+## 🔄 版本更新管理
 
-### 更新到最新版本
+### 📦 开发端版本发布 (代码提交者使用)
+
+#### 自动化版本发布脚本 (推荐)
 ```bash
-# 停止服务
-./stop-services.sh  # 或 stop-services.bat
+# Windows
+update-version.bat
 
-# 拉取最新代码
+# Linux/macOS  
+chmod +x update-version.sh
+./update-version.sh
+```
+
+**脚本功能**:
+- ✅ 自动检查Git状态和网络连接
+- ✅ 智能版本类型选择 (补丁/功能/重大)
+- ✅ 自动创建版本标签 (v1.0.x 格式)
+- ✅ 一键提交并推送到GitHub
+- ✅ 生成标准化提交信息
+
+#### 手动版本发布流程
+```bash
+# 1. 检查当前状态
+git status
 git pull origin main
 
-# 检查是否有新的配置项
+# 2. 添加所有更改
+git add .
+
+# 3. 创建提交 (标准格式)
+git commit -m "feat: 描述本次更新内容
+
+- 补丁/功能/重大版本更新
+- 系统功能优化和bug修复
+- 文档和配置更新
+
+🚀 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+
+# 4. 创建版本标签
+git tag -a v1.0.x -m "版本描述"
+
+# 5. 推送到GitHub
+git push origin main
+git push origin v1.0.x
+```
+
+---
+
+### 🚀 生产端安全更新 (部署服务器使用)
+
+#### 自动化安全更新脚本 (推荐)
+```bash
+# Windows
+deploy-update.bat
+
+# Linux/macOS
+chmod +x deploy-update.sh  
+./deploy-update.sh
+```
+
+**脚本功能**:
+- ✅ 网络连接和仓库状态检查
+- ✅ 自动配置文件备份保护
+- ✅ 优雅的服务停止和启动
+- ✅ 配置变更检测和提醒
+- ✅ 服务状态验证
+- ✅ 失败自动回滚机制
+
+#### 手动安全更新流程
+```bash
+# 1. 停止服务
+./stop-services.sh  # 或 stop-services.bat
+
+# 2. 备份重要文件
+mkdir backup_$(date +%Y%m%d_%H%M%S)
+cp backend/.env frontend/.env *.db backup_*/
+
+# 3. 拉取最新代码
+git fetch origin
+git pull origin main
+
+# 4. 检查配置文件变更
 git diff HEAD~1 backend/.env.example
 git diff HEAD~1 frontend/.env.example
 
-# 更新依赖（如果有变化）
+# 5. 更新依赖（如有变化）
 cd backend && pip install -r requirements.txt
 cd ../frontend && npm install
 
-# 重新启动服务
+# 6. 重新启动服务
 ./start-production.sh  # 或 start-production.bat
+
+# 7. 验证服务状态
+curl http://localhost:8002/health
+curl http://localhost:5173
 ```
 
-### 版本回退（如有问题）
+---
+
+### 🔙 版本回退机制
+
+#### 快速回滚 (紧急情况)
 ```bash
-# 查看提交历史
+# 查看最近提交历史
 git log --oneline -10
 
-# 回退到指定版本（替换为实际的commit hash）
-git checkout <commit-hash>
+# 回滚到上一个版本
+git reset --hard HEAD~1
+
+# 重新启动服务  
+./start-production.sh
+```
+
+#### 指定版本回滚
+```bash
+# 查看所有版本标签
+git tag -l
+
+# 回滚到指定标签版本
+git checkout v1.0.5
 
 # 如果需要创建新分支
-git checkout -b rollback-version
+git checkout -b rollback-v1.0.5
 
 # 重新启动服务
 ./start-production.sh
+```
+
+#### 恢复备份配置
+```bash
+# 查看备份目录
+ls backup_*/
+
+# 恢复配置文件
+cp backup_YYYYMMDD_HHMMSS/backend.env.backup backend/.env
+cp backup_YYYYMMDD_HHMMSS/frontend.env.backup frontend/.env
+
+# 恢复数据库 (如果需要)
+cp backup_YYYYMMDD_HHMMSS/database.backup yunwei_docs.db
+```
+
+---
+
+### 📊 版本更新最佳实践
+
+#### 开发端最佳实践
+1. **版本类型选择**:
+   - `patch`: Bug修复、小优化
+   - `minor`: 新功能、功能增强  
+   - `major`: 重大架构变更、破坏性更新
+
+2. **提交信息规范**:
+   - 使用清晰的中文描述
+   - 包含变更类型和影响范围
+   - 遵循Git提交信息最佳实践
+
+3. **发布前检查**:
+   - 确保本地测试通过
+   - 检查是否有遗漏的配置文件
+   - 验证依赖包版本兼容性
+
+#### 生产端最佳实践
+1. **更新时机选择**:
+   - 选择业务低峰期进行更新
+   - 预留充足的回滚时间窗口
+   - 提前通知相关用户
+
+2. **安全措施**:
+   - 始终创建配置和数据备份
+   - 验证服务启动状态
+   - 监控系统运行指标
+
+3. **应急预案**:
+   - 准备快速回滚方案
+   - 保持备份文件的完整性
+   - 建立问题上报机制
+
+---
+
+### 🔍 更新故障排除
+
+#### 常见问题及解决方案
+
+**1. 代码拉取失败**
+```bash
+# 检查网络连接
+ping github.com
+
+# 检查远程仓库配置
+git remote -v
+
+# 重置本地更改后重试
+git stash && git pull origin main
+```
+
+**2. 服务启动失败**
+```bash  
+# 检查端口占用
+netstat -tlnp | grep :8002
+netstat -tlnp | grep :5173
+
+# 查看服务日志
+tail -f logs/backend.log
+tail -f logs/frontend.log
+
+# 手动启动调试
+cd backend && python database_integrated_server.py
+cd frontend && npm run dev
+```
+
+**3. 配置文件冲突**
+```bash
+# 对比配置差异
+git diff backend/.env.example backend/.env
+git diff frontend/.env.example frontend/.env
+
+# 手动合并配置
+# 编辑 .env 文件，添加新的配置项
+```
+
+**4. 依赖包更新失败**
+```bash
+# 清理并重新安装 Python 依赖
+cd backend && pip cache purge && pip install -r requirements.txt
+
+# 清理并重新安装 Node.js 依赖  
+cd frontend && rm -rf node_modules && npm install
 ```
 
 ## 🌐 生产环境优化

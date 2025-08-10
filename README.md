@@ -224,11 +224,34 @@ cp frontend/.env.example frontend/.env
 # 编辑配置文件后执行启动脚本
 ```
 
-### 版本更新
+### 🔄 版本更新
+
+#### 自动化更新 (推荐)
+```bash
+# 生产服务器安全更新
+Windows: deploy-update.bat
+Linux:   ./deploy-update.sh
+
+# 开发端版本发布
+Windows: update-version.bat  
+Linux:   ./update-version.sh
+
+# 配置变更检测
+Windows: check-config-changes.bat
+Linux:   ./check-config-changes.sh
+
+# 服务健康检查  
+Windows: check-service-health.bat
+Linux:   ./check-service-health.sh
+```
+
+#### 手动更新
 ```bash
 git pull origin main  # 拉取最新代码
 # 重启服务应用更新
 ```
+
+**详细说明**: 参见 [VERSION_UPDATE_GUIDE.md](./VERSION_UPDATE_GUIDE.md)
 
 ---
 

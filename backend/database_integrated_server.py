@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Que
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 import uvicorn
 import jwt
 
@@ -57,11 +58,33 @@ try:
 except Exception as e:
     print(f"数据库表创建失败: {e}")
 
+# 应用生命周期管理
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时的代码
+    if 'task_manager' in globals() and task_manager:
+        task_manager.start_worker()
+        print("数据库后台任务处理器已启动")
+    
+    yield
+    
+    # 关闭时的代码
+    print("服务器关闭中，保存用户分析数据...")
+    try:
+        save_user_analytics_to_file()
+    except:
+        pass
+    
+    if 'task_manager' in globals() and task_manager:
+        task_manager.stop_worker()
+        print("数据库后台任务处理器已停止")
+
 # 创建FastAPI应用
 app = FastAPI(
     title="运维文档管理系统",
     version="2.1.0",
-    description="数据库集成版运维文档管理系统后端API"
+    description="数据库集成版运维文档管理系统后端API",
+    lifespan=lifespan
 )
 
 # 设置CORS
@@ -1475,17 +1498,27 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
         db = None
         try:
             db = SessionLocal()
-            total_documents = crud.document.count(db=db)
-            recent_uploads = crud.document.count_recent(db=db, days=7)
+            # 直接查询文档总数
+            from app.models.document import Document
+            total_documents = db.query(Document).count()
+            
+            # 查询最近7天上传的文档
+            from datetime import datetime, timedelta
+            recent_date = datetime.utcnow() - timedelta(days=7)
+            recent_uploads = db.query(Document).filter(Document.created_at >= recent_date).count()
+            
             print(f"成功获取文档统计: 总数={total_documents}, 最近上传={recent_uploads}")
         except Exception as e:
-            print(f"获取文档统计失败，使用默认值: {e}")
-            # 使用一些合理的默认值
-            total_documents = 25
-            recent_uploads = 8
+            print(f"获取文档统计失败，使用0值: {e}")
+            # 使用0作为默认值，表示没有数据
+            total_documents = 0
+            recent_uploads = 0
             # 如果数据库连接失败，关闭连接并设为None
             if db:
-                db.close()
+                try:
+                    db.close()
+                except:
+                    pass
                 db = None
         
         # 基于真实用户数据生成活动统计（可能使用db会话获取真实名称）
@@ -1612,7 +1645,7 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
             "maintenance_assets": maintenance_assets,
             "recent_assets": recent_assets,
             "total_users": len(USERS),
-            "total_searches": total_searches_real if total_searches_real > 0 else 156,
+            "total_searches": total_searches_real,
             "total_document_views": total_document_views,
             "total_asset_views": total_asset_views,
             "recent_uploads": recent_uploads,
@@ -1623,22 +1656,21 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
         }
     except Exception as e:
         print(f"获取分析统计失败: {e}")
-        # 返回默认值
+        # 返回零值，表示系统中没有数据
         return {
-            "total_documents": 15,
-            "total_assets": 6,
-            "active_assets": 5,
-            "maintenance_assets": 1,
-            "recent_assets": 3,
-            "total_users": 1,
-            "total_searches": 125,
-            "recent_uploads": 5,
+            "total_documents": 0,
+            "total_assets": 0,
+            "active_assets": 0,
+            "maintenance_assets": 0,
+            "recent_assets": 0,
+            "total_users": len(USERS) if 'USERS' in globals() else 1,
+            "total_searches": 0,
+            "total_document_views": 0,
+            "total_asset_views": 0,
+            "recent_uploads": 0,
             "system_status": "error",
             "userActivityStats": [],
-            "searchKeywords": [
-                {"keyword": "服务器运维", "count": 245, "growth": 15},
-                {"keyword": "网络配置", "count": 198, "growth": -5}
-            ]
+            "searchKeywords": []
         }
 
 # 资产数据持久化存储
@@ -2674,22 +2706,6 @@ async def clear_analytics_stats(current_user: dict = Depends(require_admin_dep))
         print(f"清空用户活动统计数据失败: {e}")
         raise HTTPException(status_code=500, detail=f"清空统计数据失败: {str(e)}")
 
-# 启动后台任务处理器
-@app.on_event("startup")
-async def startup_event():
-    if task_manager:
-        task_manager.start_worker()
-        print("数据库后台任务处理器已启动")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    # 保存用户分析数据
-    print("服务器关闭中，保存用户分析数据...")
-    save_user_analytics_to_file()
-    
-    if task_manager:
-        task_manager.stop_worker()
-        print("数据库后台任务处理器已停止")
 
 if __name__ == "__main__":
     try:
