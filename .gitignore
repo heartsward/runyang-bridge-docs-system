@@ -1,0 +1,152 @@
+# 润扬大桥运维文档管理系统 - Git忽略文件
+
+# ===== 敏感数据和用户数据 =====
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 用户数据和分析数据
+*_data.json
+users_data.json
+user_analytics_data.json
+assets_data.json
+
+# 环境配置文件
+.env
+.env.local
+.env.development
+.env.test
+
+# ===== 运行时文件 =====
+# 上传文件目录
+uploads/
+files/
+
+# 日志文件
+logs/
+*.log
+
+# 临时文件和调试文件
+debug_*.png
+debug_*.jpg
+*.tmp
+*.cache
+temp/
+
+# ===== Python相关 =====
+# 字节码文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 虚拟环境
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyInstaller
+*.manifest
+*.spec
+dist/
+build/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ===== Node.js相关 =====
+# 依赖包
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 包管理器锁文件（保留package-lock.json用于依赖锁定）
+# yarn.lock
+
+# 构建输出
+frontend/dist/
+frontend/build/
+
+# 开发服务器
+.vite/
+
+# ===== IDE和编辑器 =====
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ===== 操作系统 =====
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Linux
+*~
+.nfs*
+
+# ===== 其他 =====
+# 压缩文件
+*.zip
+*.tar.gz
+*.rar
+
+# 备份文件
+*.bak
+*.backup
+*.old
+
+# 测试文件
+test_*.py
+*_test.py
+test/
+tests/__pycache__/
+
+# 证书和密钥
+*.pem
+*.key
+*.crt
+*.p12
+
+# ===== 项目特定 =====
+# Alembic
+alembic/versions/
+
+# 任务状态文件
+task_status/
+
+# 性能分析文件
+profile_*.prof

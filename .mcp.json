@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "promptx-local": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "dpml-prompt@latest",
+        "mcp-server"
+      ],
+      "env": {}
+    }
+  }
+}
