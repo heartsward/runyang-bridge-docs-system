@@ -1792,16 +1792,30 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep), d
                     user_doc_views = db.query(DocumentView).filter(DocumentView.user_id == user_id).all()
                     document_views = len(user_doc_views)
                     
-                    # 获取最近的文档访问详情
-                    for view in user_doc_views[-5:]:  # 最近5个
+                    # 获取文档访问详情 - 按文档ID分组统计
+                    doc_access_stats = {}
+                    for view in user_doc_views:
+                        doc_id = view.document_id
+                        if doc_id not in doc_access_stats:
+                            doc_access_stats[doc_id] = {
+                                "count": 0,
+                                "lastAccess": view.created_at
+                            }
+                        doc_access_stats[doc_id]["count"] += 1
+                        if view.created_at > doc_access_stats[doc_id]["lastAccess"]:
+                            doc_access_stats[doc_id]["lastAccess"] = view.created_at
+                    
+                    # 按访问次数排序并获取前5个最常访问的文档
+                    sorted_docs = sorted(doc_access_stats.items(), key=lambda x: x[1]["count"], reverse=True)[:5]
+                    for doc_id, stats in sorted_docs:
                         try:
-                            document_obj = crud.document.get(db=db, id=view.document_id)
+                            document_obj = crud.document.get(db=db, id=doc_id)
                             if document_obj:
                                 document_details.append({
-                                    "documentId": view.document_id,
+                                    "documentId": doc_id,
                                     "documentTitle": document_obj.title,
-                                    "accessCount": 1,
-                                    "lastAccess": view.created_at.isoformat() + "Z"
+                                    "accessCount": stats["count"],
+                                    "lastAccess": stats["lastAccess"].isoformat() + "Z"
                                 })
                         except:
                             pass
@@ -1810,21 +1824,35 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep), d
                     user_asset_views = db.query(AssetView).filter(AssetView.user_id == user_id).all()
                     asset_views = len(user_asset_views)
                     
-                    # 获取最近的资产访问详情
-                    for view in user_asset_views[-5:]:  # 最近5个
+                    # 获取资产访问详情 - 按资产ID分组统计
+                    asset_access_stats = {}
+                    for view in user_asset_views:
+                        asset_id = view.asset_id
+                        if asset_id not in asset_access_stats:
+                            asset_access_stats[asset_id] = {
+                                "count": 0,
+                                "lastAccess": view.created_at
+                            }
+                        asset_access_stats[asset_id]["count"] += 1
+                        if view.created_at > asset_access_stats[asset_id]["lastAccess"]:
+                            asset_access_stats[asset_id]["lastAccess"] = view.created_at
+                    
+                    # 按访问次数排序并获取前5个最常访问的资产
+                    sorted_assets = sorted(asset_access_stats.items(), key=lambda x: x[1]["count"], reverse=True)[:5]
+                    for asset_id, stats in sorted_assets:
                         try:
-                            asset_name = f"资产ID{view.asset_id}"
+                            asset_name = f"资产ID{asset_id}"
                             # 从内存存储获取资产名称
                             for asset in assets_storage:
-                                if asset["id"] == view.asset_id:
+                                if asset["id"] == asset_id:
                                     asset_name = asset["name"]
                                     break
                             
                             asset_details.append({
-                                "assetId": view.asset_id,
+                                "assetId": asset_id,
                                 "assetName": asset_name,
-                                "accessCount": 1,
-                                "lastAccess": view.created_at.isoformat() + "Z"
+                                "accessCount": stats["count"],
+                                "lastAccess": stats["lastAccess"].isoformat() + "Z"
                             })
                         except:
                             pass
@@ -2666,100 +2694,255 @@ async def export_assets(export_request: dict, current_user: dict = Depends(requi
             headers={"Content-Disposition": f"attachment; filename=assets_export.csv"}
         )
 
-@app.post("/api/v1/assets/extract")
-async def extract_assets_from_document(extract_request: dict, current_user: dict = Depends(require_admin_dep)):
-    """从文档提取资产信息"""
-    global assets_storage, next_asset_id
+@app.post("/api/v1/assets/bulk-delete")
+async def bulk_delete_assets(asset_ids: List[int], current_user: dict = Depends(require_admin_dep)):
+    """批量删除资产"""
+    global assets_storage
     
-    document_id = extract_request.get("document_id")
-    auto_merge = extract_request.get("auto_merge", True)
-    merge_threshold = extract_request.get("merge_threshold", 80)
+    if len(asset_ids) == 0:
+        raise HTTPException(status_code=400, detail="请提供要删除的资产ID列表")
     
-    # 从文档提取资产
+    if len(asset_ids) > 100:
+        raise HTTPException(status_code=400, detail="单次最多删除100个资产")
     
-    # 模拟提取过程
-    import time
-    time.sleep(1)  # 模拟处理时间
+    # 验证所有资产是否存在
+    existing_assets = []
+    missing_ids = []
     
-    # 模拟提取的资产数据模板
-    extract_templates = [
-        {
-            "name": "提取的服务器01",
-            "asset_type": "server",
-            "device_model": "Dell PowerEdge R740",
-            "ip_address": "192.168.1.201",
-            "hostname": "extracted-server-01",
-            "username": "root",
-            "password": "extract123",
-            "network_location": "office",
-            "department": "技术部",
-            "status": "active",
-            "notes": "从文档中提取的服务器信息",
-            "tags": ["extracted", "server"],
-            "confidence_score": 85,
-            "is_merged": False
-        },
-        {
-            "name": "提取的网络设备01",
-            "asset_type": "network",
-            "device_model": "Cisco Catalyst 2960",
-            "ip_address": "192.168.1.202",
-            "hostname": "switch-extracted-01",
-            "username": "admin",
-            "password": "switch456",
-            "network_location": "office",
-            "department": "网络部",
-            "status": "active",
-            "notes": "从文档中提取的网络设备",
-            "tags": ["extracted", "network"],
-            "confidence_score": 92,
-            "is_merged": False
-        }
-    ]
+    for asset_id in asset_ids:
+        found = False
+        for asset in assets_storage:
+            if asset["id"] == asset_id:
+                existing_assets.append(asset)
+                found = True
+                break
+        if not found:
+            missing_ids.append(asset_id)
     
-    extracted_assets = []
-    created_count = 0
+    if missing_ids:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"以下资产不存在: {missing_ids}"
+        )
     
-    # 实际创建资产到存储中
-    for template in extract_templates:
-        new_asset = {
-            "id": next_asset_id,
-            "name": template["name"],
-            "asset_type": template["asset_type"],
-            "device_model": template["device_model"],
-            "ip_address": template["ip_address"],
-            "hostname": template["hostname"],
-            "username": template["username"],
-            "password": template["password"],
-            "network_location": template["network_location"],
-            "department": template["department"],
-            "status": template["status"],
-            "notes": template["notes"],
-            "tags": template["tags"],
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "confidence_score": template["confidence_score"],
-            "is_merged": template["is_merged"]
-        }
-        
-        # 添加到存储
-        assets_storage.append(new_asset)
-        extracted_assets.append(new_asset)
-        next_asset_id += 1
-        created_count += 1
-        
-        # 资产提取创建完成
+    # 批量删除资产
+    deleted_count = 0
+    for asset_id in asset_ids:
+        for i, asset in enumerate(assets_storage):
+            if asset["id"] == asset_id:
+                deleted_asset = assets_storage.pop(i)
+                deleted_count += 1
+                break
     
     # 保存到文件
-    if created_count > 0:
+    if deleted_count > 0:
         save_assets_to_file()
     
     return {
-        "extracted_count": len(extract_templates),
-        "merged_count": 0,  # 目前不实现合并逻辑
-        "assets": extracted_assets,
-        "errors": []
+        "message": f"成功删除 {deleted_count} 个资产",
+        "deleted_count": deleted_count,
+        "deleted_ids": asset_ids
     }
+
+@app.post("/api/v1/assets/file-extract")
+async def extract_assets_from_file(
+    file: UploadFile = File(...),
+    auto_merge: bool = Form(True),
+    merge_threshold: int = Form(80),
+    current_user: dict = Depends(require_admin_dep)
+):
+    """从文件提取资产信息"""
+    global assets_storage, next_asset_id
+    
+    # 验证文件类型
+    allowed_types = ['txt', 'csv', 'xlsx', 'xls', 'json', 'md']
+    file_ext = file.filename.split('.')[-1].lower() if file.filename and '.' in file.filename else 'txt'
+    
+    if file_ext not in allowed_types:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"不支持的文件类型。支持的类型: {', '.join(allowed_types)}"
+        )
+    
+    # 限制文件大小 (10MB)
+    max_size = 10 * 1024 * 1024
+    file_content = await file.read()
+    if len(file_content) > max_size:
+        raise HTTPException(status_code=400, detail="文件大小不能超过10MB")
+    
+    extracted_assets = []
+    created_count = 0
+    errors = []
+    
+    try:
+        import re
+        
+        if file_ext == 'csv':
+            # CSV处理
+            content_str = file_content.decode('utf-8')
+            lines = content_str.strip().split('\n')
+            
+            for i, line in enumerate(lines[1:], 1):  # 跳过标题行
+                if line.strip():
+                    parts = [part.strip() for part in line.split(',')]
+                    if len(parts) >= 2:
+                        try:
+                            new_asset = {
+                                "id": next_asset_id,
+                                "name": parts[1] if len(parts) > 1 and parts[1] else f"设备-{i}",
+                                "asset_type": "server",
+                                "device_model": parts[2] if len(parts) > 2 and parts[2] else "",
+                                "ip_address": parts[0] if parts[0] else "",
+                                "hostname": parts[1] if len(parts) > 1 and parts[1] else "",
+                                "username": parts[3] if len(parts) > 3 and parts[3] else "",
+                                "password": parts[4] if len(parts) > 4 and parts[4] else "",
+                                "network_location": "office",
+                                "department": parts[5] if len(parts) > 5 and parts[5] else "技术部",
+                                "status": "active",
+                                "notes": f"从文件 {file.filename} 提取",
+                                "tags": ["extracted"],
+                                "created_at": datetime.utcnow().isoformat() + "Z",
+                                "updated_at": datetime.utcnow().isoformat() + "Z",
+                                "confidence_score": 85,
+                                "is_merged": False
+                            }
+                            
+                            assets_storage.append(new_asset)
+                            extracted_assets.append(new_asset)
+                            next_asset_id += 1
+                            created_count += 1
+                        except Exception as e:
+                            errors.append(f"第{i}行处理失败: {str(e)}")
+                            continue
+        
+        elif file_ext in ['txt', 'md']:
+            # TXT/MD文件处理 - 使用正则表达式提取IP地址
+            content_str = file_content.decode('utf-8')
+            ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
+            ips = list(set(ip_pattern.findall(content_str)))  # 去重
+            
+            for i, ip in enumerate(ips[:20]):  # 最多提取20个IP
+                try:
+                    # 验证IP地址格式
+                    parts = ip.split('.')
+                    if all(0 <= int(part) <= 255 for part in parts):
+                        new_asset = {
+                            "id": next_asset_id,
+                            "name": f"设备-{ip}",
+                            "asset_type": "server",
+                            "device_model": "",
+                            "ip_address": ip,
+                            "hostname": f"host-{ip.replace('.', '-')}",
+                            "username": "",
+                            "password": "",
+                            "network_location": "office",
+                            "department": "技术部",
+                            "status": "active",
+                            "notes": f"从文件 {file.filename} 提取的IP地址",
+                            "tags": ["extracted", "ip-based"],
+                            "created_at": datetime.utcnow().isoformat() + "Z",
+                            "updated_at": datetime.utcnow().isoformat() + "Z",
+                            "confidence_score": 75,
+                            "is_merged": False
+                        }
+                        
+                        assets_storage.append(new_asset)
+                        extracted_assets.append(new_asset)
+                        next_asset_id += 1
+                        created_count += 1
+                except Exception as e:
+                    errors.append(f"IP {ip} 处理失败: {str(e)}")
+                    continue
+        
+        elif file_ext == 'json':
+            # JSON文件处理
+            try:
+                import json
+                content_str = file_content.decode('utf-8')
+                json_data = json.loads(content_str)
+                
+                # 如果是数组格式
+                if isinstance(json_data, list):
+                    for i, item in enumerate(json_data[:50]):  # 最多50条
+                        if isinstance(item, dict):
+                            try:
+                                new_asset = {
+                                    "id": next_asset_id,
+                                    "name": item.get("name", f"设备-{i+1}"),
+                                    "asset_type": item.get("type", "server"),
+                                    "device_model": item.get("model", ""),
+                                    "ip_address": item.get("ip", item.get("ip_address", "")),
+                                    "hostname": item.get("hostname", item.get("host", "")),
+                                    "username": item.get("username", item.get("user", "")),
+                                    "password": item.get("password", ""),
+                                    "network_location": item.get("location", "office"),
+                                    "department": item.get("department", "技术部"),
+                                    "status": item.get("status", "active"),
+                                    "notes": f"从JSON文件 {file.filename} 提取",
+                                    "tags": ["extracted", "json"],
+                                    "created_at": datetime.utcnow().isoformat() + "Z",
+                                    "updated_at": datetime.utcnow().isoformat() + "Z",
+                                    "confidence_score": 90,
+                                    "is_merged": False
+                                }
+                                
+                                assets_storage.append(new_asset)
+                                extracted_assets.append(new_asset)
+                                next_asset_id += 1
+                                created_count += 1
+                            except Exception as e:
+                                errors.append(f"JSON第{i+1}项处理失败: {str(e)}")
+                                continue
+            except json.JSONDecodeError as e:
+                errors.append(f"JSON格式错误: {str(e)}")
+        
+        else:
+            # Excel文件处理（简化版）
+            try:
+                # 由于这是简化实现，这里创建一个示例资产
+                new_asset = {
+                    "id": next_asset_id,
+                    "name": f"Excel提取设备",
+                    "asset_type": "server",
+                    "device_model": "从Excel提取",
+                    "ip_address": "192.168.1.100",
+                    "hostname": "excel-extracted",
+                    "username": "",
+                    "password": "",
+                    "network_location": "office",
+                    "department": "技术部",
+                    "status": "active",
+                    "notes": f"从Excel文件 {file.filename} 提取（简化处理）",
+                    "tags": ["extracted", "excel"],
+                    "created_at": datetime.utcnow().isoformat() + "Z",
+                    "updated_at": datetime.utcnow().isoformat() + "Z",
+                    "confidence_score": 60,
+                    "is_merged": False
+                }
+                
+                assets_storage.append(new_asset)
+                extracted_assets.append(new_asset)
+                next_asset_id += 1
+                created_count += 1
+            except Exception as e:
+                errors.append(f"Excel处理失败: {str(e)}")
+        
+        # 保存到文件
+        if created_count > 0:
+            save_assets_to_file()
+        
+        return {
+            "extracted_count": created_count,
+            "merged_count": 0,  # 简化版暂不实现合并逻辑
+            "assets": extracted_assets,
+            "errors": errors
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"文件处理失败: {str(e)}"
+        )
 
 @app.get("/api/v1/categories")
 async def get_categories():

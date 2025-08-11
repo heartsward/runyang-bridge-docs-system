@@ -1,5 +1,6 @@
 import os
 import uuid
+import re
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -7,13 +8,17 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.deps import get_db, get_current_active_user, get_optional_user
 from app.crud import document as crud_document
+from app.crud.asset import asset as asset_crud
 from app.models.user import User
+from app.models.asset import AssetStatus, AssetType, NetworkLocation
 from app.schemas.document import Document, DocumentCreate
+from app.schemas.asset import AssetCreate
 from app.services.background_tasks import get_task_manager
 from app.services.content_extractor import ContentExtractor
 from app.services.document_analyzer import DocumentAnalyzer
 
 router = APIRouter()
+
 
 # 确保上传目录存在
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -292,13 +297,7 @@ async def upload_multiple_files(
     return uploaded_documents
 
 
-@router.get("/test-multiple", summary="测试多文件上传端点")
-async def test_multiple_upload():
-    """测试端点是否正常工作"""
-    return {"message": "多文件上传端点正常工作", "endpoint": "/upload-multiple"}
 
 
-@router.post("/simple-multiple", summary="简单多文件上传测试")
-async def simple_multiple_upload():
-    """最简单的多文件上传测试"""
-    return {"message": "简单多文件上传端点工作正常"}
+
+

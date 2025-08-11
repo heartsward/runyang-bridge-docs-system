@@ -246,6 +246,16 @@ class CRUDAsset(CRUDBase[Asset, AssetCreate, AssetUpdate]):
     def get_by_document(self, db: Session, *, document_id: int) -> List[Asset]:
         """获取从指定文档提取的资产"""
         return db.query(Asset).filter(Asset.source_document_id == document_id).all()
+    
+    def get_multi_by_ids(self, db: Session, *, ids: List[int]) -> List[Asset]:
+        """根据ID列表获取多个资产"""
+        return db.query(Asset).filter(Asset.id.in_(ids)).all()
+    
+    def bulk_remove(self, db: Session, *, ids: List[int]) -> int:
+        """批量删除资产"""
+        deleted_count = db.query(Asset).filter(Asset.id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        return deleted_count
 
 
 class CRUDAssetExtractRule(CRUDBase[AssetExtractRule, Dict, Dict]):

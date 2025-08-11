@@ -628,9 +628,38 @@ class AssetExtractor:
         
         if not asset_data.get('asset_type'):
             asset_data['asset_type'] = AssetType.SERVER
+            
+        # 处理网络位置，确保使用正确的枚举值
+        if not asset_data.get('network_location'):
+            from app.models.asset import NetworkLocation
+            asset_data['network_location'] = NetworkLocation.OFFICE
+        
+        # 处理资产状态
+        if not asset_data.get('status'):
+            asset_data['status'] = AssetStatus.ACTIVE
         
         # 处理标签
         if isinstance(asset_data.get('tags'), str):
             asset_data['tags'] = [tag.strip() for tag in asset_data['tags'].split(',') if tag.strip()]
         
-        return AssetCreate(**asset_data)
+        # 移除不在AssetCreate模型中的字段
+        valid_fields = {
+            'name', 'asset_type', 'device_model', 'manufacturer', 'serial_number',
+            'ip_address', 'mac_address', 'hostname', 'port', 'network_location',
+            'username', 'password', 'ssh_key', 'location', 'rack_position',
+            'datacenter', 'os_version', 'cpu', 'memory', 'storage', 'status',
+            'department', 'service_name', 'application', 'purpose', 'purchase_date',
+            'warranty_expiry', 'last_maintenance', 'next_maintenance', 'notes',
+            'tags', 'source_file', 'source_document_id', 'confidence_score'
+        }
+        
+        # 过滤字段，只保留有效的
+        filtered_data = {}
+        for key, value in asset_data.items():
+            if key in valid_fields and value is not None:
+                # 对于字符串字段，确保不是空字符串
+                if isinstance(value, str) and value.strip() == '':
+                    continue
+                filtered_data[key] = value
+        
+        return AssetCreate(**filtered_data)

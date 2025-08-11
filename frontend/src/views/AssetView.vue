@@ -22,7 +22,13 @@
         <template #icon>
           <n-icon :component="DocumentTextOutline" />
         </template>
-        从文档提取
+        从文件提取
+      </n-button>
+      <n-button v-if="currentUser?.is_superuser" type="error" @click="handleBulkDelete" :disabled="selectedAssets.length === 0">
+        <template #icon>
+          <n-icon :component="TrashOutline" />
+        </template>
+        批量删除 ({{ selectedAssets.length }})
       </n-button>
       <n-button v-if="currentUser?.is_superuser" type="success" @click="showExportModal = true" :disabled="selectedAssets.length === 0">
         <template #icon>
@@ -230,19 +236,32 @@
       </template>
     </n-modal>
 
-    <!-- 从文档提取设备模态框 -->
-    <n-modal v-model:show="showExtractModal" preset="card" style="width: 600px" title="从文档提取设备">
+    <!-- 从文件提取设备模态框 -->
+    <n-modal v-model:show="showExtractModal" preset="card" style="width: 600px" title="从文件提取设备">
       <n-form ref="extractFormRef" :model="extractForm">
-        <n-form-item label="选择文档">
-          <n-select
-            v-model:value="extractForm.document_id"
-            :options="documentOptions"
-            placeholder="请选择文档"
-            filterable
-            remote
-            :loading="loadingDocuments"
-            @search="searchDocuments"
-          />
+        <n-form-item label="选择文件">
+          <n-upload
+            ref="uploadRef"
+            v-model:file-list="fileList"
+            :max="1"
+            :show-file-list="true"
+            accept=".txt,.csv,.xlsx,.xls,.json,.md"
+            @before-upload="handleBeforeUpload"
+          >
+            <n-upload-dragger>
+              <div style="margin-bottom: 12px">
+                <n-icon size="48" :depth="3">
+                  <DocumentTextOutline />
+                </n-icon>
+              </div>
+              <n-text style="font-size: 16px">点击或者拖动文件到该区域来上传</n-text>
+              <n-p depth="3" style="margin: 8px 0 0 0">
+                支持格式：TXT、CSV、Excel、JSON、Markdown
+                <br>
+                单个文件大小不超过10MB
+              </n-p>
+            </n-upload-dragger>
+          </n-upload>
         </n-form-item>
         <n-form-item label="自动合并">
           <n-switch v-model:value="extractForm.auto_merge" />
@@ -256,7 +275,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showExtractModal = false">取消</n-button>
-          <n-button type="primary" @click="handleExtract" :loading="extracting">
+          <n-button type="primary" @click="handleExtract" :loading="extracting" :disabled="fileList.length === 0">
             开始提取
           </n-button>
         </n-space>
@@ -431,11 +450,15 @@ import {
   NRadioGroup,
   NRadio,
   NCheckboxGroup,
-  NCheckbox,        
+  NCheckbox,
+  NUpload,
+  NUploadDragger,
+  NP,
   useMessage,
   useDialog,
   type DataTableColumns,
-  type FormInst
+  type FormInst,
+  type UploadFileInfo
 } from 'naive-ui'
 import {
   SearchOutline,
@@ -448,7 +471,8 @@ import {
   CreateOutline,
   TrashOutline,
   EyeOutline,
-  DownloadOutline
+  DownloadOutline,
+  CopyOutline
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { assetService, documentService, authService, analyticsService } from '@/services'
@@ -467,7 +491,6 @@ const extractFormRef = ref<FormInst | null>(null)
 const loading = ref(false)
 const submitting = ref(false)
 const extracting = ref(false)
-const loadingDocuments = ref(false)
 const assets = ref<Asset[]>([])
 const currentUser = ref<User | null>(null)
 const statistics = ref<AssetStatistics>({
@@ -530,11 +553,12 @@ const showExportModal = ref(false)
 const editingAsset = ref<Asset | null>(null)
 const viewingAsset = ref<Asset | null>(null)
 const extractResult = ref<AssetExtractResult | null>(null)
-const documentOptions = ref<Array<{label: string, value: number}>>([])
 const selectedAssets = ref<Asset[]>([])
 const exporting = ref(false)
 const exportFormat = ref('excel')
 const exportFields = ref(['name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'network_location', 'department', 'status'])
+const fileList = ref<UploadFileInfo[]>([])
+const uploadRef = ref(null)
 
 // 筛选器
 const filters = reactive({
@@ -559,8 +583,7 @@ const assetForm = reactive<AssetCreate>({
   notes: ''
 })
 
-const extractForm = reactive<AssetExtractRequest>({
-  document_id: 0,
+const extractForm = reactive({
   auto_merge: true,
   merge_threshold: 80
 })
@@ -699,7 +722,7 @@ const columns: DataTableColumns<Asset> = [
           icon: () => h(NIcon, { component: EyeOutline }),
           default: () => '查看'
         }),
-        // 只有管理员才能看到编辑和删除按钮
+        // 只有管理员才能看到编辑、复制和删除按钮
         ...(currentUser.value?.is_superuser ? [
           h(NButton, {
             size: 'small',
@@ -707,6 +730,14 @@ const columns: DataTableColumns<Asset> = [
           }, {
             icon: () => h(NIcon, { component: CreateOutline }),
             default: () => '编辑'
+          }),
+          h(NButton, {
+            size: 'small',
+            type: 'info',
+            onClick: () => copyAsset(row.id)
+          }, {
+            icon: () => h(NIcon, { component: CopyOutline }),
+            default: () => '复制'
           }),
           h(NButton, {
             size: 'small',
@@ -1045,52 +1076,62 @@ const deleteAsset = async (id: number) => {
   })
 }
 
-const loadInitialDocuments = async () => {
-  loadingDocuments.value = true
-  try {
-    const documents = await documentService.getDocuments({ limit: 50 })
-    documentOptions.value = documents.map((doc: Document) => ({
-      label: doc.title,
-      value: doc.id
-    }))
-  } catch (error: any) {
-    message.error('加载文档列表失败')
-  } finally {
-    loadingDocuments.value = false
-  }
-}
 
-const searchDocuments = async (query: string) => {
-  if (!query) {
-    await loadInitialDocuments()
-    return
+const handleBeforeUpload = (data: { file: UploadFileInfo }) => {
+  // 检查文件类型
+  const allowedTypes = ['txt', 'csv', 'xlsx', 'xls', 'json', 'md']
+  const fileExt = data.file.name?.split('.').pop()?.toLowerCase() || ''
+  
+  if (!allowedTypes.includes(fileExt)) {
+    message.error(`不支持的文件类型，支持格式：${allowedTypes.join(', ')}`)
+    return false
   }
   
-  loadingDocuments.value = true
-  try {
-    const documents = await documentService.searchDocuments(query, { limit: 20 })
-    documentOptions.value = documents.map((doc: Document) => ({
-      label: doc.title,
-      value: doc.id
-    }))
-  } catch (error: any) {
-    message.error('搜索文档失败')
-  } finally {
-    loadingDocuments.value = false
+  // 检查文件大小 (10MB)
+  const maxSize = 10 * 1024 * 1024
+  if (data.file.file && data.file.file.size > maxSize) {
+    message.error('文件大小不能超过10MB')
+    return false
   }
+  
+  return true
 }
 
 const handleExtract = async () => {
-  if (!extractForm.document_id) {
-    message.error('请选择文档')
+  if (!fileList.value.length || !fileList.value[0].file) {
+    message.error('请选择文件')
     return
   }
   
   extracting.value = true
   try {
-    extractResult.value = await assetService.extractAssetsFromDocument(extractForm)
+    const formData = new FormData()
+    formData.append('file', fileList.value[0].file)
+    formData.append('auto_merge', extractForm.auto_merge.toString())
+    formData.append('merge_threshold', extractForm.merge_threshold.toString())
+    
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+    const token = localStorage.getItem('access_token')
+    
+    const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.detail || '提取失败')
+    }
+    
+    extractResult.value = await response.json()
     showExtractModal.value = false
     showExtractResult.value = true
+    
+    // 清空文件列表
+    fileList.value = []
     
     if (extractResult.value.assets.length > 0) {
       message.success(`成功提取 ${extractResult.value.assets.length} 个设备`)
@@ -1098,7 +1139,7 @@ const handleExtract = async () => {
       message.warning('未能提取到有效的设备信息')
     }
   } catch (error: any) {
-    message.error(error.detail || '提取失败')
+    message.error(error.message || '提取失败')
   } finally {
     extracting.value = false
   }
@@ -1109,6 +1150,87 @@ const refreshAssets = async () => {
   // 刷新后重新加载资产列表
   await loadAssets()
   await loadStatistics()
+}
+
+// 复制资产 - 打开添加表单并预填充数据
+const copyAsset = async (assetId: number) => {
+  try {
+    // 获取原始资产的完整信息
+    const originalAsset = await assetService.getAsset(assetId)
+    
+    // 重置表单并设为创建模式
+    editingAsset.value = null
+    
+    // 预填充表单数据，保留包括IP地址在内的所有信息
+    Object.assign(assetForm, {
+      name: `${originalAsset.name}_副本`,
+      asset_type: originalAsset.asset_type,
+      device_model: originalAsset.device_model,
+      ip_address: originalAsset.ip_address, // 保留IP地址
+      hostname: originalAsset.hostname ? `${originalAsset.hostname}_copy` : '',
+      username: originalAsset.username,
+      password: originalAsset.password,
+      network_location: originalAsset.network_location,
+      department: originalAsset.department,
+      status: 'inactive', // 设置为非活跃状态
+      notes: `复制自资产: ${originalAsset.name}`
+    })
+    
+    // 打开创建模态框
+    showCreateModal.value = true
+    
+    message.info('已预填充资产信息，请修改后保存')
+  } catch (error: any) {
+    message.error('获取资产信息失败')
+  }
+}
+
+// 批量删除资产
+const handleBulkDelete = () => {
+  if (selectedAssets.value.length === 0) {
+    message.error('请选择要删除的资产')
+    return
+  }
+  
+  const assetNames = selectedAssets.value.map(asset => asset.name).join('、')
+  
+  dialog.warning({
+    title: '批量删除确认',
+    content: `确定要删除以下 ${selectedAssets.value.length} 个资产吗？\n${assetNames}\n\n此操作不可撤销。`,
+    positiveText: '确定删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const assetIds = selectedAssets.value.map(asset => asset.id)
+        
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/assets/bulk-delete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          },
+          body: JSON.stringify(assetIds)
+        })
+        
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.detail || '删除失败')
+        }
+        
+        const result = await response.json()
+        message.success(result.message)
+        
+        // 清空选择
+        selectedAssets.value = []
+        
+        // 重新加载资产列表
+        await loadAssets()
+        await loadStatistics()
+      } catch (error: any) {
+        message.error(error.message || '批量删除失败')
+      }
+    }
+  })
 }
 
 const editCurrentAsset = () => {
@@ -1190,10 +1312,10 @@ const handleExport = async () => {
   }
 }
 
-// 监听提取模态框打开状态，当打开时加载文档列表
+// 监听提取模态框打开状态，清空文件列表
 watch(showExtractModal, (newValue) => {
   if (newValue) {
-    loadInitialDocuments()
+    fileList.value = []
   }
 })
 

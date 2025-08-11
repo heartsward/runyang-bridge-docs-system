@@ -48,7 +48,8 @@
       "Bash(chmod:*)",
       "Bash(git init:*)",
       "Bash(git commit:*)",
-      "Bash(ipconfig:*)"
+      "Bash(ipconfig:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }
