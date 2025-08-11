@@ -553,30 +553,8 @@ const handleSearch = async () => {
     
     console.log('🔍 搜索参数:', docParams)
     
-    // Try unified API first, fallback to regular API if needed
-    let response
-    try {
-      response = await apiService.get('/search/documents', { params: docParams })
-    } catch (corsError) {
-      console.log('Regular API failed, trying direct fetch:', corsError)
-      // Fallback to direct fetch to avoid CORS issues
-      const queryString = new URLSearchParams(docParams).toString()
-      const token = localStorage.getItem('access_token')
-      
-      const fetchResponse = await fetch(`http://localhost:8002/api/v1/search/documents?${queryString}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      })
-      
-      if (!fetchResponse.ok) {
-        throw new Error(`Search failed: ${fetchResponse.status}`)
-      }
-      
-      response = await fetchResponse.json()
-    }
+    // 使用统一API
+    const response = await apiService.get('/search/documents', { params: docParams })
     documentResults.value = response.results.map((item: any) => ({
       ...item,
       type: 'document'
@@ -625,36 +603,12 @@ const previewDocument = async (doc: DocumentSearchResult) => {
 // 加载预览内容
 const loadPreviewContent = async (documentId: number) => {
   try {
-    // Try API service first, fallback to direct fetch if CORS issues
-    let response
-    try {
-      response = await apiService.get(`/search/preview/${documentId}`, {
-        params: {
-          highlight: searchQuery.value
-        }
-      })
-    } catch (corsError) {
-      console.log('Preview API failed, trying direct fetch:', corsError)
-      // Fallback to direct fetch to avoid CORS issues
-      const params = new URLSearchParams({
+    // 使用统一API
+    const response = await apiService.get(`/search/preview/${documentId}`, {
+      params: {
         highlight: searchQuery.value
-      })
-      const token = localStorage.getItem('access_token')
-      
-      const fetchResponse = await fetch(`http://localhost:8002/api/v1/search/preview/${documentId}?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      })
-      
-      if (!fetchResponse.ok) {
-        throw new Error(`Preview failed: ${fetchResponse.status}`)
       }
-      
-      response = await fetchResponse.json()
-    }
+    })
     
     previewDocumentData.value = response
     previewContent.value = response.content

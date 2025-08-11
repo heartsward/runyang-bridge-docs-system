@@ -292,7 +292,7 @@
     </n-modal>
 
     <!-- 资产凭据查看模态框 -->
-    <n-modal v-model:show="showViewModal" preset="card" style="width: 500px" title="设备登录凭据">
+    <n-modal v-model:show="showViewModal" preset="card" style="width: 600px" title="设备登录凭据">
       <div v-if="viewingAsset">
         <n-space vertical size="large">
           <div style="text-align: center; margin-bottom: 20px;">
@@ -301,7 +301,8 @@
           </div>
           
           <n-space vertical size="medium">
-            <n-card size="small">
+            <!-- 登录凭据信息 -->
+            <n-card size="small" title="登录凭据">
               <n-form label-placement="left" label-width="80px">
                 <n-form-item label="用户名">
                   <n-text code v-if="viewingAsset.username">{{ viewingAsset.username }}</n-text>
@@ -314,12 +315,22 @@
                     type="password"
                     readonly
                     show-password-on="click"
-                    style="max-width: 200px;"
+                    style="max-width: 250px;"
                     autocomplete="off"
                   />
                   <n-text depth="3" v-else>未设置</n-text>
                 </n-form-item>
               </n-form>
+            </n-card>
+
+            <!-- 设备备注信息 -->
+            <n-card size="small" title="设备备注" v-if="viewingAsset.notes && viewingAsset.notes.trim()">
+              <n-text>{{ viewingAsset.notes }}</n-text>
+            </n-card>
+            
+            <!-- 当没有备注时显示提示 -->
+            <n-card size="small" title="设备备注" v-else>
+              <n-text depth="3" italic>暂无备注信息</n-text>
             </n-card>
           </n-space>
         </n-space>
@@ -441,6 +452,7 @@ import {
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { assetService, documentService, authService, analyticsService } from '@/services'
+import apiService from '@/services/api'
 import type { Asset, AssetCreate, AssetExtractRequest, AssetExtractResult, AssetStatistics } from '@/types/asset'
 import { AssetType, AssetStatus } from '@/types/asset'
 import type { Document, User } from '@/types/api'
@@ -996,15 +1008,9 @@ const viewAsset = async (asset: Asset) => {
     viewingAsset.value = fullAsset
     showViewModal.value = true
     
-    // 记录资产凭据查看统计 - 调用正确的后端API
+    // 记录资产凭据查看统计 - 使用analytics服务
     try {
-      await fetch(`http://localhost:8002/api/v1/assets/${asset.id}/view-details`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      await analyticsService.recordAssetView(asset.id, 'credentials')
       console.log('资产凭据查看统计已记录')
     } catch (error) {
       console.warn('记录资产查看统计失败:', error)
@@ -1135,10 +1141,15 @@ const handleExport = async () => {
   try {
     const assetIds = selectedAssets.value.map(asset => asset.id)
     
-    const response = await fetch('http://localhost:8002/api/v1/assets/export', {
+    // 导出功能需要直接使用fetch来处理文件下载
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+    const token = localStorage.getItem('access_token')
+    
+    const response = await fetch(`${apiBaseUrl}/api/v1/assets/export`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({
         asset_ids: assetIds,

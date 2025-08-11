@@ -225,9 +225,6 @@
         <n-descriptions-item label="AI摘要" v-if="currentDocument.ai_summary">
           <n-text>{{ currentDocument.ai_summary }}</n-text>
         </n-descriptions-item>
-        <n-descriptions-item label="查看次数">
-          <n-text>{{ currentDocument.view_count || 0 }}</n-text>
-        </n-descriptions-item>
         <n-descriptions-item label="创建时间">{{ formatDate(currentDocument.created_at) }}</n-descriptions-item>
         <n-descriptions-item label="更新时间">{{ formatDate(currentDocument.updated_at) }}</n-descriptions-item>
       </n-descriptions>
@@ -392,6 +389,7 @@ import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline
 import PageLayout from '../components/PageLayout.vue'
 import { documentService, uploadService, authService, taskService, analyticsService } from '@/services'
 import type { Document, Category, User } from '@/types/api'
+import apiService from '@/services/api'
 import { debounce } from '@/utils'
 
 const message = useMessage()
@@ -918,21 +916,10 @@ const previewDocument = async (document: Document) => {
   
   try {
     // 调用搜索API的预览端点
-    const response = await fetch(`http://localhost:8002/api/v1/search/preview/${document.id}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-      }
-    })
+    const data = await apiService.get(`/search/preview/${document.id}`)
+    previewContent.value = data.content || '无法获取文档内容'
     
-    if (response.ok) {
-      const data = await response.json()
-      previewContent.value = data.content || '无法获取文档内容'
-      
-      // 文档访问统计已在后端预览API中自动记录，无需前端额外调用
-    } else {
-      previewContent.value = '无法获取文档内容'
-      message.error('预览失败')
-    }
+    // 文档访问统计已在后端预览API中自动记录，无需前端额外调用
   } catch (error) {
     console.error('预览文档失败:', error)
     previewContent.value = '无法获取文档内容'
@@ -945,26 +932,67 @@ const previewDocument = async (document: Document) => {
 // 下载文档
 const downloadDocument = async (doc: Document) => {
   try {
-    const response = await fetch(`http://localhost:8002/api/v1/documents/${doc.id}/download`, {
+    // 使用fetch获取文件，然后创建安全的下载
+    // 检测当前访问环境，如果是本地访问就使用localhost，避免CORS问题
+    const currentHost = window.location.hostname
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+    
+    // 如果当前访问是localhost但配置的API是其他IP，改为localhost避免CORS
+    if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+      apiBaseUrl = 'http://localhost:8002'
+    }
+    
+    const token = localStorage.getItem('access_token')
+    
+    const response = await fetch(`${apiBaseUrl}/api/v1/documents/${doc.id}/download`, {
+      method: 'GET',
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        'Authorization': `Bearer ${token}`
       }
     })
     
-    if (response.ok) {
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = doc.title
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-      message.success('下载成功')
-    } else {
-      message.error('下载失败')
+    if (!response.ok) {
+      throw new Error(`下载失败: ${response.status}`)
     }
+    
+    // 获取文件数据 - 保持原始响应类型
+    const blob = await response.blob()
+    
+    // 创建安全的下载链接
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    
+    // 尝试从响应头获取文件名，否则使用文档标题
+    let filename = doc.title
+    const contentDisposition = response.headers.get('content-disposition')
+    
+    if (contentDisposition) {
+      // 更严格的文件名解析
+      const filenameMatch = contentDisposition.match(/filename\*?=['"]?([^'"\r\n]*)['"]?/i)
+      if (filenameMatch && filenameMatch[1]) {
+        filename = decodeURIComponent(filenameMatch[1])
+      }
+    }
+    
+    // 如果文件名没有扩展名，尝试从文档的file_path中获取
+    if (!filename.includes('.') && doc.file_path) {
+      const originalFilename = doc.file_path.split('/').pop() || doc.file_path.split('\\').pop()
+      if (originalFilename) {
+        filename = originalFilename
+      }
+    }
+    
+    link.download = filename
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    // 清理URL对象
+    window.URL.revokeObjectURL(url)
+    
+    message.success('下载成功')
   } catch (error) {
     console.error('下载文档失败:', error)
     message.error('下载失败')
@@ -1088,17 +1116,8 @@ const checkFilenameConflicts = async () => {
       const filename = fileItem.file.name
       console.log(`检查文件: "${filename}"`)
       
-      const response = await fetch(`http://localhost:8002/api/v1/documents/check-filename?filename=${encodeURIComponent(filename)}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
-      })
-      
-      console.log(`API响应状态: ${response.status}`)
-      
-      if (response.ok) {
-        const result = await response.json()
-        console.log(`文件 "${filename}" 冲突检查结果:`, result)
+      const result = await apiService.get(`/documents/check-filename?filename=${encodeURIComponent(filename)}`)
+      console.log(`文件 "${filename}" 冲突检查结果:`, result)
         
         if (result.exists) {
           console.log(`发现冲突: "${filename}" 已存在 ${result.count} 个`)
@@ -1110,9 +1129,6 @@ const checkFilenameConflicts = async () => {
         } else {
           console.log(`无冲突: "${filename}" 不存在`)
         }
-      } else {
-        console.error(`检查文件 "${filename}" 失败: ${response.status}`)
-      }
     }
     
     console.log('冲突检查完成，发现冲突文件数量:', conflictingFiles.length)
@@ -1164,18 +1180,10 @@ const validateNewFilename = async (conflict) => {
   
   // 检查新文件名是否也冲突
   try {
-    const response = await fetch(`http://localhost:8002/api/v1/documents/check-filename?filename=${encodeURIComponent(conflict.newName)}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-      }
-    })
-    
-    if (response.ok) {
-      const result = await response.json()
-      if (result.exists) {
-        conflict.nameError = `文件名 "${conflict.newName}" 也已存在，请选择其他名称`
-        return false
-      }
+    const result = await apiService.get(`/documents/check-filename?filename=${encodeURIComponent(conflict.newName)}`)
+    if (result.exists) {
+      conflict.nameError = `文件名 "${conflict.newName}" 也已存在，请选择其他名称`
+      return false
     }
   } catch (error) {
     console.error('验证新文件名失败:', error)
@@ -1252,32 +1260,21 @@ const generateAutoRename = async (originalName, existingDocuments) => {
     
     // 实时检查数据库是否存在这个文件名
     try {
-      const response = await fetch(`http://localhost:8002/api/v1/documents/check-filename?filename=${encodeURIComponent(newName)}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
-      })
+      const result = await apiService.get(`/documents/check-filename?filename=${encodeURIComponent(newName)}`)
+      console.log(`📡 API响应详情:`, result)
+      console.log(`🔍 检查冲突: result.exists = ${result.exists}, result.count = ${result.count}`)
       
-      if (response.ok) {
-        const result = await response.json()
-        console.log(`📡 API响应详情:`, result)
-        console.log(`🔍 检查冲突: result.exists = ${result.exists}, result.count = ${result.count}`)
-        
-        if (result.exists === true && result.count > 0) {
-          console.log(`❌ 数据库冲突检测: "${newName}" 在数据库中已存在 (${result.count} 个), 尝试下一个数字`)
-          // 将这个名称添加到本地缓存，避免重复检查
-          existingNames.add(newName)
-          counter++
-          newName = `${baseName}_${counter}.${ext}`
-          console.log(`⬆️ 递增计数器到: ${counter}, 新文件名: "${newName}"`)
-          continue
-        } else {
-          // 找到了不冲突的文件名
-          console.log(`✅ 找到唯一文件名: "${newName}" (exists=${result.exists}, count=${result.count})`)
-          break
-        }
+      if (result.exists === true && result.count > 0) {
+        console.log(`❌ 数据库冲突检测: "${newName}" 在数据库中已存在 (${result.count} 个), 尝试下一个数字`)
+        // 将这个名称添加到本地缓存，避免重复检查
+        existingNames.add(newName)
+        counter++
+        newName = `${baseName}_${counter}.${ext}`
+        console.log(`⬆️ 递增计数器到: ${counter}, 新文件名: "${newName}"`)
+        continue
       } else {
-        console.warn(`❌ API调用失败 (${response.status}), 使用当前名称: "${newName}"`)
+        // 找到了不冲突的文件名
+        console.log(`✅ 找到唯一文件名: "${newName}" (exists=${result.exists}, count=${result.count})`)
         break
       }
     } catch (error) {
@@ -1374,17 +1371,9 @@ const validateFinalFileNames = async () => {
     // 检查数据库中是否存在（除了覆盖模式的文件）
     if (!fileItem.overwriteMode) {
       try {
-        const response = await fetch(`http://localhost:8002/api/v1/documents/check-filename?filename=${encodeURIComponent(finalName)}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-          }
-        })
-        
-        if (response.ok) {
-          const result = await response.json()
-          if (result.exists) {
-            duplicates.push(finalName)
-          }
+        const result = await apiService.get(`/documents/check-filename?filename=${encodeURIComponent(finalName)}`)
+        if (result.exists) {
+          duplicates.push(finalName)
         }
       } catch (error) {
         console.error('最终验证文件名失败:', error)

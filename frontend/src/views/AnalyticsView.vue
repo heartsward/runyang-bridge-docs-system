@@ -287,6 +287,7 @@ import { documentService } from '@/services/document'
 import { assetService } from '@/services/asset'
 import { analyticsService } from '@/services/analytics'
 import { authService } from '@/services/auth'
+import apiService from '@/services/api'
 import { useDialog } from 'naive-ui'
 
 const message = useMessage()
@@ -547,23 +548,10 @@ const clearStats = () => {
     onPositiveClick: async () => {
       clearingStats.value = true
       try {
-        const response = await fetch('http://localhost:8002/api/v1/analytics/clear-stats', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-            'Content-Type': 'application/json'
-          }
-        })
-        
-        if (response.ok) {
-          const result = await response.json()
-          message.success('统计数据已清空')
-          // 重新加载数据
-          await loadAnalyticsData()
-        } else {
-          const errorData = await response.json()
-          throw new Error(errorData.detail || '清空失败')
-        }
+        const result = await apiService.post('/analytics/clear-stats')
+        message.success('统计数据已清空')
+        // 重新加载数据
+        await loadAnalyticsData()
       } catch (error) {
         console.error('清空统计数据失败:', error)
         message.error(error.message || '清空统计数据失败')

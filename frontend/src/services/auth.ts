@@ -5,37 +5,18 @@ class AuthService {
   // 用户登录
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
-      // 发送JSON格式的登录请求
-      const response = await fetch('http://localhost:8002/api/v1/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: credentials.username,
-          password: credentials.password
-        })
+      // 使用动态API服务进行登录
+      const response = await apiService.post<LoginResponse>('/auth/login', {
+        username: credentials.username,
+        password: credentials.password
       })
       
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || '用户名或密码错误')
-      }
-      
-      const loginResult = await response.json()
-      
-      // 验证登录结果
-      if (!loginResult || !loginResult.access_token) {
-        throw new Error('登录失败，用户名或密码错误')
-      }
-      
       // 保存token
-      apiService.setToken(loginResult.access_token)
-      
-      return {
-        access_token: loginResult.access_token,
-        token_type: loginResult.token_type || 'bearer'
+      if (response.access_token) {
+        apiService.setToken(response.access_token)
       }
+      
+      return response
     } catch (error: any) {
       console.error('登录失败:', error)
       throw new Error(error.message || '用户名或密码错误，请检查后重试')

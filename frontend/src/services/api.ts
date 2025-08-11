@@ -1,15 +1,43 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios'
 import type { ApiError } from '@/types/api'
 
-// API配置 - 统一端口策略
-const API_BASE_URL = 'http://localhost:8002/api/v1'
-const UNIFIED_BASE_URL = 'http://localhost:8002' // 统一API端点
+// API配置 - 动态检测服务器地址
+function getApiBaseUrl(): string {
+  // 1. 优先使用环境变量配置
+  const envApiUrl = import.meta.env.VITE_API_BASE_URL
+  if (envApiUrl) {
+    return envApiUrl + '/api/v1'
+  }
+  
+  // 2. 从当前访问地址自动推断API地址
+  const currentHost = window.location.hostname
+  const currentProtocol = window.location.protocol
+  
+  // 如果是通过IP访问，使用相同IP的8002端口
+  if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+    return `${currentProtocol}//${currentHost}:8002/api/v1`
+  }
+  
+  // 3. 默认localhost配置
+  return 'http://localhost:8002/api/v1'
+}
 
-// 保留旧的端口配置作为备用（逐步迁移）
-const FIXED_DISPLAY_BASE_URL = 'http://localhost:8003' // 用于修复的显示端点
-const FIXED_UPDATE_BASE_URL = 'http://localhost:8004' // 用于修复的更新端点
-const FIXED_SEARCH_BASE_URL = 'http://localhost:8005' // 用于修复的搜索端点
-const FIXED_DETAIL_BASE_URL = 'http://localhost:8006' // 用于修复的详情端点
+function getUnifiedBaseUrl(): string {
+  const currentHost = window.location.hostname
+  const currentProtocol = window.location.protocol
+  
+  if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+    return `${currentProtocol}//${currentHost}:8002`
+  }
+  
+  return 'http://localhost:8002'
+}
+
+const API_BASE_URL = getApiBaseUrl()
+const UNIFIED_BASE_URL = getUnifiedBaseUrl() // 统一API端点
+
+console.log('API配置:', { API_BASE_URL, UNIFIED_BASE_URL })
+
 
 class ApiService {
   private api: AxiosInstance
@@ -149,45 +177,6 @@ class ApiService {
     window.URL.revokeObjectURL(downloadUrl)
   }
 
-  // 修复的显示端点 - 使用8003端口的无认证端点
-  async getFixed<T>(url: string): Promise<T> {
-    const response = await axios.get<T>(FIXED_DISPLAY_BASE_URL + url)
-    return response.data
-  }
-
-  // 修复的更新端点 - 使用8004端口PUT请求
-  async putFixed<T>(url: string, data?: any): Promise<T> {
-    const response = await axios.put<T>(FIXED_UPDATE_BASE_URL + url, data)
-    return response.data
-  }
-
-  // 修复的搜索端点 - 使用8005端口GET请求
-  async searchFixed<T>(url: string): Promise<T> {
-    const response = await axios.get<T>(FIXED_SEARCH_BASE_URL + url)
-    return response.data
-  }
-
-  // 修复的详情端点 - 使用8006端口GET请求
-  async getDetailFixed<T>(url: string): Promise<T> {
-    const response = await axios.get<T>(FIXED_DETAIL_BASE_URL + url)
-    return response.data
-  }
-
-  // 统一API端点 - 使用8000端口
-  async getUnified<T>(url: string): Promise<T> {
-    const response = await axios.get<T>(UNIFIED_BASE_URL + url)
-    return response.data
-  }
-
-  async putUnified<T>(url: string, data?: any): Promise<T> {
-    const response = await axios.put<T>(UNIFIED_BASE_URL + url, data)
-    return response.data
-  }
-
-  async searchUnified<T>(url: string): Promise<T> {
-    const response = await axios.get<T>(UNIFIED_BASE_URL + url)
-    return response.data
-  }
 }
 
 export const apiService = new ApiService()

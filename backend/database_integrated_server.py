@@ -9,6 +9,7 @@ import uuid
 import json
 import time
 import threading
+import socket
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -69,11 +70,12 @@ async def lifespan(app: FastAPI):
     yield
     
     # 关闭时的代码
-    print("服务器关闭中，保存用户分析数据...")
-    try:
-        save_user_analytics_to_file()
-    except:
-        pass
+    print("服务器关闭中...")
+    # 用户分析数据已迁移到数据库，不再需要保存到文件
+    # try:
+    #     save_user_analytics_to_file()
+    # except:
+    #     pass
     
     if 'task_manager' in globals() and task_manager:
         task_manager.stop_worker()
@@ -87,12 +89,126 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 设置CORS
+# CORS配置函数
+def get_local_ips() -> List[str]:
+    """获取本机所有IP地址"""
+    ips = []
+    try:
+        # 方法1：获取本机名对应的IP
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        if local_ip and local_ip != '127.0.0.1':
+            ips.append(local_ip)
+    except:
+        pass
+    
+    try:
+        # 方法2：连接外部地址获取本机IP（更准确）
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            if local_ip not in ips:
+                ips.append(local_ip)
+    except:
+        pass
+    
+    # 方法3：尝试使用netifaces获取所有网络接口（如果可用）
+    try:
+        import netifaces
+        for interface in netifaces.interfaces():
+            try:
+                addresses = netifaces.ifaddresses(interface)
+                if netifaces.AF_INET in addresses:
+                    for addr in addresses[netifaces.AF_INET]:
+                        ip = addr['addr']
+                        if ip not in ['127.0.0.1', '0.0.0.0'] and ip not in ips:
+                            ips.append(ip)
+            except:
+                continue
+    except ImportError:
+        print("[CORS] 提示: 安装 netifaces 包可获得更完整的IP检测功能")
+    
+    return ips
+
+def build_cors_origins() -> List[str]:
+    """构建CORS允许的源列表"""
+    origins = []
+    
+    # 读取配置
+    cors_mode = os.getenv("CORS_MODE", "auto").lower()
+    auto_detect = os.getenv("CORS_AUTO_DETECT", "true").lower() == "true"
+    include_localhost = os.getenv("CORS_INCLUDE_LOCALHOST", "true").lower() == "true"
+    custom_origins = os.getenv("CORS_CUSTOM_ORIGINS", "")
+    frontend_port = os.getenv("CORS_FRONTEND_PORT", "5173")
+    
+    # 自动检测模式
+    if cors_mode in ["auto", "mixed"] and auto_detect:
+        # 添加localhost
+        if include_localhost:
+            origins.extend([
+                f"http://localhost:{frontend_port}",
+                f"http://127.0.0.1:{frontend_port}",
+                f"https://localhost:{frontend_port}",
+                f"https://127.0.0.1:{frontend_port}"
+            ])
+        
+        # 添加本机IP
+        local_ips = get_local_ips()
+        for ip in local_ips:
+            origins.extend([
+                f"http://{ip}:{frontend_port}",
+                f"https://{ip}:{frontend_port}"
+            ])
+    
+    # 手动配置
+    if cors_mode in ["manual", "mixed"] and custom_origins:
+        custom_list = [origin.strip() for origin in custom_origins.split(",") if origin.strip()]
+        origins.extend(custom_list)
+    
+    # 如果没有配置任何源，使用默认配置
+    if not origins:
+        print("[CORS] 警告: 未检测到任何CORS源，使用默认配置")
+        origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173", 
+            "http://192.168.66.99:5173",
+            "http://192.168.134.1:5173",
+            "http://192.168.19.1:5173"
+        ]
+    
+    # 去重并排序
+    origins = list(set(origins))
+    origins.sort()
+    
+    return origins
+
+# 构建CORS配置 - 使用配置类
+try:
+    from app.core.config import settings
+    cors_origins = settings.BACKEND_CORS_ORIGINS
+    print(f"[CORS] 使用配置类，检测到 {len(cors_origins)} 个源")
+        
+except Exception as e:
+    print(f"[CORS] 配置失败，使用备用方案: {e}")
+    # 回退到我们的自定义函数
+    try:
+        cors_origins = build_cors_origins()
+        print(f"[CORS] 使用备用配置: {len(cors_origins)} 个源")
+    except Exception as e2:
+        print(f"[CORS] 备用配置也失败，使用默认配置: {e2}")
+        cors_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173", 
+            "http://192.168.66.99:5173",
+            "http://192.168.134.1:5173",
+            "http://192.168.19.1:5173"
+        ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=True,  # 允许认证信息
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -885,14 +1001,79 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="文档不存在")
     
     file_path = document_obj.file_path
-    if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
     
-    return FileResponse(
-        path=file_path,
-        filename=document_obj.file_name,
-        media_type='application/octet-stream'
-    )
+    if not file_path:
+        raise HTTPException(status_code=404, detail="文档文件路径不存在")
+    
+    if not os.path.exists(file_path):
+        # 检查是否有其他可能的路径
+        alternative_paths = [
+            f"./uploads/{document_obj.file_name}",
+            f"uploads/{document_obj.file_name}",
+            os.path.join("uploads", document_obj.file_name) if document_obj.file_name else None
+        ]
+        
+        for alt_path in alternative_paths:
+            if alt_path and os.path.exists(alt_path):
+                file_path = alt_path
+                break
+        else:
+            raise HTTPException(status_code=404, detail=f"文件不存在: {file_path}")
+    
+    import mimetypes
+    
+    # 获取正确的MIME类型，优先使用数据库中存储的文件类型
+    mime_type = None
+    
+    # 首先尝试使用数据库中的file_type字段
+    if hasattr(document_obj, 'file_type') and document_obj.file_type:
+        # 将文件扩展名转换为MIME类型
+        ext_to_mime = {
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.txt': 'text/plain',
+            '.md': 'text/markdown',
+            '.xls': 'application/vnd.ms-excel',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.csv': 'text/csv',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png'
+        }
+        
+        file_type = document_obj.file_type.lower()
+        if not file_type.startswith('.'):
+            file_type = '.' + file_type
+        mime_type = ext_to_mime.get(file_type)
+    
+    # 如果数据库中没有，尝试从文件路径推断
+    if not mime_type:
+        mime_type, _ = mimetypes.guess_type(file_path)
+    
+    # 默认使用二进制流
+    if not mime_type:
+        mime_type = 'application/octet-stream'
+    
+    # 确保文件名正确编码
+    filename = document_obj.file_name or os.path.basename(file_path)
+    
+    try:
+        import urllib.parse
+        
+        # 对文件名进行URL编码以处理中文字符
+        encoded_filename = urllib.parse.quote(filename.encode('utf-8'))
+        
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type=mime_type,
+            headers={
+                "Content-Disposition": f'attachment; filename*=UTF-8\'\'{encoded_filename}'
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件下载失败: {str(e)}")
 
 @app.delete("/api/v1/documents/{document_id}")
 async def delete_document(document_id: int, db: Session = Depends(get_db), current_user: dict = Depends(require_admin_dep)):
@@ -966,9 +1147,28 @@ async def preview_document(
     if not document_obj:
         raise HTTPException(status_code=404, detail="文档不存在")
     
-    # 跟踪文档查看 - 使用当前用户ID
+    # 记录文档查看到数据库 - 使用当前用户ID
     user_id = current_user.get("id", 1) if current_user else 1
-    track_document_view(document_id, user_id)
+    try:
+        from app.models.document import DocumentView
+        view_log = DocumentView(
+            document_id=document_id,
+            user_id=user_id,
+            duration=None  # 预览时不记录时长
+        )
+        db.add(view_log)
+        
+        # 更新文档访问计数
+        document_obj.view_count = (document_obj.view_count or 0) + 1
+        db.commit()
+    except Exception as e:
+        db.rollback()
+    
+    # 同时保留内存跟踪（兼容性）
+    try:
+        track_document_view(document_id, user_id)
+    except Exception as e:
+        pass
     
     # 如果内容还未提取完成
     if document_obj.content_extracted is None:
@@ -1053,8 +1253,21 @@ async def search_documents(search_request: SearchRequest, db: Session = Depends(
             "query_time": 0.0
         }
     
-    # 跟踪搜索关键词 - 使用当前用户ID
+    # 跟踪搜索关键词 - 记录到数据库
     user_id = current_user.get("id", 1) if current_user else 1
+    try:
+        from app.models.document import SearchLog
+        search_log = SearchLog(
+            user_id=user_id,
+            query=query,
+            result_count=0  # Will be updated after search
+        )
+        db.add(search_log)
+        db.commit()
+    except Exception as e:
+        print(f"记录搜索日志失败: {e}")
+        db.rollback()
+    
     track_search_keyword(query, user_id)
     
     # 从数据库获取所有文档
@@ -1127,6 +1340,13 @@ async def search_documents(search_request: SearchRequest, db: Session = Depends(
     total = len(results)
     results = results[:search_request.max_results]
     
+    # 更新搜索日志的结果数量
+    try:
+        search_log.result_count = total
+        db.commit()
+    except:
+        pass
+    
     query_time = time.time() - start_time
     
     return {
@@ -1163,8 +1383,21 @@ async def search_documents_get(
             "results": []
         }
     
-    # 跟踪搜索关键词 - 使用当前用户ID
+    # 跟踪搜索关键词 - 记录到数据库
     user_id = current_user.get("id", 1) if current_user else 1
+    try:
+        from app.models.document import SearchLog
+        search_log = SearchLog(
+            user_id=user_id,
+            query=query,
+            result_count=0  # Will be updated after search
+        )
+        db.add(search_log)
+        db.commit()
+    except Exception as e:
+        print(f"记录搜索日志失败: {e}")
+        db.rollback()
+    
     track_search_keyword(query, user_id)
     
     # 从数据库获取所有文档
@@ -1273,6 +1506,13 @@ async def search_documents_get(
     # 分页
     total = len(results)
     results_page = results[offset:offset + limit]
+    
+    # 更新搜索日志的结果数量
+    try:
+        search_log.result_count = total
+        db.commit()
+    except:
+        pass
     
     return {
         "query": q,
@@ -1459,13 +1699,24 @@ async def get_document_extraction_status(document_id: int, db: Session = Depends
 
 # 其他API端点
 @app.get("/api/v1/analytics/stats")
-async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
-    """系统统计信息"""
-    global assets_storage
+async def get_analytics_stats(current_user: dict = Depends(require_admin_dep), db: Session = Depends(get_db)):
+    """获取系统统计信息 - 从数据库读取真实数据"""
+    from sqlalchemy import func, desc
     
     try:
-        # 获取真实的资产统计
-        total_assets = len(assets_storage) if assets_storage else 0
+        global assets_storage
+        # 导入所需的模型
+        from app.models.user import User
+        from app.models.document import Document, DocumentView, SearchLog, AssetView
+        from app.models.asset import Asset
+        
+        # 基础统计 - 混合读取（资产从内存，其他从数据库）
+        total_documents_db = db.query(Document).count()
+        total_assets = len(assets_storage) if assets_storage else 0  # 从内存读取资产数
+        total_users_db = db.query(User).count()
+        total_document_views_db = db.query(DocumentView).count()
+        total_asset_views_db = db.query(AssetView).count()
+        total_searches_db = db.query(SearchLog).count()
         
         # 计算资产相关统计
         active_assets = 0
@@ -1521,80 +1772,87 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
                     pass
                 db = None
         
-        # 基于真实用户数据生成活动统计（可能使用db会话获取真实名称）
+        # 基于数据库生成用户活动统计
         for username, user_data in USERS.items():
             user_id = user_data.get("id")
             
-            # 统计该用户的文档查看次数
+            # 从数据库统计该用户的活动
             document_views = 0
-            document_details = []
-            for doc_id, view_data in DOCUMENT_VIEWS.items():
-                if user_id in view_data.get("users", set()):
-                    # 计算该用户对此文档的查看次数（简化统计）
-                    user_view_count = view_data["count"] // len(view_data.get("users", {1}))  # 平均分配
-                    document_views += user_view_count
-                    
-                    # 从数据库获取真实的文档标题
-                    document_title = f"文档{doc_id}"  # 默认标题
-                    if db:
-                        try:
-                            document_obj = crud.document.get(db=db, id=doc_id)
-                            if document_obj:
-                                document_title = document_obj.title
-                        except Exception as e:
-                            print(f"获取文档{doc_id}标题失败: {e}")
-                    
-                    document_details.append({
-                        "documentId": doc_id,
-                        "documentTitle": document_title,
-                        "accessCount": user_view_count,
-                        "lastAccess": view_data.get("last_viewed")
-                    })
-            
-            # 统计该用户的资产查看次数
             asset_views = 0
-            asset_details = []
-            for asset_id, view_data in ASSET_VIEWS.items():
-                if user_id in view_data.get("users", set()):
-                    # 计算该用户对此资产的查看次数
-                    user_view_count = view_data["count"] // len(view_data.get("users", {1}))  # 平均分配
-                    asset_views += user_view_count
-                    
-                    # 从资产存储获取真实的资产名称
-                    asset_name = f"资产设备{asset_id}"  # 默认名称
-                    try:
-                        for asset in assets_storage:
-                            if asset["id"] == asset_id:
-                                asset_name = asset["name"]
-                                break
-                    except Exception as e:
-                        print(f"获取资产{asset_id}名称失败: {e}")
-                    
-                    asset_details.append({
-                        "assetId": asset_id,
-                        "assetName": asset_name,
-                        "accessCount": user_view_count,
-                        "lastAccess": view_data.get("last_viewed")
-                    })
-            
-            # 统计该用户的搜索次数
             searches = 0
-            for keyword, search_data in SEARCH_KEYWORDS_COUNT.items():
-                if user_id in search_data.get("users", set()):
-                    searches += search_data["count"] // len(search_data.get("users", {1}))  # 平均分配
-            
-            # 计算最后活动时间
+            document_details = []
+            asset_details = []
             last_activity = None
-            activity_times = []
-            for doc_id, view_data in DOCUMENT_VIEWS.items():
-                if user_id in view_data.get("users", set()) and view_data.get("last_viewed"):
-                    activity_times.append(view_data["last_viewed"])
-            for asset_id, view_data in ASSET_VIEWS.items():
-                if user_id in view_data.get("users", set()) and view_data.get("last_viewed"):
-                    activity_times.append(view_data["last_viewed"])
             
-            if activity_times:
-                last_activity = max(activity_times)
+            if db:
+                try:
+                    from app.models.document import DocumentView, AssetView, SearchLog
+                    
+                    # 统计文档查看次数
+                    user_doc_views = db.query(DocumentView).filter(DocumentView.user_id == user_id).all()
+                    document_views = len(user_doc_views)
+                    
+                    # 获取最近的文档访问详情
+                    for view in user_doc_views[-5:]:  # 最近5个
+                        try:
+                            document_obj = crud.document.get(db=db, id=view.document_id)
+                            if document_obj:
+                                document_details.append({
+                                    "documentId": view.document_id,
+                                    "documentTitle": document_obj.title,
+                                    "accessCount": 1,
+                                    "lastAccess": view.created_at.isoformat() + "Z"
+                                })
+                        except:
+                            pass
+                    
+                    # 统计资产查看次数
+                    user_asset_views = db.query(AssetView).filter(AssetView.user_id == user_id).all()
+                    asset_views = len(user_asset_views)
+                    
+                    # 获取最近的资产访问详情
+                    for view in user_asset_views[-5:]:  # 最近5个
+                        try:
+                            asset_name = f"资产ID{view.asset_id}"
+                            # 从内存存储获取资产名称
+                            for asset in assets_storage:
+                                if asset["id"] == view.asset_id:
+                                    asset_name = asset["name"]
+                                    break
+                            
+                            asset_details.append({
+                                "assetId": view.asset_id,
+                                "assetName": asset_name,
+                                "accessCount": 1,
+                                "lastAccess": view.created_at.isoformat() + "Z"
+                            })
+                        except:
+                            pass
+                    
+                    # 统计搜索次数
+                    user_searches = db.query(SearchLog).filter(SearchLog.user_id == user_id).all()
+                    searches = len(user_searches)
+                    
+                    # 计算最后活动时间
+                    activity_times = []
+                    if user_doc_views:
+                        activity_times.extend([v.created_at for v in user_doc_views])
+                    if user_asset_views:
+                        activity_times.extend([v.created_at for v in user_asset_views])
+                    if user_searches:
+                        activity_times.extend([v.created_at for v in user_searches])
+                    
+                    if activity_times:
+                        last_activity = max(activity_times).isoformat() + "Z"
+                    
+                except Exception as e:
+                    print(f"获取用户{user_id}活动统计失败: {e}")
+                    # 使用默认值
+                    document_views = 0
+                    asset_views = 0 
+                    searches = 0
+                    document_details = []
+                    asset_details = []
             
             user_activity_stats.append({
                 "userId": user_id,
@@ -1602,10 +1860,10 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
                 "department": user_data.get("department", "未设置"),
                 "documentViews": document_views,
                 "searches": searches,
-                "assetViews": asset_views,  # 添加资产查看统计
+                "assetViews": asset_views,
                 "lastActivity": last_activity or datetime.utcnow().isoformat() + "Z",
-                "documentAccess": document_details[:5],  # 最多显示5个
-                "assetAccess": asset_details[:5]  # 最多显示5个
+                "documentAccess": document_details,
+                "assetAccess": asset_details
             })
         
         # 按文档查看次数排序
@@ -1633,13 +1891,20 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
         # 直接使用真实数据，如果没有真实数据则显示空
         search_keywords = real_keywords[:10] if real_keywords else []
 
-        # 计算真实的查看统计
-        total_document_views = sum(data["count"] for data in DOCUMENT_VIEWS.values())
-        total_asset_views = sum(data["count"] for data in ASSET_VIEWS.values())
-        total_searches_real = sum(data["count"] for data in SEARCH_KEYWORDS_COUNT.values())
+        # 计算真实的查看统计 - 从数据库读取
+        try:
+            total_document_views = db.query(DocumentView).count()
+            total_asset_views = db.query(AssetView).count() 
+            total_searches_real = db.query(SearchLog).count()
+        except Exception as e:
+            print(f"读取数据库统计失败，使用内存数据: {e}")
+            # 回退到内存统计
+            total_document_views = sum(data["count"] for data in DOCUMENT_VIEWS.values())
+            total_asset_views = sum(data["count"] for data in ASSET_VIEWS.values())
+            total_searches_real = sum(data["count"] for data in SEARCH_KEYWORDS_COUNT.values())
         
         return {
-            "total_documents": total_documents,
+            "total_documents": total_documents_db if 'total_documents_db' in locals() else total_documents,
             "total_assets": total_assets,
             "active_assets": active_assets,
             "maintenance_assets": maintenance_assets,
@@ -1672,6 +1937,166 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep)):
             "userActivityStats": [],
             "searchKeywords": []
         }
+
+@app.get("/api/v1/debug/database-info")
+async def get_database_info(db: Session = Depends(get_db)):
+    """调试：获取数据库配置和表结构信息"""
+    from app.core.config import settings
+    from app.models.document import DocumentView, SearchLog, AssetView
+    from app.models.asset import Asset
+    from app.models.user import User
+    from app.models.document import Document
+    
+    # 检查表是否存在并获取记录数
+    table_counts = {}
+    try:
+        table_counts["users"] = db.query(User).count()
+        table_counts["documents"] = db.query(Document).count()
+        table_counts["assets"] = db.query(Asset).count()
+        table_counts["document_views"] = db.query(DocumentView).count()
+        table_counts["asset_views"] = db.query(AssetView).count()
+        table_counts["search_logs"] = db.query(SearchLog).count()
+    except Exception as e:
+        table_counts["error"] = str(e)
+    
+    return {
+        "config_database_url": settings.DATABASE_URL,
+        "database_files": {
+            "yunwei_docs.db": os.path.exists("./yunwei_docs.db"),
+            "yunwei_docs_clean.db": os.path.exists("./yunwei_docs_clean.db"),
+            "backend/yunwei_docs.db": os.path.exists("./backend/yunwei_docs.db"),
+            "backend/yunwei_docs_clean.db": os.path.exists("./backend/yunwei_docs_clean.db")
+        },
+        "working_directory": os.getcwd(),
+        "env_database_url": os.getenv("DATABASE_URL", "Not set"),
+        "table_record_counts": table_counts,
+        "memory_assets_count": len(assets_storage) if 'assets_storage' in globals() else 0
+    }
+
+
+@app.post("/api/v1/analytics/record-asset-view")
+async def record_asset_view(
+    request: dict,
+    current_user: dict = Depends(get_current_user_dep),
+    db: Session = Depends(get_db)
+):
+    """记录资产查看访问统计"""
+    try:
+        asset_id = request.get("asset_id")
+        view_type = request.get("view_type", "details")
+        duration = request.get("duration")
+        
+        if not asset_id:
+            raise HTTPException(status_code=400, detail="asset_id is required")
+        
+        # 检查资产是否存在于内存存储中
+        global assets_storage
+        asset_found = False
+        memory_asset = None
+        for asset in assets_storage:
+            if asset.get("id") == asset_id:
+                asset_found = True
+                memory_asset = asset
+                break
+        
+        if not asset_found:
+            raise HTTPException(status_code=404, detail="资产不存在")
+        
+        # 确保数据库Asset表中有对应记录（用于外键约束）
+        from app.models.asset import Asset
+        db_asset = db.query(Asset).filter(Asset.id == asset_id).first()
+        
+        if not db_asset:
+            if memory_asset:
+                db_asset = Asset(
+                    id=memory_asset.get("id"),
+                    name=memory_asset.get("name", ""),
+                    asset_type=memory_asset.get("asset_type", "other"),
+                    network_location=memory_asset.get("network_location", "office"),
+                    status=memory_asset.get("status", "active"),
+                    creator_id=current_user.get("id") if current_user else 1
+                )
+                db.add(db_asset)
+                db.commit()
+        
+        # 确保有用户信息
+        if not current_user:
+            raise HTTPException(status_code=401, detail="需要登录才能记录查看统计")
+            
+        user_id = current_user.get("id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="无效的用户信息")
+        
+        # 记录访问日志到数据库
+        from app.models.document import AssetView
+        view_log = AssetView(
+            asset_id=asset_id,
+            user_id=user_id,
+            view_type=view_type,
+            duration=duration
+        )
+        db.add(view_log)
+        db.commit()
+        
+        return {
+            "message": "资产访问记录成功",
+            "asset_id": asset_id,
+            "view_type": view_type,
+            "user_id": user_id,
+            "record_id": view_log.id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"记录资产访问失败: {str(e)}")
+
+@app.post("/api/v1/analytics/record-view")
+async def record_document_view(
+    request: dict,
+    current_user: dict = Depends(get_current_user_dep),
+    db: Session = Depends(get_db)
+):
+    """记录文档预览访问统计"""
+    try:
+        document_id = request.get("document_id")
+        duration = request.get("duration")
+        
+        if not document_id:
+            raise HTTPException(status_code=400, detail="document_id is required")
+        
+        # 检查文档是否存在
+        from app.models.document import Document
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        
+        # 记录访问日志
+        from app.models.document import DocumentView
+        view_log = DocumentView(
+            document_id=document_id,
+            user_id=current_user.get("id") if current_user else None,
+            duration=duration
+        )
+        db.add(view_log)
+        
+        # 更新文档访问计数
+        document.view_count = (document.view_count or 0) + 1
+        
+        db.commit()
+        
+        return {
+            "message": "文档访问记录成功",
+            "document_id": document_id,
+            "view_count": document.view_count
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"记录文档访问失败: {str(e)}")
 
 # 资产数据持久化存储
 ASSETS_DATA_FILE = "./assets_data.json"
@@ -1973,15 +2398,16 @@ def get_initial_assets():
 assets_storage, next_asset_id = load_assets_from_file()
 # 资产数据已加载
 
-# 从文件加载用户分析数据
-load_user_analytics_from_file()
+# 用户分析数据已迁移到数据库，不再使用文件存储
+# load_user_analytics_from_file()
 
 # 如果是首次运行（没有数据文件），保存初始数据
 if not os.path.exists(ASSETS_DATA_FILE):
     save_assets_to_file()
 
-if not os.path.exists(USER_ANALYTICS_DATA_FILE):
-    save_user_analytics_to_file()
+# 用户分析数据已迁移到数据库，不再使用文件存储
+# if not os.path.exists(USER_ANALYTICS_DATA_FILE):
+#     save_user_analytics_to_file()
 
 @app.get("/api/v1/assets")
 async def get_assets(
@@ -2004,10 +2430,10 @@ async def get_assets(
         query_lower = query.lower()
         filtered_assets = [
             asset for asset in filtered_assets
-            if (query_lower in asset["name"].lower() or
-                query_lower in asset.get("hostname", "").lower() or
-                query_lower in asset.get("ip_address", "").lower() or
-                query_lower in asset.get("department", "").lower())
+            if (query_lower in (asset.get("name", "") or "").lower() or
+                query_lower in (asset.get("hostname", "") or "").lower() or
+                query_lower in (asset.get("ip_address", "") or "").lower() or
+                query_lower in (asset.get("department", "") or "").lower())
         ]
     
     if asset_type:
@@ -2667,44 +3093,75 @@ async def get_ai_analysis(current_user: dict = Depends(require_admin_dep), db: S
     
     return analysis_results
 
-# 清空用户活动统计数据API - 仅管理员
 @app.post("/api/v1/analytics/clear-stats")
-async def clear_analytics_stats(current_user: dict = Depends(require_admin_dep)):
-    """清空所有用户活动统计数据"""
-    global USER_ACTIVITY_LOG, SEARCH_KEYWORDS_COUNT, DOCUMENT_VIEWS, ASSET_VIEWS
+async def clear_analytics_stats(current_user: dict = Depends(require_admin_dep), db: Session = Depends(get_db)):
+    """清空统计数据 - 仅管理员可用"""
+    from app.models.document import DocumentView, SearchLog, AssetView
     
     try:
-        # 备份当前数据（如果需要的话）
-        backup_data = {
-            'user_activity_log_count': len(USER_ACTIVITY_LOG),
-            'search_keywords_count': len(SEARCH_KEYWORDS_COUNT),
-            'document_views_count': len(DOCUMENT_VIEWS),
-            'asset_views_count': len(ASSET_VIEWS),
-            'cleared_at': datetime.utcnow().isoformat() + "Z",
-            'cleared_by': current_user.get("username", "unknown")
-        }
+        # 获取清空前的统计数据
+        doc_views_count_before = db.query(DocumentView).count()
+        asset_views_count_before = db.query(AssetView).count()
+        search_logs_count_before = db.query(SearchLog).count()
         
-        # 在清空用户活动统计数据
+        print(f"[INFO] 管理员 {current_user.get('username')} 请求清空统计数据")
+        print(f"[INFO] 清空前统计: 文档查看={doc_views_count_before}, 资产查看={asset_views_count_before}, 搜索记录={search_logs_count_before}")
         
-        # 清空所有统计数据
-        USER_ACTIVITY_LOG = []
-        SEARCH_KEYWORDS_COUNT = {}
-        DOCUMENT_VIEWS = {}
-        ASSET_VIEWS = {}
+        # 清空数据库中的统计数据
+        db.query(DocumentView).delete()
+        db.query(AssetView).delete()
+        db.query(SearchLog).delete()
         
-        # 保存空数据到文件
-        save_user_analytics_to_file()
+        # 重置文档的view_count
+        from app.models.document import Document
+        documents = db.query(Document).all()
+        for doc in documents:
+            doc.view_count = 0
         
-        # 数据清空完成
+        db.commit()
+        
+        # 验证清空结果
+        doc_views_count_after = db.query(DocumentView).count()
+        asset_views_count_after = db.query(AssetView).count()
+        search_logs_count_after = db.query(SearchLog).count()
+        
+        print(f"[INFO] 清空后统计: 文档查看={doc_views_count_after}, 资产查看={asset_views_count_after}, 搜索记录={search_logs_count_after}")
+        
+        # 同时清空内存中的统计数据（兼容性）
+        global USER_ACTIVITY_LOG, SEARCH_KEYWORDS_COUNT, DOCUMENT_VIEWS, ASSET_VIEWS
+        USER_ACTIVITY_LOG.clear()
+        SEARCH_KEYWORDS_COUNT.clear()
+        DOCUMENT_VIEWS.clear()
+        ASSET_VIEWS.clear()
+        
+        print(f"[INFO] 内存统计数据也已清空")
         
         return {
             "success": True,
-            "message": "用户活动统计数据已清空",
-            "backup_info": backup_data
+            "message": "统计数据已成功清空",
+            "cleared_counts": {
+                "document_views": doc_views_count_before,
+                "asset_views": asset_views_count_before,
+                "search_logs": search_logs_count_before
+            },
+            "current_counts": {
+                "document_views": doc_views_count_after,
+                "asset_views": asset_views_count_after,
+                "search_logs": search_logs_count_after
+            }
         }
+        
     except Exception as e:
-        print(f"清空用户活动统计数据失败: {e}")
-        raise HTTPException(status_code=500, detail=f"清空统计数据失败: {str(e)}")
+        db.rollback()
+        print(f"[ERROR] 清空统计数据失败: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        return {
+            "success": False,
+            "message": "清空统计数据失败",
+            "error": str(e)
+        }
 
 
 if __name__ == "__main__":
@@ -2717,8 +3174,8 @@ if __name__ == "__main__":
         
         uvicorn.run(
             app,
-            host="127.0.0.1",
-            port=8002,
+            host=settings.SERVER_HOST,
+            port=settings.SERVER_PORT,
             reload=False,
             log_level="info",
             access_log=True

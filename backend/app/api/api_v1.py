@@ -4,7 +4,7 @@ api_router = APIRouter()
 
 # 临时禁用有问题的路由，使用直接API替代
 try:
-    from app.api.endpoints import auth, documents, upload, upload_multiple, assets, search, categories, settings, tasks, analytics
+    from app.api.endpoints import auth, documents, upload, upload_multiple, assets, search, categories, settings, tasks, analytics, mobile, system, voice
     
     # 包含核心路由
     api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
@@ -17,6 +17,13 @@ try:
     api_router.include_router(settings.router, prefix="/settings", tags=["用户设置"])
     api_router.include_router(tasks.router, prefix="/tasks", tags=["后台任务"])
     api_router.include_router(analytics.router, prefix="/analytics", tags=["数据分析"])
+    
+    # 移动端和系统API路由
+    api_router.include_router(mobile.router, prefix="/mobile", tags=["移动端API"])
+    api_router.include_router(system.router, prefix="/system", tags=["系统信息"])
+    
+    # 语音查询API路由
+    api_router.include_router(voice.router, prefix="/voice", tags=["语音查询"])
         
 except Exception as e:
     print(f"警告：API路由加载失败: {e}")

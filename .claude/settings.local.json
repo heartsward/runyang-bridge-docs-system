@@ -47,7 +47,8 @@
       "Bash(tskill:*)",
       "Bash(chmod:*)",
       "Bash(git init:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(ipconfig:*)"
     ],
     "deny": []
   }

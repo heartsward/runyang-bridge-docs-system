@@ -2,7 +2,6 @@ import { fileURLToPath, URL } from 'node:url'
 
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -10,9 +9,8 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [
-      vue(), 
-      // 只在开发模式下启用 devtools
-      ...(mode === 'development' ? [vueDevTools()] : [])
+      vue()
+      // Vue DevTools 已禁用
     ],
     resolve: {
       alias: {

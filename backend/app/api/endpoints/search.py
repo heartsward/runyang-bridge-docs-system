@@ -295,6 +295,24 @@ async def preview_document(
             search_service = SearchService()
             content = search_service.highlight_text(content, highlight)
         
+        # 记录文档查看统计（仅限已登录用户）
+        if current_user:
+            try:
+                from app.models.document import DocumentView
+                view_log = DocumentView(
+                    document_id=document_id,
+                    user_id=current_user.id
+                )
+                db.add(view_log)
+                
+                # 更新文档的查看计数
+                document.view_count = (document.view_count or 0) + 1
+                
+                db.commit()
+            except Exception as e:
+                print(f"记录文档查看统计失败: {e}")
+                db.rollback()
+        
         # 限制预览内容长度
         original_length = len(content)
         if len(content) > 10000:
