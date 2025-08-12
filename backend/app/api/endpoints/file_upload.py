@@ -7,7 +7,7 @@ from app.core.deps import get_db, get_current_active_user
 from app.crud.asset import asset as asset_crud
 from app.models.user import User
 from app.schemas.asset import AssetExtractResult
-from app.services.asset_extractor import AssetExtractor
+from app.services.enhanced_asset_extractor import EnhancedAssetExtractor
 
 router = APIRouter()
 
@@ -39,8 +39,8 @@ async def extract_assets_from_file(
         # 读取文件内容
         file_content = await file.read()
         
-        # 初始化资产提取器
-        extractor = AssetExtractor()
+        # 初始化增强版资产提取器
+        extractor = EnhancedAssetExtractor()
         
         # 从文件中提取资产信息
         raw_assets = extractor.extract_from_file(

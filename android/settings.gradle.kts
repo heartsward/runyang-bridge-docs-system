@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 rootProject.name = "RunYang Bridge Maintenance"
 include(":app")
 include(":app")
+include(":app")

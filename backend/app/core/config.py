@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8002
     
     # 数据库配置 - 从环境变量读取，默认使用本地文件
-    DATABASE_URL: str = "sqlite:///./yunwei_docs.db"
+    # 使用绝对路径确保无论从哪个目录启动都使用同一个数据库
+    DATABASE_URL: str = "sqlite:///./backend/yunwei_docs.db"
     TEST_DATABASE_URL: Optional[str] = None
     
     # 安全配置

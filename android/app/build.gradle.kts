@@ -40,7 +40,7 @@ android {
             isDebuggable = true
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            buildConfigField("String", "API_BASE_URL", "\"http://192.168.1.100:8000/api/v1/\"")
+            buildConfigField("String", "API_BASE_URL", "\"http://192.168.1.100:8002/api/v1/\"")
             buildConfigField("boolean", "DEBUG_MODE", "true")
             
             // 调试时禁用混淆以便调试
@@ -152,8 +152,8 @@ dependencies {
     
     // 依赖注入 - Hilt
     implementation("com.google.dagger:hilt-android:2.49")
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.10.0")
     kapt("com.google.dagger:hilt-android-compiler:2.49")
     
     // 网络请求

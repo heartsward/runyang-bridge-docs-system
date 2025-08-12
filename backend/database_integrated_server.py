@@ -38,14 +38,17 @@ try:
     from app.services.enhanced_content_extractor import EnhancedContentExtractor
     from app.services.search_service import SearchService  
     from app.services.document_analyzer import DocumentAnalyzer
+    from app.services.enhanced_asset_extractor import EnhancedAssetExtractor
     from database_task_manager import DatabaseTaskManager
 except ImportError as e:
     print(f"警告: 部分服务导入失败: {e}")
     # 回退到原始提取器
     try:
         from app.services.content_extractor import ContentExtractor as EnhancedContentExtractor
+        from app.services.enhanced_asset_extractor import EnhancedAssetExtractor
     except ImportError:
         EnhancedContentExtractor = None
+        EnhancedAssetExtractor = None
     SearchService = None
     DocumentAnalyzer = None
     DatabaseTaskManager = None
@@ -2744,6 +2747,47 @@ async def bulk_delete_assets(asset_ids: List[int], current_user: dict = Depends(
         "deleted_ids": asset_ids
     }
 
+def check_duplicate_asset(asset_data, existing_assets):
+    """检查资产是否重复（基于名称和IP地址）"""
+    name = asset_data.get("name", "").strip().lower()
+    ip_address = asset_data.get("ip_address", "").strip()
+    
+    for existing in existing_assets:
+        existing_name = existing.get("name", "").strip().lower()
+        existing_ip = existing.get("ip_address", "").strip()
+        
+        # 精确匹配名称或IP地址
+        if name and existing_name and name == existing_name:
+            return existing, "name"
+        if ip_address and existing_ip and ip_address == existing_ip:
+            return existing, "ip"
+    
+    return None, None
+
+def generate_unique_name(base_name, existing_assets):
+    """生成唯一的资产名称"""
+    if not base_name:
+        base_name = "未命名设备"
+    
+    existing_names = [asset.get("name", "").lower() for asset in existing_assets]
+    
+    # 如果原名称不重复，直接返回
+    if base_name.lower() not in existing_names:
+        return base_name
+    
+    # 生成带编号的名称
+    counter = 2
+    while True:
+        new_name = f"{base_name}-{counter}"
+        if new_name.lower() not in existing_names:
+            return new_name
+        counter += 1
+        
+        # 防止无限循环
+        if counter > 1000:
+            import uuid
+            return f"{base_name}-{str(uuid.uuid4())[:8]}"
+
 @app.post("/api/v1/assets/file-extract")
 async def extract_assets_from_file(
     file: UploadFile = File(...),
@@ -2751,7 +2795,7 @@ async def extract_assets_from_file(
     merge_threshold: int = Form(80),
     current_user: dict = Depends(require_admin_dep)
 ):
-    """从文件提取资产信息"""
+    """从文件提取资产信息 - 使用增强型资产提取器"""
     global assets_storage, next_asset_id
     
     # 验证文件类型
@@ -2772,38 +2816,160 @@ async def extract_assets_from_file(
     
     extracted_assets = []
     created_count = 0
+    merged_count = 0
     errors = []
     
     try:
-        import re
+        # 保存临时文件
+        import tempfile
+        import os
         
-        if file_ext == 'csv':
-            # CSV处理
-            content_str = file_content.decode('utf-8')
-            lines = content_str.strip().split('\n')
+        temp_file_path = None
+        try:
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as temp_file:
+                temp_file.write(file_content)
+                temp_file_path = temp_file.name
             
-            for i, line in enumerate(lines[1:], 1):  # 跳过标题行
-                if line.strip():
-                    parts = [part.strip() for part in line.split(',')]
-                    if len(parts) >= 2:
-                        try:
+            print(f"临时文件创建成功: {temp_file_path}")
+            
+            # 使用增强型资产提取器
+            if EnhancedAssetExtractor:
+                extractor = EnhancedAssetExtractor()
+                print("使用EnhancedAssetExtractor进行资产提取...")
+                
+                # 提取资产数据  
+                # 读取文件内容
+                with open(temp_file_path, 'rb') as f:
+                    file_content = f.read()
+                
+                extracted_data = extractor.extract_from_file(temp_file_path, file_content, file_ext)
+                print(f"提取到 {len(extracted_data)} 个资产")
+                
+                # 详细打印提取的数据结构
+                for i, data in enumerate(extracted_data):
+                    print(f"原始提取数据[{i+1}]: {data}")
+                    print(f"数据键: {list(data.keys())}")
+                    if 'ip_address' in data:
+                        print(f"包含ip_address: {data['ip_address']}")
+                    else:
+                        print("不包含ip_address字段")
+                
+                # 转换为系统格式并添加到存储（带重复检测）
+                for i, asset_data in enumerate(extracted_data):
+                    try:
+                        print(f"处理第{i+1}个资产: {asset_data}")
+                        
+                        # 检查是否重复
+                        duplicate_asset, duplicate_type = check_duplicate_asset(asset_data, assets_storage)
+                        
+                        if duplicate_asset and auto_merge:
+                            # 自动合并：跳过重复资产
+                            print(f"跳过重复资产 (基于{duplicate_type}): {asset_data.get('name', 'Unknown')} - {asset_data.get('ip_address', 'No IP')}")
+                            merged_count += 1
+                            continue
+                        
+                        # 如果不自动合并但有重复，生成唯一名称
+                        asset_name = asset_data.get("name", f"提取设备-{i+1}")
+                        if duplicate_asset and not auto_merge:
+                            asset_name = generate_unique_name(asset_name, assets_storage)
+                            print(f"检测到重复，使用新名称: {asset_name}")
+                        
+                        new_asset = {
+                            "id": next_asset_id,
+                            "name": asset_name,
+                            "asset_type": asset_data.get("asset_type", "server"),
+                            "device_model": asset_data.get("device_model", ""),
+                            "ip_address": asset_data.get("ip_address", ""),
+                            "hostname": asset_data.get("hostname", ""),
+                            "username": asset_data.get("username", ""),
+                            "password": asset_data.get("password", ""),
+                            "network_location": asset_data.get("network_location", "office"),
+                            "department": asset_data.get("department", "技术部"),
+                            "status": asset_data.get("status", "active"),
+                            "notes": asset_data.get("notes", f"从文件 {file.filename} 提取"),
+                            "tags": asset_data.get("tags", ["extracted"]),
+                            "created_at": datetime.utcnow().isoformat() + "Z",
+                            "updated_at": datetime.utcnow().isoformat() + "Z",
+                            "confidence_score": asset_data.get("confidence_score", 75),
+                            "is_merged": asset_data.get("is_merged", False)
+                        }
+                        
+                        print(f"创建的资产对象: name={new_asset['name']}, ip={new_asset['ip_address']}")
+                        
+                        assets_storage.append(new_asset)
+                        extracted_assets.append(new_asset)
+                        next_asset_id += 1
+                        created_count += 1
+                        
+                    except Exception as e:
+                        errors.append(f"处理第{i+1}个资产失败: {str(e)}")
+                        print(f"处理资产失败: {e}")
+                        continue
+                
+                print(f"成功创建 {created_count} 个资产")
+                
+            else:
+                # 回退到基础提取逻辑
+                print("EnhancedAssetExtractor不可用，使用基础提取逻辑")
+                errors.append("增强型提取器不可用，使用基础提取")
+                
+                # 基础IP地址提取
+                import re
+                try:
+                    content_str = file_content.decode('utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        content_str = file_content.decode('gbk')
+                    except UnicodeDecodeError:
+                        content_str = file_content.decode('latin-1', errors='ignore')
+                
+                # 提取IP地址
+                ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
+                ips = list(set(ip_pattern.findall(content_str)))[:10]  # 最多10个IP
+                
+                for i, ip in enumerate(ips):
+                    try:
+                        parts = ip.split('.')
+                        if all(0 <= int(part) <= 255 for part in parts):
+                            # 创建临时资产数据用于重复检测
+                            temp_asset_data = {
+                                "name": f"设备-{ip}",
+                                "ip_address": ip
+                            }
+                            
+                            # 检查是否重复
+                            duplicate_asset, duplicate_type = check_duplicate_asset(temp_asset_data, assets_storage)
+                            
+                            if duplicate_asset and auto_merge:
+                                # 自动合并：跳过重复资产
+                                print(f"跳过重复资产 (基于{duplicate_type}): 设备-{ip}")
+                                merged_count += 1
+                                continue
+                            
+                            # 如果不自动合并但有重复，生成唯一名称
+                            asset_name = f"设备-{ip}"
+                            if duplicate_asset and not auto_merge:
+                                asset_name = generate_unique_name(asset_name, assets_storage)
+                                print(f"检测到重复，使用新名称: {asset_name}")
+                            
                             new_asset = {
                                 "id": next_asset_id,
-                                "name": parts[1] if len(parts) > 1 and parts[1] else f"设备-{i}",
+                                "name": asset_name,
                                 "asset_type": "server",
-                                "device_model": parts[2] if len(parts) > 2 and parts[2] else "",
-                                "ip_address": parts[0] if parts[0] else "",
-                                "hostname": parts[1] if len(parts) > 1 and parts[1] else "",
-                                "username": parts[3] if len(parts) > 3 and parts[3] else "",
-                                "password": parts[4] if len(parts) > 4 and parts[4] else "",
+                                "device_model": "",
+                                "ip_address": ip,
+                                "hostname": f"host-{ip.replace('.', '-')}",
+                                "username": "",
+                                "password": "",
                                 "network_location": "office",
-                                "department": parts[5] if len(parts) > 5 and parts[5] else "技术部",
+                                "department": "技术部",
                                 "status": "active",
-                                "notes": f"从文件 {file.filename} 提取",
-                                "tags": ["extracted"],
+                                "notes": f"从文件 {file.filename} 基础提取",
+                                "tags": ["extracted", "basic"],
                                 "created_at": datetime.utcnow().isoformat() + "Z",
                                 "updated_at": datetime.utcnow().isoformat() + "Z",
-                                "confidence_score": 85,
+                                "confidence_score": 60,
                                 "is_merged": False
                             }
                             
@@ -2811,134 +2977,35 @@ async def extract_assets_from_file(
                             extracted_assets.append(new_asset)
                             next_asset_id += 1
                             created_count += 1
-                        except Exception as e:
-                            errors.append(f"第{i}行处理失败: {str(e)}")
-                            continue
-        
-        elif file_ext in ['txt', 'md']:
-            # TXT/MD文件处理 - 使用正则表达式提取IP地址
-            content_str = file_content.decode('utf-8')
-            ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
-            ips = list(set(ip_pattern.findall(content_str)))  # 去重
+                    except Exception as e:
+                        errors.append(f"IP {ip} 处理失败: {str(e)}")
+                        continue
             
-            for i, ip in enumerate(ips[:20]):  # 最多提取20个IP
+            # 保存到文件
+            if created_count > 0:
+                save_assets_to_file()
+                print(f"资产数据已保存，新增 {created_count} 个资产")
+            
+            return {
+                "extracted_count": created_count,
+                "merged_count": merged_count,
+                "assets": extracted_assets,
+                "errors": errors
+            }
+            
+        finally:
+            # 清理临时文件
+            if temp_file_path and os.path.exists(temp_file_path):
                 try:
-                    # 验证IP地址格式
-                    parts = ip.split('.')
-                    if all(0 <= int(part) <= 255 for part in parts):
-                        new_asset = {
-                            "id": next_asset_id,
-                            "name": f"设备-{ip}",
-                            "asset_type": "server",
-                            "device_model": "",
-                            "ip_address": ip,
-                            "hostname": f"host-{ip.replace('.', '-')}",
-                            "username": "",
-                            "password": "",
-                            "network_location": "office",
-                            "department": "技术部",
-                            "status": "active",
-                            "notes": f"从文件 {file.filename} 提取的IP地址",
-                            "tags": ["extracted", "ip-based"],
-                            "created_at": datetime.utcnow().isoformat() + "Z",
-                            "updated_at": datetime.utcnow().isoformat() + "Z",
-                            "confidence_score": 75,
-                            "is_merged": False
-                        }
-                        
-                        assets_storage.append(new_asset)
-                        extracted_assets.append(new_asset)
-                        next_asset_id += 1
-                        created_count += 1
+                    os.unlink(temp_file_path)
+                    print(f"临时文件已清理: {temp_file_path}")
                 except Exception as e:
-                    errors.append(f"IP {ip} 处理失败: {str(e)}")
-                    continue
-        
-        elif file_ext == 'json':
-            # JSON文件处理
-            try:
-                import json
-                content_str = file_content.decode('utf-8')
-                json_data = json.loads(content_str)
-                
-                # 如果是数组格式
-                if isinstance(json_data, list):
-                    for i, item in enumerate(json_data[:50]):  # 最多50条
-                        if isinstance(item, dict):
-                            try:
-                                new_asset = {
-                                    "id": next_asset_id,
-                                    "name": item.get("name", f"设备-{i+1}"),
-                                    "asset_type": item.get("type", "server"),
-                                    "device_model": item.get("model", ""),
-                                    "ip_address": item.get("ip", item.get("ip_address", "")),
-                                    "hostname": item.get("hostname", item.get("host", "")),
-                                    "username": item.get("username", item.get("user", "")),
-                                    "password": item.get("password", ""),
-                                    "network_location": item.get("location", "office"),
-                                    "department": item.get("department", "技术部"),
-                                    "status": item.get("status", "active"),
-                                    "notes": f"从JSON文件 {file.filename} 提取",
-                                    "tags": ["extracted", "json"],
-                                    "created_at": datetime.utcnow().isoformat() + "Z",
-                                    "updated_at": datetime.utcnow().isoformat() + "Z",
-                                    "confidence_score": 90,
-                                    "is_merged": False
-                                }
-                                
-                                assets_storage.append(new_asset)
-                                extracted_assets.append(new_asset)
-                                next_asset_id += 1
-                                created_count += 1
-                            except Exception as e:
-                                errors.append(f"JSON第{i+1}项处理失败: {str(e)}")
-                                continue
-            except json.JSONDecodeError as e:
-                errors.append(f"JSON格式错误: {str(e)}")
-        
-        else:
-            # Excel文件处理（简化版）
-            try:
-                # 由于这是简化实现，这里创建一个示例资产
-                new_asset = {
-                    "id": next_asset_id,
-                    "name": f"Excel提取设备",
-                    "asset_type": "server",
-                    "device_model": "从Excel提取",
-                    "ip_address": "192.168.1.100",
-                    "hostname": "excel-extracted",
-                    "username": "",
-                    "password": "",
-                    "network_location": "office",
-                    "department": "技术部",
-                    "status": "active",
-                    "notes": f"从Excel文件 {file.filename} 提取（简化处理）",
-                    "tags": ["extracted", "excel"],
-                    "created_at": datetime.utcnow().isoformat() + "Z",
-                    "updated_at": datetime.utcnow().isoformat() + "Z",
-                    "confidence_score": 60,
-                    "is_merged": False
-                }
-                
-                assets_storage.append(new_asset)
-                extracted_assets.append(new_asset)
-                next_asset_id += 1
-                created_count += 1
-            except Exception as e:
-                errors.append(f"Excel处理失败: {str(e)}")
-        
-        # 保存到文件
-        if created_count > 0:
-            save_assets_to_file()
-        
-        return {
-            "extracted_count": created_count,
-            "merged_count": 0,  # 简化版暂不实现合并逻辑
-            "assets": extracted_assets,
-            "errors": errors
-        }
+                    print(f"清理临时文件失败: {e}")
         
     except Exception as e:
+        print(f"资产提取异常: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"文件处理失败: {str(e)}"

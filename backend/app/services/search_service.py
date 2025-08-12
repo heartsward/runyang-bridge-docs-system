@@ -8,6 +8,9 @@ import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+# 导入智能编码检测工具
+from app.utils.encoding_detector import EncodingDetector
+
 # 导入文档解析库
 try:
     import pandas as pd
@@ -167,16 +170,24 @@ class SearchService:
             
             file_ext = Path(file_path).suffix.lower()
             
-            # 文本文件直接读取
+            # 文本文件直接读取 - 使用智能编码检测
             if file_ext in {'.txt', '.py', '.js', '.html', '.xml', '.yml', '.yaml', '.csv', '.rtf', 
                            '.conf', '.config', '.cfg', '.ini', '.properties', '.env'}:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    return f.read()
+                content, error = EncodingDetector.read_file_with_encoding(file_path)
+                if content is not None:
+                    return content
+                else:
+                    # 如果智能检测失败，使用原来的方法作为后备
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        return f.read()
             
-            # Markdown文件处理
+            # Markdown文件处理 - 使用智能编码检测
             elif file_ext == '.md':
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
+                content, error = EncodingDetector.read_file_with_encoding(file_path)
+                if content is None:
+                    # 如果智能检测失败，使用原来的方法作为后备
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
                     # 如果有markdown库，可以转换为纯文本
                     if markdown:
                         try:
@@ -1196,11 +1207,18 @@ class SearchService:
             
             file_ext = Path(file_path).suffix.lower()
             
-            # 对于文本文件，直接读取前N个字符
+            # 对于文本文件，直接读取前N个字符 - 使用智能编码检测
             if file_ext in {'.txt', '.py', '.js', '.html', '.xml', '.yml', '.yaml', '.csv', '.rtf', 
                            '.conf', '.config', '.cfg', '.ini', '.properties', '.env', '.md'}:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read(max_chars)
+                # 首先检测文件编码
+                detected_encoding, confidence = EncodingDetector.detect_encoding(file_path)
+                try:
+                    with open(file_path, 'r', encoding=detected_encoding) as f:
+                        content = f.read(max_chars)
+                except UnicodeDecodeError:
+                    # 如果检测的编码失败，使用UTF-8忽略错误
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read(max_chars)
                     if len(content) == max_chars:
                         # 截断到最后一个完整的行
                         last_newline = content.rfind('\n')

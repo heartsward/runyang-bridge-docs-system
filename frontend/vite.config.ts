@@ -21,7 +21,11 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       port: 5173,
       strictPort: true,
-      hmr: mode === 'development'
+      hmr: mode === 'development',
+      https: env.VITE_DEV_HTTPS === 'true' ? {
+        // 开发环境使用自签名证书
+        // Vite会自动生成自签名证书
+      } : false
     },
     build: {
       outDir: env.VITE_BUILD_OUTPUT || 'dist',

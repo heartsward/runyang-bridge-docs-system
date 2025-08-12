@@ -49,7 +49,15 @@
       "Bash(git init:*)",
       "Bash(git commit:*)",
       "Bash(ipconfig:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(ping:*)",
+      "Bash(PYTHONPATH=C:Usersccclyyunweiruanjianbackend python backendtest_encoding_fix.py)",
+      "Bash(PYTHONPATH=C:Usersccclyyunweiruanjianbackend python backend/test_encoding_fix.py)",
+      "Bash(PYTHONPATH=C:Usersccclyyunweiruanjianbackend python backend/manual_encoding_fix.py)",
+      "Bash(PYTHONPATH=C:Usersccclyyunweiruanjianbackend python backend/test_enhanced_extractor.py)",
+      "Bash(.gradlew.bat clean:*)",
+      "Bash(gradlew.bat clean:*)"
     ],
     "deny": []
   }

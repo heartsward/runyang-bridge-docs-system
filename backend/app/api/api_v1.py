@@ -4,7 +4,7 @@ api_router = APIRouter()
 
 # 临时禁用有问题的路由，使用直接API替代
 try:
-    from app.api.endpoints import auth, documents, upload, upload_multiple, search, categories, settings, tasks, analytics, mobile, system, voice, file_upload
+    from app.api.endpoints import auth, documents, upload, upload_multiple, search, categories, settings, tasks, analytics, mobile, system, voice, file_upload, encoding_fix
     
     # 包含核心路由
     api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
@@ -26,6 +26,9 @@ try:
     
     # 文件上传API路由
     api_router.include_router(file_upload.router, prefix="/file", tags=["文件处理"])
+    
+    # 编码修复API路由
+    api_router.include_router(encoding_fix.router, prefix="/encoding", tags=["编码修复"])
         
 except Exception as e:
     print(f"警告：API路由加载失败: {e}")
