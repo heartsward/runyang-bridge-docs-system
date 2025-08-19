@@ -58,6 +58,12 @@ class EnhancedContentExtractor:
         self.advanced_pdf_extractor = AdvancedPDFExtractor()  # 新增高性能PDF提取器
         self.image_preprocessor = ImagePreprocessor()  # 图像预处理器
         
+        # PDF扫描检测缓存，避免重复检测
+        self._pdf_scan_cache = {}
+        
+        # 处理进度回调函数（可选）
+        self.progress_callback = None
+        
         # 性能监控
         self.performance_stats = {
             "total_extractions": 0,
@@ -153,6 +159,10 @@ class EnhancedContentExtractor:
             
             logger.info(f"开始提取文件内容: {file_path} ({size_mb:.2f}MB)")
             
+            # 进度回调 - 开始处理
+            if self.progress_callback:
+                self.progress_callback("开始处理", 0, file_path)
+            
             # 检查文件类型
             file_ext = Path(file_path).suffix.lower()
             
@@ -162,9 +172,13 @@ class EnhancedContentExtractor:
             
             # 方法1: 简单直接的PDF文本提取
             if file_ext == '.pdf':
+                if self.progress_callback:
+                    self.progress_callback("标准PDF提取", 20, file_path)
                 content, error = self._extract_pdf_content_simple(file_path)
                 logger.info(f"PDF标准提取结果: {'成功' if content else '失败'}, 内容长度: {len(content) if content else 0}")
             else:
+                if self.progress_callback:
+                    self.progress_callback("文档内容提取", 20, file_path)
                 # 其他文件类型使用原有的搜索服务
                 content = self.search_service.extract_file_content(file_path)
             
@@ -198,33 +212,66 @@ class EnhancedContentExtractor:
             if content_is_garbled:
                 logger.info(f"检测到乱码内容，将尝试备用方案: {file_path}")
             
-            # 方法2: 如果标准提取失败，先尝试LibreOffice（比OCR更快更准确）
+            # 方法2: 智能选择处理策略 - 检查是否为扫描PDF
             if (content_too_short or content_is_placeholder or content_is_garbled) and file_ext == '.pdf':
-                logger.info(f"标准PDF提取不理想，尝试LibreOffice转换: {file_path}")
-                
-                # 尝试LibreOffice提取
-                libreoffice_content, libreoffice_error = self.pdf_extractor._extract_with_libreoffice(file_path)
-                
-                if libreoffice_content and len(libreoffice_content.strip()) > 100:
-                    logger.info(f"LibreOffice PDF提取成功，内容长度: {len(libreoffice_content)}")
-                    content = libreoffice_content
-                    error = None
-                    # 重新检查是否还是乱码
-                    content_is_garbled = self._is_garbled_text(content)
-                elif libreoffice_error:
-                    logger.warning(f"LibreOffice PDF提取失败: {libreoffice_error}")
-            
-            # 方法3: 如果LibreOffice也失败或仍是乱码，最后尝试OCR
-            if (content_too_short or content_is_placeholder or content_is_garbled) and self.has_ocr:
-                reason = "未知原因"
-                if content_is_garbled:
-                    reason = "检测到乱码内容"
-                elif content_is_placeholder:
-                    reason = "内容为占位符"
-                elif content_too_short:
-                    reason = "内容太短或为空"
+                if self.progress_callback:
+                    self.progress_callback("PDF类型检测", 40, file_path)
                     
-                logger.info(f"尝试OCR提取: {file_path} (原因: {reason})")
+                # 检查是否为扫描PDF（使用缓存）
+                if file_path not in self._pdf_scan_cache:
+                    self._pdf_scan_cache[file_path] = self._is_scanned_pdf(file_path)
+                is_scanned = self._pdf_scan_cache[file_path]
+                
+                if is_scanned:
+                    logger.info(f"检测到扫描PDF，跳过LibreOffice直接使用OCR: {file_path}")
+                else:
+                    logger.info(f"标准PDF提取不理想，尝试LibreOffice转换: {file_path}")
+                    
+                    if self.progress_callback:
+                        self.progress_callback("LibreOffice处理", 50, file_path)
+                    
+                    # 尝试LibreOffice提取
+                    libreoffice_content, libreoffice_error = self.pdf_extractor._extract_with_libreoffice(file_path)
+                    
+                    if libreoffice_content and len(libreoffice_content.strip()) > 100:
+                        logger.info(f"LibreOffice PDF提取成功，内容长度: {len(libreoffice_content)}")
+                        content = libreoffice_content
+                        error = None
+                        # 重新检查是否还是乱码
+                        content_is_garbled = self._is_garbled_text(content)
+                    elif libreoffice_error:
+                        logger.warning(f"LibreOffice PDF提取失败: {libreoffice_error}")
+            
+            # 方法3: OCR处理 - 智能决策
+            should_use_ocr = False
+            ocr_reason = ""
+            
+            if file_ext == '.pdf':
+                # 对于PDF文件，检查是否需要OCR
+                is_scanned = self._is_scanned_pdf(file_path) if not hasattr(self, '_pdf_scan_cache') else self._pdf_scan_cache.get(file_path, self._is_scanned_pdf(file_path))
+                
+                if is_scanned:
+                    should_use_ocr = True
+                    ocr_reason = "扫描PDF文件"
+                elif content_too_short or content_is_placeholder or content_is_garbled:
+                    should_use_ocr = True
+                    if content_is_garbled:
+                        ocr_reason = "检测到乱码内容"
+                    elif content_is_placeholder:
+                        ocr_reason = "内容为占位符"
+                    elif content_too_short:
+                        ocr_reason = "内容太短或为空"
+            else:
+                # 非PDF文件，只在标准提取失败时使用OCR
+                if content_too_short or content_is_placeholder or content_is_garbled:
+                    should_use_ocr = True
+                    ocr_reason = "标准提取失败"
+            
+            if should_use_ocr and self.has_ocr:
+                if self.progress_callback:
+                    self.progress_callback("OCR识别处理", 70, file_path)
+                
+                logger.info(f"尝试OCR提取: {file_path} (原因: {ocr_reason})")
                 ocr_content, ocr_error = self._extract_with_ocr(file_path)
                 
                 if ocr_content and len(ocr_content.strip()) > 100:  # OCR内容要足够长才替换
@@ -233,19 +280,32 @@ class EnhancedContentExtractor:
                     logger.info(f"OCR提取成功，内容长度: {len(ocr_content)}")
                 elif ocr_error:
                     logger.warning(f"OCR提取失败: {ocr_error}")
+            elif should_use_ocr and not self.has_ocr:
+                logger.warning(f"需要OCR处理但OCR功能不可用: {file_path} (原因: {ocr_reason})")
             
             if content:
+                if self.progress_callback:
+                    self.progress_callback("内容后处理", 90, file_path)
+                
                 # 智能文本处理和清理
                 content = self._process_and_clean_content(content, file_path)
                 
                 if len(content.strip()) > 0:
                     self.performance_stats["successful_extractions"] += 1
+                    
+                    if self.progress_callback:
+                        self.progress_callback("处理完成", 100, file_path)
+                    
                     logger.info(f"内容提取成功: {file_path}, 最终内容长度: {len(content)}")
                     return content, None
                 else:
                     return None, "提取的内容为空"
             else:
                 self.performance_stats["failed_extractions"] += 1
+                
+                if self.progress_callback:
+                    self.progress_callback("处理失败", 100, file_path)
+                
                 return None, error or "无法提取文件内容"
                 
         except Exception as e:
@@ -323,32 +383,90 @@ class EnhancedContentExtractor:
         """
         doc = None
         try:
-            doc = fitz.open(file_path)
+            # 增强的PDF文档打开处理 - 简化版
+            retry_count = 0
+            max_retries = 2
+            
+            while retry_count < max_retries:
+                try:
+                    doc = fitz.open(file_path)
+                    if not doc:
+                        raise Exception("fitz.open返回None")
+                    
+                    # 验证页数
+                    page_count = doc.page_count
+                    if page_count is None or page_count == 0:
+                        raise Exception("PDF文档无页面或无法获取页数")
+                    
+                    logger.info(f"简单OCR模式: PDF文件打开成功，页数: {page_count}")
+                    break
+                    
+                except Exception as open_error:
+                    retry_count += 1
+                    if doc:
+                        try:
+                            doc.close()
+                        except:
+                            pass
+                        doc = None
+                    
+                    logger.warning(f"简单OCR第{retry_count}次打开PDF失败: {str(open_error)}")
+                    
+                    if retry_count < max_retries:
+                        import time
+                        time.sleep(0.3)
+                    else:
+                        return None, f"简单OCR无法打开PDF文件: {str(open_error)}"
+            
             if not doc:
                 return None, f"无法打开PDF文件: {file_path}"
             
             extracted_text = []
             
             # 动态调整页面处理限制（简单OCR模式 - 更保守的策略）
-            if doc.page_count <= 15:
-                max_pages = doc.page_count  # 小文档完全处理
-            elif doc.page_count <= 30:
-                max_pages = min(20, doc.page_count)  # 中等文档
+            if page_count <= 15:
+                max_pages = page_count  # 小文档完全处理
+            elif page_count <= 30:
+                max_pages = min(20, page_count)  # 中等文档
             else:
                 max_pages = 25  # 大文档保守处理
-                logger.info(f"大型PDF文档({doc.page_count}页)，简单模式处理前{max_pages}页")
+                logger.info(f"大型PDF文档({page_count}页)，简单模式处理前{max_pages}页")
             
             for page_num in range(max_pages):
                 logger.info(f"OCR处理PDF第{page_num+1}页")
                 
-                page = doc[page_num]
-                
-                # 使用固定的适中缩放
-                pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
-                img_data = pix.tobytes('png')
-                
-                # 直接进行OCR，不做任何预处理
-                pil_image = Image.open(io.BytesIO(img_data))
+                try:
+                    # 安全地访问页面
+                    if page_num >= page_count:
+                        logger.warning(f"简单OCR: 页面索引{page_num+1}超出文档页数{page_count}，跳过")
+                        break
+                    
+                    page = doc[page_num]
+                    if not page:
+                        logger.warning(f"简单OCR: 无法获取第{page_num+1}页，跳过")
+                        extracted_text.append(f"[第{page_num+1}页]\n(页面获取失败)\n")
+                        continue
+                    
+                    # 使用固定的适中缩放
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+                    if not pix:
+                        logger.warning(f"简单OCR: 无法生成第{page_num+1}页的图像，跳过")
+                        extracted_text.append(f"[第{page_num+1}页]\n(图像生成失败)\n")
+                        continue
+                    
+                    img_data = pix.tobytes('png')
+                    if not img_data:
+                        logger.warning(f"简单OCR: 第{page_num+1}页图像数据为空，跳过")
+                        extracted_text.append(f"[第{page_num+1}页]\n(图像数据为空)\n")
+                        continue
+                    
+                    # 直接进行OCR，不做任何预处理
+                    pil_image = Image.open(io.BytesIO(img_data))
+                    
+                except Exception as page_error:
+                    logger.error(f"简单OCR处理第{page_num+1}页时发生错误: {str(page_error)}")
+                    extracted_text.append(f"[第{page_num+1}页]\n(页面处理错误: {str(page_error)[:100]})\n")
+                    continue
                 
                 try:
                     # 使用优化的中文OCR配置
@@ -375,7 +493,7 @@ class EnhancedContentExtractor:
                 # 添加详细的处理统计日志
                 total_chars = len(full_text)
                 pages_processed = len(extracted_text)
-                logger.info(f"✅ 简单OCR处理完成 - 处理页数: {pages_processed}/{doc.page_count}, 提取字符: {total_chars}个")
+                logger.info(f"✅ 简单OCR处理完成 - 处理页数: {pages_processed}/{page_count}, 提取字符: {total_chars}个")
                 
                 # 中文识别质量评估
                 chinese_chars = len([c for c in full_text if '\u4e00' <= c <= '\u9fff'])
@@ -389,7 +507,7 @@ class EnhancedContentExtractor:
                 
                 return full_text, None
             else:
-                logger.warning(f"⚠️ 简单OCR未提取到文本 - 处理了{max_pages}/{doc.page_count}页")
+                logger.warning(f"⚠️ 简单OCR未提取到文本 - 处理了{max_pages}/{page_count}页")
                 return None, "简单OCR未提取到任何文本"
                 
         except Exception as e:
@@ -477,36 +595,98 @@ class EnhancedContentExtractor:
             
             logger.info(f"尝试打开PDF文件: {file_path} (大小: {file_size} bytes)")
             
-            doc = fitz.open(file_path)
+            # 增强的PDF文档打开处理
+            doc = None
+            retry_count = 0
+            max_retries = 3
+            
+            while retry_count < max_retries:
+                try:
+                    doc = fitz.open(file_path)
+                    
+                    # 验证文档是否有效
+                    if not doc:
+                        raise Exception("fitz.open返回None")
+                    
+                    # 验证页数是否可访问
+                    page_count = doc.page_count
+                    if page_count is None:
+                        raise Exception("无法获取页数")
+                    
+                    if page_count == 0:
+                        raise Exception("PDF文档无页面")
+                    
+                    logger.info(f"PDF文件打开成功，页数: {page_count}")
+                    break
+                    
+                except Exception as open_error:
+                    retry_count += 1
+                    if doc:
+                        try:
+                            doc.close()
+                        except:
+                            pass
+                        doc = None
+                    
+                    logger.warning(f"第{retry_count}次打开PDF失败: {str(open_error)}")
+                    
+                    if retry_count < max_retries:
+                        import time
+                        time.sleep(0.5)  # 短暂等待后重试
+                    else:
+                        return None, f"PyMuPDF多次尝试后仍无法打开PDF文件: {str(open_error)}"
+            
             if not doc:
                 return None, f"PyMuPDF无法打开PDF文件: {file_path}"
-            
-            logger.info(f"PDF文件打开成功，页数: {doc.page_count}")
             
             extracted_text = []
             
             # 智能页面处理策略（完整OCR模式 - 更积极的处理）
-            if doc.page_count <= 20:
-                max_pages = doc.page_count  # 小文档完全处理
-            elif doc.page_count <= 50:
-                max_pages = min(40, doc.page_count)  # 中等文档处理更多页面
+            if page_count <= 20:
+                max_pages = page_count  # 小文档完全处理
+            elif page_count <= 50:
+                max_pages = min(40, page_count)  # 中等文档处理更多页面
             else:
                 max_pages = 60  # 大文档允许处理更多页面
-                logger.info(f"大型PDF文档({doc.page_count}页)，完整模式处理前{max_pages}页")
+                logger.info(f"大型PDF文档({page_count}页)，完整模式处理前{max_pages}页")
             
-            logger.info(f"开始OCR处理，共{max_pages}页（总{doc.page_count}页），使用图像预处理")
+            logger.info(f"开始OCR处理，共{max_pages}页（总{page_count}页），使用图像预处理")
             
             for page_num in range(max_pages):
                 logger.info(f"OCR处理PDF第{page_num+1}页")
                 
-                page = doc[page_num]
-                
-                # 使用固定的适中缩放提高OCR效果
-                pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))  # 固定2x缩放
-                img_data = pix.tobytes('png')
-                
-                # 直接使用原始图像进行OCR
-                pil_image = Image.open(io.BytesIO(img_data))
+                try:
+                    # 安全地访问页面
+                    if page_num >= page_count:
+                        logger.warning(f"页面索引{page_num+1}超出文档页数{page_count}，跳过")
+                        break
+                    
+                    page = doc[page_num]
+                    if not page:
+                        logger.warning(f"无法获取第{page_num+1}页，跳过")
+                        extracted_text.append(f"[第{page_num+1}页]\n(页面获取失败)\n")
+                        continue
+                    
+                    # 使用固定的适中缩放提高OCR效果
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))  # 固定2x缩放
+                    if not pix:
+                        logger.warning(f"无法生成第{page_num+1}页的图像，跳过")
+                        extracted_text.append(f"[第{page_num+1}页]\n(图像生成失败)\n")
+                        continue
+                    
+                    img_data = pix.tobytes('png')
+                    if not img_data:
+                        logger.warning(f"第{page_num+1}页图像数据为空，跳过")
+                        extracted_text.append(f"[第{page_num+1}页]\n(图像数据为空)\n")
+                        continue
+                    
+                    # 直接使用原始图像进行OCR
+                    pil_image = Image.open(io.BytesIO(img_data))
+                    
+                except Exception as page_error:
+                    logger.error(f"处理第{page_num+1}页时发生错误: {str(page_error)}")
+                    extracted_text.append(f"[第{page_num+1}页]\n(页面处理错误: {str(page_error)[:100]})\n")
+                    continue
                 
                 # 进行OCR - 使用简单有效的配置
                 try:
@@ -548,7 +728,7 @@ class EnhancedContentExtractor:
                 pages_processed = len(extracted_text)
                 successful_pages = len([page for page in extracted_text if "OCR处理失败" not in page and "OCR未识别到文本" not in page])
                 
-                logger.info(f"✅ 完整OCR处理完成 - 总页数: {doc.page_count}, 处理: {pages_processed}, 成功: {successful_pages}")
+                logger.info(f"✅ 完整OCR处理完成 - 总页数: {page_count}, 处理: {pages_processed}, 成功: {successful_pages}")
                 logger.info(f"   提取字符总数: {total_chars}个, 平均每页: {total_chars//max(1,successful_pages)}个字符")
                 
                 # 中文识别质量详细分析
@@ -570,7 +750,7 @@ class EnhancedContentExtractor:
                 
                 return full_text, None
             else:
-                logger.warning(f"⚠️ 完整OCR未提取到文本 - 处理了{max_pages}/{doc.page_count}页")
+                logger.warning(f"⚠️ 完整OCR未提取到文本 - 处理了{max_pages}/{page_count}页")
                 return None, "完整OCR未提取到任何文本"
                 
         except Exception as e:
@@ -1447,3 +1627,121 @@ class EnhancedContentExtractor:
             logger.debug(f"乱码样本: {clean_text[:200]}...")
         
         return is_garbled
+    
+    def set_progress_callback(self, callback_func):
+        """
+        设置处理进度回调函数
+        
+        Args:
+            callback_func: 回调函数，接受参数 (stage, progress, file_path)
+                - stage: str, 当前处理阶段描述
+                - progress: int, 进度百分比 (0-100)
+                - file_path: str, 正在处理的文件路径
+        """
+        self.progress_callback = callback_func
+    
+    def clear_pdf_scan_cache(self):
+        """清理PDF扫描检测缓存"""
+        self._pdf_scan_cache.clear()
+        logger.info("PDF扫描检测缓存已清理")
+    
+    def _is_scanned_pdf(self, file_path: str) -> bool:
+        """
+        检测PDF是否为扫描文件
+        
+        Args:
+            file_path: PDF文件路径
+            
+        Returns:
+            bool: True如果是扫描PDF，False如果是文本PDF
+        """
+        try:
+            import fitz  # PyMuPDF
+            
+            # 首先尝试安全地打开PDF
+            doc = None
+            try:
+                # 检查文件是否存在且非空
+                if not os.path.exists(file_path):
+                    logger.warning(f"PDF文件不存在，假设为扫描文件: {file_path}")
+                    return True
+                
+                file_size = os.path.getsize(file_path)
+                if file_size == 0:
+                    logger.warning(f"PDF文件为空，假设为扫描文件: {file_path}")
+                    return True
+                
+                # 尝试打开PDF文档
+                doc = fitz.open(file_path)
+                if not doc or doc.page_count == 0:
+                    logger.warning(f"PDF文档无法打开或无页面，假设为扫描文件: {file_path}")
+                    return True
+                
+                # 检查前几页的文本密度来判断是否为扫描PDF
+                pages_to_check = min(3, doc.page_count)  # 检查前3页
+                total_text_length = 0
+                total_image_count = 0
+                valid_pages = 0
+                
+                logger.info(f"检查PDF类型: {file_path} (检查前{pages_to_check}页)")
+                
+                for page_num in range(pages_to_check):
+                    try:
+                        page = doc[page_num]
+                        
+                        # 提取页面文本
+                        text = page.get_text()
+                        if text:
+                            # 清理文本，移除空白字符
+                            clean_text = text.strip()
+                            total_text_length += len(clean_text)
+                        
+                        # 检查图像数量
+                        image_list = page.get_images()
+                        total_image_count += len(image_list)
+                        
+                        valid_pages += 1
+                        
+                    except Exception as page_error:
+                        logger.debug(f"检查第{page_num+1}页时出错: {page_error}")
+                        continue
+                
+                if valid_pages == 0:
+                    logger.warning(f"无法检查任何页面，假设为扫描文件: {file_path}")
+                    return True
+                
+                # 计算平均文本密度
+                avg_text_per_page = total_text_length / valid_pages
+                avg_images_per_page = total_image_count / valid_pages
+                
+                # 判断标准
+                is_scanned = (
+                    avg_text_per_page < 50 or  # 平均每页文本少于50字符
+                    (avg_images_per_page >= 1 and avg_text_per_page < 200)  # 有图像且文本很少
+                )
+                
+                logger.info(f"PDF类型检测结果: {file_path}")
+                logger.info(f"  平均每页文本: {avg_text_per_page:.1f}字符")
+                logger.info(f"  平均每页图像: {avg_images_per_page:.1f}个")
+                logger.info(f"  检测类型: {'扫描PDF' if is_scanned else '文本PDF'}")
+                
+                return is_scanned
+                
+            except Exception as e:
+                logger.warning(f"PDF类型检测失败: {str(e)}, 假设为扫描文件: {file_path}")
+                return True
+                
+            finally:
+                # 确保文档被正确关闭
+                if doc:
+                    try:
+                        doc.close()
+                    except:
+                        pass
+                        
+        except ImportError:
+            logger.warning("PyMuPDF不可用，无法检测PDF类型，假设为扫描文件")
+            return True
+        except Exception as e:
+            logger.error(f"PDF类型检测异常: {str(e)}, 假设为扫描文件")
+            return True
