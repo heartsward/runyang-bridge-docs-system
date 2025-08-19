@@ -34,13 +34,13 @@ export const taskService = {
   // 重新提取文档内容
   async retryDocumentExtraction(documentId: number) {
     const response = await apiService.post(`/tasks/document/${documentId}/retry-extraction`)
-    return response.data
+    return (response as any).data
   },
 
   // 获取任务状态
   async getTaskStatus(taskId: string): Promise<TaskStatus> {
     const response = await apiService.get(`/tasks/status/${taskId}`)
-    return response.data
+    return (response as any).data
   }
 }
 

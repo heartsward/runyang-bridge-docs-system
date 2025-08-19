@@ -41,7 +41,7 @@
           <n-button quaternary circle @click="toggleTheme">
             <template #icon>
               <n-icon>
-                <component :is="isDark ? SunOutlined : MoonOutlined" />
+                <component :is="isDark ? SunOutlined : BulbOutlined" />
               </n-icon>
             </template>
           </n-button>
@@ -134,7 +134,7 @@ import {
   SearchOutlined,
   UserOutlined,
   SunOutlined,
-  MoonOutlined,
+  BulbOutlined,
   FileTextOutlined,
   DesktopOutlined,
   BarChartOutlined,

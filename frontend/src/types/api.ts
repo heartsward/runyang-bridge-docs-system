@@ -93,9 +93,10 @@ export interface Category {
   parent_id?: number
   sort_order: number
   is_active: boolean
-  creator_id: number
+  creator_id?: number
   created_at: string
   updated_at?: string
+  document_count?: number
 }
 
 export interface CategoryCreate {
@@ -106,6 +107,12 @@ export interface CategoryCreate {
   parent_id?: number
   sort_order?: number
   is_active?: boolean
+}
+
+export interface CategoryStatistics {
+  categories: Category[]
+  uncategorized_count: number
+  total_categories: number
 }
 
 export interface SearchQuery {

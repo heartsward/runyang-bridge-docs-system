@@ -51,7 +51,7 @@ export class SettingsService {
     try {
       const response = await apiService.get('/settings/')
       console.log('设置API原始响应:', response)
-      return response
+      return response as UserSettings
     } catch (error) {
       console.error('设置API调用失败:', error)
       throw error
@@ -65,7 +65,7 @@ export class SettingsService {
     try {
       const response = await apiService.put('/settings/', settings)
       console.log('更新设置API响应:', response)
-      return response
+      return response as UserSettings
     } catch (error) {
       console.error('更新设置API调用失败:', error)
       throw error
@@ -79,12 +79,12 @@ export class SettingsService {
     try {
       // 首先尝试原始API
       const response = await apiService.get('/settings/users')
-      return response
+      return response as User[]
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API
-      const response = await apiService.getUnified('/direct-users')
-      return response
+      const response = await apiService.get('/direct-users')
+      return response as User[]
     }
   }
 
@@ -95,7 +95,7 @@ export class SettingsService {
     try {
       // 首先尝试原始API
       const response = await apiService.post('/settings/users', userData)
-      return response
+      return response as UserSettings
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API
@@ -131,7 +131,7 @@ export class SettingsService {
     try {
       // 首先尝试原始API
       const response = await apiService.delete(`/settings/users/${userId}`)
-      return response
+      return response as UserSettings
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API

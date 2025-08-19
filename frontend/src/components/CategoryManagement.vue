@@ -69,8 +69,8 @@
                   <n-text depth="3" v-if="category.description">
                     {{ category.description }}
                   </n-text>
-                  <n-tag size="small" :type="category.document_count > 0 ? 'info' : 'default'">
-                    {{ category.document_count || 0 }} 个文档
+                  <n-tag size="small" :type="(category.document_count ?? 0) > 0 ? 'info' : 'default'">
+                    {{ category.document_count ?? 0 }} 个文档
                   </n-tag>
                 </n-space>
               </div>
@@ -86,7 +86,7 @@
                   size="small" 
                   type="error" 
                   @click="confirmDeleteCategory(category)"
-                  :disabled="category.document_count > 0"
+                  :disabled="(category.document_count ?? 0) > 0"
                 >
                   <template #icon>
                     <n-icon :component="TrashOutline" />
@@ -141,7 +141,7 @@
             placeholder="选择图标（可选）"
             clearable
           >
-            <template #render-label="{ option }">
+            <template #render-option="{ option }">
               <n-space align="center">
                 <n-icon :component="getIconComponent(option.value)" />
                 <span>{{ option.label }}</span>
@@ -209,26 +209,7 @@ import {
   DocumentTextOutline
 } from '@vicons/ionicons5'
 import { apiService } from '@/services/api'
-
-interface Category {
-  id: number
-  name: string
-  description?: string
-  color?: string
-  icon?: string
-  sort_order: number
-  is_active: boolean
-  creator_id?: number
-  created_at: string
-  updated_at?: string
-  document_count?: number
-}
-
-interface CategoryStatistics {
-  categories: any[]
-  uncategorized_count: number
-  total_categories: number
-}
+import type { Category, CategoryStatistics } from '@/types/api'
 
 const emit = defineEmits(['close', 'updated'])
 const message = useMessage()
@@ -311,8 +292,8 @@ const loadCategories = async () => {
     console.log('CategoryManagement 分类响应:', categoriesResponse)
     console.log('CategoryManagement 统计响应:', statsResponse)
     
-    categories.value = categoriesResponse || []
-    statistics.value = statsResponse || { categories: [], uncategorized_count: 0, total_categories: 0 }
+    categories.value = (categoriesResponse as Category[]) || []
+    statistics.value = (statsResponse as CategoryStatistics) || { categories: [], uncategorized_count: 0, total_categories: 0 }
   } catch (error) {
     console.error('加载分类失败:', error)
     message.error('加载分类失败')
@@ -404,7 +385,7 @@ const deleteCategory = async (category: Category) => {
 const initDefaultCategories = async () => {
   initLoading.value = true
   try {
-    const response = await apiService.post('/categories/init-default')
+    const response = await apiService.post('/categories/init-default') as any
     message.success(response.message)
     await loadCategories()
     emit('updated')
