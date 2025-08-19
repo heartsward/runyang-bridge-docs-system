@@ -69,7 +69,8 @@
       "Bash(java:*)",
       "Bash(\"C:\\Users\\cccly\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest\\bin\\sdkmanager.bat\" \"platforms;android-34\")",
       "Bash(where:*)",
-      "Bash(test-install.bat)"
+      "Bash(test-install.bat)",
+      "Bash(git rm:*)"
     ],
     "deny": []
   }
