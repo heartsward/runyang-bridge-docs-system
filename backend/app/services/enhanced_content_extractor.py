@@ -285,6 +285,9 @@ class EnhancedContentExtractor:
         doc = None
         try:
             doc = fitz.open(file_path)
+            if not doc:
+                return None, f"无法打开PDF文件: {file_path}"
+            
             extracted_text = []
             
             # 动态调整页面处理限制（简单OCR模式 - 更保守的策略）
@@ -403,8 +406,14 @@ class EnhancedContentExtractor:
         try:
             # 优先使用PyMuPDF，因为它不需要poppler
             if HAS_PYMUPDF:
-                return self._ocr_pdf_with_pymupdf(file_path)
-            elif HAS_PDF2IMAGE:
+                content, error = self._ocr_pdf_with_pymupdf(file_path)
+                if content:
+                    return content, error
+                else:
+                    logger.warning(f"PyMuPDF OCR失败: {error}, 尝试pdf2image备用方案")
+                    
+            # 如果PyMuPDF失败，尝试pdf2image
+            if HAS_PDF2IMAGE:
                 return self._ocr_pdf_with_pdf2image(file_path)
             else:
                 return None, "没有可用的PDF处理工具"
@@ -417,7 +426,24 @@ class EnhancedContentExtractor:
         doc = None
         try:
             import io
+            
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                return None, f"PDF文件不存在: {file_path}"
+            
+            # 检查文件大小
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                return None, f"PDF文件为空: {file_path}"
+            
+            logger.info(f"尝试打开PDF文件: {file_path} (大小: {file_size} bytes)")
+            
             doc = fitz.open(file_path)
+            if not doc:
+                return None, f"PyMuPDF无法打开PDF文件: {file_path}"
+            
+            logger.info(f"PDF文件打开成功，页数: {doc.page_count}")
+            
             extracted_text = []
             
             # 智能页面处理策略（完整OCR模式 - 更积极的处理）
