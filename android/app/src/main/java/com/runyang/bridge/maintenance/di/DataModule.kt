@@ -1,6 +1,5 @@
 package com.runyang.bridge.maintenance.di
 
-import com.runyang.bridge.maintenance.data.local.datastore.SettingsDataStore
 import com.runyang.bridge.maintenance.data.local.datastore.TokenDataStore
 import com.runyang.bridge.maintenance.data.repository.AssetRepositoryImpl
 import com.runyang.bridge.maintenance.data.repository.AuthRepositoryImpl

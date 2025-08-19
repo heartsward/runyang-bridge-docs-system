@@ -3,8 +3,16 @@
 运维文档管理系统 - 数据库集成版后端服务器
 使用 yunwei_docs_clean.db 数据库进行数据持久化
 """
+
+# 设置UTF-8编码环境（在导入其他模块之前）
 import os
 import sys
+
+# 确保UTF-8编码
+if sys.platform.startswith('win'):
+    # Windows环境强制UTF-8
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    os.environ['PYTHONUTF8'] = '1'
 import uuid
 import json
 import time

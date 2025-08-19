@@ -1,20 +1,20 @@
 package com.runyang.bridge.maintenance
 
 import android.app.Application
-import androidx.hilt.work.HiltWorkerFactory
+// import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
-import dagger.hilt.android.HiltAndroidApp
-import javax.inject.Inject
+// import dagger.hilt.android.HiltAndroidApp
+// import javax.inject.Inject
 
 /**
  * 主应用程序类
  * 配置Hilt依赖注入和WorkManager
  */
-@HiltAndroidApp
+// @HiltAndroidApp
 class MainApplication : Application(), Configuration.Provider {
 
-    @Inject
-    lateinit var workerFactory: HiltWorkerFactory
+    // @Inject
+    // lateinit var workerFactory: HiltWorkerFactory
 
     override fun onCreate() {
         super.onCreate()
@@ -56,7 +56,7 @@ class MainApplication : Application(), Configuration.Provider {
 
     override fun getWorkManagerConfiguration(): Configuration =
         Configuration.Builder()
-            .setWorkerFactory(workerFactory)
+            // .setWorkerFactory(workerFactory)
             .setMinimumLoggingLevel(
                 if (BuildConfig.DEBUG_MODE) {
                     android.util.Log.DEBUG

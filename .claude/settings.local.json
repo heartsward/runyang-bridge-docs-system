@@ -57,7 +57,18 @@
       "Bash(PYTHONPATH=C:Usersccclyyunweiruanjianbackend python backend/manual_encoding_fix.py)",
       "Bash(PYTHONPATH=C:Usersccclyyunweiruanjianbackend python backend/test_enhanced_extractor.py)",
       "Bash(.gradlew.bat clean:*)",
-      "Bash(gradlew.bat clean:*)"
+      "Bash(gradlew.bat clean:*)",
+      "Bash(diagnose-issues.bat)",
+      "Bash(gradlew.bat build:*)",
+      "Bash(./gradlew:*)",
+      "Bash(claude mcp:*)",
+      "Bash(npx @upstash/context7-mcp:*)",
+      "Bash(context7-mcp)",
+      "Bash(where context7-mcp)",
+      "Bash(claude /doctor)",
+      "Bash(java:*)",
+      "Bash(\"C:\\Users\\cccly\\AppData\\Local\\Android\\Sdk\\cmdline-tools\\latest\\bin\\sdkmanager.bat\" \"platforms;android-34\")",
+      "Bash(where:*)"
     ],
     "deny": []
   }

@@ -165,4 +165,32 @@ class TokenDataStore @Inject constructor(
             true // 发生错误时认为已过期
         }
     }
+
+    /**
+     * 保存令牌 (简化版本)
+     */
+    suspend fun saveToken(token: String) {
+        updateAccessToken(token)
+    }
+
+    /**
+     * 获取令牌
+     */
+    fun getToken(): Flow<String?> {
+        return accessToken
+    }
+
+    /**
+     * 检查是否已登录
+     */
+    fun isLoggedIn(): Flow<Boolean> {
+        return accessToken.map { !it.isNullOrEmpty() }
+    }
+
+    /**
+     * 清除令牌 (简化版本)
+     */
+    suspend fun clearToken() {
+        clearTokens()
+    }
 }

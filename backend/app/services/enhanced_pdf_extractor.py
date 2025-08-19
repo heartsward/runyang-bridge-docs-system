@@ -78,7 +78,9 @@ class EnhancedPDFExtractor:
                         text = page.extract_text()
                         
                         if text and text.strip():
-                            text_content.append(f"[页面 {page_num + 1}]\n{text.strip()}\n")
+                            # 增强编码处理
+                            cleaned_text = self._fix_text_encoding(text.strip())
+                            text_content.append(f"[页面 {page_num + 1}]\n{cleaned_text}\n")
                         else:
                             text_content.append(f"[页面 {page_num + 1}]\n(无文本内容)\n")
                             
@@ -91,6 +93,8 @@ class EnhancedPDFExtractor:
             
             if text_content:
                 full_content = "\n".join(text_content)
+                # 最终编码检查和清理
+                full_content = self._final_text_cleanup(full_content)
                 return full_content, None
             else:
                 return None, "PDF文档中没有找到可提取的文本内容"
@@ -113,7 +117,9 @@ class EnhancedPDFExtractor:
                         text = page.extract_text()
                         
                         if text and text.strip():
-                            text_content.append(f"[页面 {page_num + 1}]\n{text.strip()}\n")
+                            # 增强编码处理
+                            cleaned_text = self._fix_text_encoding(text.strip())
+                            text_content.append(f"[页面 {page_num + 1}]\n{cleaned_text}\n")
                         else:
                             text_content.append(f"[页面 {page_num + 1}]\n(无文本内容)\n")
                             
@@ -126,6 +132,8 @@ class EnhancedPDFExtractor:
             
             if text_content:
                 full_content = "\n".join(text_content)
+                # 最终编码检查和清理
+                full_content = self._final_text_cleanup(full_content)
                 return full_content, None
             else:
                 return None, "PDF文档中没有找到可提取的文本内容"
@@ -133,6 +141,145 @@ class EnhancedPDFExtractor:
         except Exception as e:
             return None, f"PyPDF2提取失败: {str(e)}"
     
+    def _fix_text_encoding(self, text: str) -> str:
+        """修复文本编码问题"""
+        if not text:
+            return text
+        
+        try:
+            # 方法1: 如果文本已经是正确的UTF-8，直接返回
+            text.encode('utf-8').decode('utf-8')
+            
+            # 检查是否包含常见的编码错误模式
+            if self._has_encoding_issues(text):
+                # 尝试修复常见的编码问题
+                fixed_text = self._fix_common_encoding_issues(text)
+                if fixed_text != text:
+                    logger.info("修复了文本编码问题")
+                    return fixed_text
+            
+            return text
+            
+        except UnicodeError:
+            # 如果UTF-8编码失败，尝试其他编码方式
+            logger.warning("检测到UTF-8编码问题，尝试修复")
+            return self._handle_encoding_error(text)
+    
+    def _has_encoding_issues(self, text: str) -> bool:
+        """检查文本是否有编码问题"""
+        # 检查常见的编码问题特征
+        encoding_issues = [
+            '�',  # 替换字符
+            '\ufffd',  # Unicode替换字符
+            '\x00',  # 空字符
+        ]
+        
+        # 检查是否有大量连续的问号或特殊字符
+        if '???' in text or '���' in text:
+            return True
+        
+        # 检查是否有编码问题特征
+        for issue in encoding_issues:
+            if issue in text:
+                return True
+        
+        # 检查中文字符是否显示异常
+        if self._has_garbled_chinese(text):
+            return True
+        
+        return False
+    
+    def _has_garbled_chinese(self, text: str) -> bool:
+        """检查是否有乱码的中文字符"""
+        import re
+        
+        # 检查是否有明显的中文乱码模式
+        garbled_patterns = [
+            r'[\\u00-\\u07][0-9a-fA-F]{4}',  # 类似 \u0000 的模式
+            r'[^\x00-\x7F\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]{3,}',  # 连续非中英文字符
+        ]
+        
+        for pattern in garbled_patterns:
+            if re.search(pattern, text):
+                return True
+        
+        return False
+    
+    def _fix_common_encoding_issues(self, text: str) -> str:
+        """修复常见的编码问题"""
+        # 移除或替换问题字符
+        text = text.replace('�', '')
+        text = text.replace('\ufffd', '')
+        text = text.replace('\x00', '')
+        
+        # 修复常见的Windows编码问题
+        encoding_fixes = {
+            'â€™': "'",  # 撇号
+            'â€œ': '"',  # 左双引号
+            'â€': '"',   # 右双引号
+            'â€"': '—',  # 长破折号
+            'â€¢': '•',  # 项目符号
+        }
+        
+        for bad, good in encoding_fixes.items():
+            text = text.replace(bad, good)
+        
+        return text
+    
+    def _handle_encoding_error(self, text: str) -> str:
+        """处理编码错误"""
+        try:
+            # 尝试不同的编码解码方式
+            if isinstance(text, str):
+                # 如果已经是字符串，尝试重新编码处理
+                byte_text = text.encode('latin1', errors='ignore')
+                
+                # 尝试常见编码
+                for encoding in ['utf-8', 'gbk', 'gb2312', 'cp1252']:
+                    try:
+                        decoded_text = byte_text.decode(encoding, errors='ignore')
+                        if decoded_text and not self._has_encoding_issues(decoded_text):
+                            logger.info(f"使用{encoding}编码修复成功")
+                            return decoded_text
+                    except:
+                        continue
+            
+            # 如果所有方法都失败，返回清理后的文本
+            return text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+            
+        except Exception as e:
+            logger.error(f"编码修复失败: {e}")
+            return text
+    
+    def _final_text_cleanup(self, text: str) -> str:
+        """最终文本清理和格式化"""
+        if not text:
+            return text
+        
+        import re
+        
+        # 清理控制字符（保留常用的换行符、制表符等）
+        text = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]', '', text)
+        
+        # 规范化空白字符
+        text = re.sub(r'\r\n', '\n', text)  # Windows换行符转Unix
+        text = re.sub(r'\r', '\n', text)    # Mac换行符转Unix
+        text = re.sub(r'[ \t]+', ' ', text)  # 多个空格或制表符合并为单个空格
+        text = re.sub(r'\n{3,}', '\n\n', text)  # 多个换行符合并为最多两个
+        
+        # 清理行首行尾空白
+        lines = text.split('\n')
+        cleaned_lines = [line.strip() for line in lines]
+        text = '\n'.join(cleaned_lines)
+        
+        # 确保UTF-8编码正确性
+        try:
+            text = text.encode('utf-8', errors='ignore').decode('utf-8')
+        except:
+            pass
+        
+        return text.strip()
+
     def is_pdf_file(self, file_path: str) -> bool:
         """检查是否为PDF文件"""
         return Path(file_path).suffix.lower() == '.pdf'

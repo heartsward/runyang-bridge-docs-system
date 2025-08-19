@@ -35,6 +35,8 @@ import com.runyang.bridge.maintenance.ui.theme.RunYangBridgeMaintenanceTheme
 @Composable
 fun HomeScreen(
     onLogout: () -> Unit,
+    onNavigateToDocuments: () -> Unit = {},
+    onNavigateToAssets: () -> Unit = {},
     authViewModel: AuthViewModel = hiltViewModel()
 ) {
     val authState by authViewModel.authState.collectAsState()
@@ -44,10 +46,10 @@ fun HomeScreen(
         listOf(
             FunctionModule("文档管理", Icons.Filled.Description, Color(0xFF2196F3), "管理运维文档"),
             FunctionModule("设备资产", Icons.Filled.Hardware, Color(0xFF4CAF50), "查看设备信息"),
-            FunctionModule("语音查询", Icons.Filled.Mic, Color(0xFFFF9800), "语音智能搜索"),
             FunctionModule("系统监控", Icons.Filled.Monitor, Color(0xFF9C27B0), "实时状态监控"),
             FunctionModule("报告生成", Icons.Filled.Assessment, Color(0xFFE91E63), "生成运维报告"),
-            FunctionModule("用户管理", Icons.Filled.People, Color(0xFF607D8B), "管理用户权限")
+            FunctionModule("用户管理", Icons.Filled.People, Color(0xFF607D8B), "管理用户权限"),
+            FunctionModule("系统设置", Icons.Filled.Settings, Color(0xFF795548), "系统配置管理")
         )
     }
 
@@ -159,7 +161,15 @@ fun HomeScreen(
                         FunctionModuleCard(
                             module = module,
                             modifier = Modifier.weight(1f),
-                            onClick = { /* TODO: 导航到对应功能 */ }
+                            onClick = {
+                                when (module.name) {
+                                    "文档管理" -> onNavigateToDocuments()
+                                    "设备资产" -> onNavigateToAssets()
+                                    else -> {
+                                        // TODO: 实现其他功能模块的导航
+                                    }
+                                }
+                            }
                         )
                     }
                     // 如果行中只有一个模块，添加占位符

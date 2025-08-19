@@ -62,91 +62,73 @@
 
 ## 🚀 快速部署
 
-### 方式一：一键启动脚本 (推荐)
+### 方式一：一键部署 (推荐)
 
 #### Windows
 ```bash
 # 1. 克隆项目
-git clone https://github.com/[your-username]/runyang-bridge-docs-system.git
+git clone https://github.com/heartsward/runyang-bridge-docs-system.git
 cd runyang-bridge-docs-system
 
-# 2. 复制环境配置
-copy backend\.env.example backend\.env
-copy frontend\.env.example frontend\.env
+# 2. 安装环境依赖
+install-environment.bat
 
-# 3. 运行一键启动脚本
-start-production.bat
+# 3. 启动服务
+start-services.bat
 ```
 
 #### Linux/macOS
 ```bash
 # 1. 克隆项目
-git clone https://github.com/[your-username]/runyang-bridge-docs-system.git
+git clone https://github.com/heartsward/runyang-bridge-docs-system.git
 cd runyang-bridge-docs-system
 
-# 2. 复制环境配置
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
+# 2. 安装环境依赖
+./install-environment.sh
 
-# 3. 给脚本执行权限并启动
-chmod +x start-production.sh
-./start-production.sh
+# 3. 启动服务
+./start-services.sh
 ```
 
 ### 方式二：手动部署
 
-#### 1. 环境准备
+如果需要自定义配置，可以手动部署：
 
-**安装LibreOffice (必需)**:
+#### 1. 环境准备
 ```bash
-# Windows: 访问 https://www.libreoffice.org/download/download/
+# 1. 安装Python依赖
+cd backend
+pip install -r requirements.txt
+
+# 2. 安装Node.js依赖  
+cd ../frontend
+npm install
+
+# 3. 安装LibreOffice (用于文档内容提取)
+# Windows: https://www.libreoffice.org/download/download/
 # Ubuntu/Debian: sudo apt install libreoffice
 # CentOS/RHEL: sudo yum install libreoffice
 # macOS: brew install --cask libreoffice
 ```
 
-**克隆项目**:
+#### 2. 手动启动服务
 ```bash
-# 克隆项目到本地
-git clone https://github.com/[your-username]/runyang-bridge-docs-system.git
-cd runyang-bridge-docs-system
-```
-
-**安装项目依赖**:
-```bash
-# 安装 Python 依赖
-cd backend
-pip install -r requirements.txt
-
-# 安装 Node.js 依赖
-cd ../frontend
-npm install
-```
-
-#### 2. 配置环境
-```bash
-# 复制环境配置模板
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-
-# 编辑配置文件，修改必要参数（如SECRET_KEY、数据库连接等）
-```
-
-#### 3. 构建前端
-```bash
-cd frontend
-npm run build
-```
-
-#### 4. 启动服务
-```bash
-# 启动后端服务
-cd backend
+# 启动后端服务 (端口8002)
+cd backend  
 python database_integrated_server.py
 
-# 在新终端启动前端 (开发模式)
+# 启动前端服务 (端口5173) - 在新终端中运行
 cd frontend
 npm run dev
+```
+
+#### 3. 停止服务
+```bash
+# Windows
+stop-services.bat
+
+# Linux/macOS  
+./stop-services.sh
 ```
 
 ## 👤 默认用户

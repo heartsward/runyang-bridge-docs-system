@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 允许本地调试 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">192.168.1.100</domain>
+        <!-- 调试用的本地IP地址 -->
+        <domain includeSubdomains="true">192.168.</domain>
+    </domain-config>
+    
+    <!-- 生产环境的域名配置 -->
+    <domain-config>
+        <domain includeSubdomains="true">runyang-bridge.com</domain>
+        <domain includeSubdomains="true">api.runyang-bridge.com</domain>
+        <domain includeSubdomains="true">staging-api.runyang-bridge.com</domain>
+    </domain-config>
+    
+    <!-- 基础配置 -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- 信任系统证书 -->
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

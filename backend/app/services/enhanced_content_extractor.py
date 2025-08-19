@@ -192,8 +192,21 @@ class EnhancedContentExtractor:
             
             content_too_short = actual_content_length < 50
             
-            if (content_too_short or content_is_placeholder) and self.has_ocr:
-                logger.info(f"尝试OCR提取: {file_path} (原因: {'内容为占位符' if content_is_placeholder else '内容太短或为空'})")
+            # 检查是否是乱码内容
+            content_is_garbled = content and self._is_garbled_text(content)
+            if content_is_garbled:
+                logger.info(f"检测到乱码内容，将使用OCR处理: {file_path}")
+            
+            if (content_too_short or content_is_placeholder or content_is_garbled) and self.has_ocr:
+                reason = "未知原因"
+                if content_is_garbled:
+                    reason = "检测到乱码内容"
+                elif content_is_placeholder:
+                    reason = "内容为占位符"
+                elif content_too_short:
+                    reason = "内容太短或为空"
+                    
+                logger.info(f"尝试OCR提取: {file_path} (原因: {reason})")
                 ocr_content, ocr_error = self._extract_with_ocr(file_path)
                 
                 if ocr_content and len(ocr_content.strip()) > 100:  # OCR内容要足够长才替换
@@ -1143,3 +1156,99 @@ class EnhancedContentExtractor:
             recommendations.append("性能表现良好，无需调整")
         
         return recommendations
+    
+    def _is_garbled_text(self, text: str) -> bool:
+        """
+        检测文本是否是乱码
+        
+        Args:
+            text: 要检测的文本
+            
+        Returns:
+            bool: True如果检测到乱码，False否则
+        """
+        if not text or len(text.strip()) < 10:
+            return False
+        
+        import re
+        
+        # 清理页面标记，只检查实际内容
+        clean_text = text
+        clean_text = re.sub(r'\[页面 \d+[^\]]*\]', '', clean_text)
+        clean_text = re.sub(r'\[第\d+页[^\]]*\]', '', clean_text)
+        clean_text = clean_text.strip()
+        
+        if len(clean_text) < 10:
+            return False
+        
+        # 检测乱码特征
+        garbled_indicators = 0
+        total_checks = 0
+        
+        # 1. 检查连续大写字母+数字的异常模式（如"8LA5 AP CE"）
+        uppercase_digit_pattern = re.findall(r'[A-Z0-9]{2,}', clean_text)
+        if len(uppercase_digit_pattern) > len(clean_text) / 20:  # 超过5%是大写字母数字组合
+            garbled_indicators += 1
+            logger.debug("检测到大量大写字母数字组合")
+        total_checks += 1
+        
+        # 2. 检查异常字符分布
+        char_count = len(clean_text)
+        uppercase_count = sum(1 for c in clean_text if c.isupper())
+        if uppercase_count > char_count * 0.7:  # 超过70%是大写字母
+            garbled_indicators += 1
+            logger.debug(f"大写字母比例异常: {uppercase_count}/{char_count}")
+        total_checks += 1
+        
+        # 3. 检查是否缺少常见的中文字符和英文单词
+        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', clean_text))
+        has_common_english = bool(re.search(r'\b(the|and|is|in|to|of|a|that|it|with|for|as|was|on|are|you|have|be|at|this|not|or|from|he|by|but|they|his|had|has|an|were|said|one|all|we|when|your|can|there|each|which|do|how|their|if|will|up|other|about|out|many|then|them|these|so|some|her|would|make|like|into|time|very|what|know|just|first|no|way|could|may|new|also|after|back|two|work|see|go|good|now|people|any|day|man|through|my|old|come|us|well|most|over|put|think|before|down|take|only|little|where|years|around|much|high|under|get|here|such|both|even|year|still|every|big|small|while|great|another|\w+ly)\b', clean_text, re.IGNORECASE))
+        
+        if not has_chinese and not has_common_english and char_count > 100:
+            garbled_indicators += 1
+            logger.debug("缺少常见的中英文字符")
+        total_checks += 1
+        
+        # 4. 检查单词边界异常（正常文本应该有空格分隔）
+        words = clean_text.split()
+        if len(words) > 5:
+            avg_word_length = sum(len(word) for word in words) / len(words)
+            if avg_word_length < 2 or avg_word_length > 15:  # 平均单词长度异常
+                garbled_indicators += 1
+                logger.debug(f"平均单词长度异常: {avg_word_length}")
+        total_checks += 1
+        
+        # 5. 检查是否有大量单字符"词"（如"8 L A 5"）
+        single_char_words = sum(1 for word in words if len(word.strip()) == 1)
+        if len(words) > 10 and single_char_words > len(words) * 0.5:  # 超过50%是单字符
+            garbled_indicators += 1
+            logger.debug(f"单字符词过多: {single_char_words}/{len(words)}")
+        total_checks += 1
+        
+        # 6. 检查特定乱码模式（基于实际观察到的乱码）
+        garbled_patterns = [
+            r'[A-Z]{1,3}\d+\s+[A-Z]{1,3}\s+[A-Z]{2,4}',  # 如 "8LA5 AP CE"
+            r'[A-Z]{2,4}[A-Z0-9]{2,4}[A-Z]{2,4}',        # 如 "RMLAN5CE"
+            r'\b[A-Z]{1,2}\d[A-Z]{1,2}\b',               # 如 "R1", "A5E"
+            r'[A-Z]+\d+[A-Z]+\d+',                       # 如 "REA5AR"
+        ]
+        
+        pattern_matches = 0
+        for pattern in garbled_patterns:
+            if re.search(pattern, clean_text):
+                pattern_matches += 1
+        
+        if pattern_matches >= 2:  # 匹配多个乱码模式
+            garbled_indicators += 2  # 乱码模式匹配给更高权重
+            logger.debug(f"匹配到{pattern_matches}个乱码模式")
+        total_checks += 1
+        
+        # 综合判断
+        garbled_ratio = garbled_indicators / total_checks
+        is_garbled = garbled_ratio >= 0.4  # 40%以上指标异常认为是乱码
+        
+        if is_garbled:
+            logger.info(f"乱码检测结果: {garbled_indicators}/{total_checks} 项异常 (比例: {garbled_ratio:.2f})")
+            logger.debug(f"乱码样本: {clean_text[:200]}...")
+        
+        return is_garbled

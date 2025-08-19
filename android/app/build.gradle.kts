@@ -1,20 +1,20 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("kotlin-kapt")
-    id("dagger.hilt.android.plugin")
+    // id("kotlin-kapt")
+    // id("dagger.hilt.android.plugin")
     id("kotlin-parcelize")
     id("kotlinx-serialization")
 }
 
 android {
     namespace = "com.runyang.bridge.maintenance"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.runyang.bridge.maintenance"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
 
@@ -28,9 +28,9 @@ android {
         buildConfigField("int", "VERSION_CODE", "${versionCode}")
         
         // Room schema导出目录
-        kapt {
-            arguments {
-                arg("room.schemaLocation", "$projectDir/schemas")
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments["room.schemaLocation"] = "$projectDir/schemas"
             }
         }
     }
@@ -75,15 +75,15 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
         
         // 启用脱糖支持新API
         isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "11"
         
         // 启用Kotlin编译器优化
         freeCompilerArgs += listOf(
@@ -150,25 +150,25 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     
-    // 依赖注入 - Hilt
-    implementation("com.google.dagger:hilt-android:2.49")
+    // 依赖注入 - Hilt (temporarily commented out for testing)
+    // implementation("com.google.dagger:hilt-android:2.49")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.10.0")
-    kapt("com.google.dagger:hilt-android-compiler:2.49")
+    // kapt("com.google.dagger:hilt-android-compiler:2.49")
     
     // 网络请求
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.9.0")
+    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
     
-    // 数据存储
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    implementation("androidx.room:room-paging:2.6.1")
-    kapt("androidx.room:room-compiler:2.6.1")
+    // 数据存储 (temporarily commented out for testing)
+    // implementation("androidx.room:room-runtime:2.6.1")
+    // implementation("androidx.room:room-ktx:2.6.1")
+    // implementation("androidx.room:room-paging:2.6.1")
+    // kapt("androidx.room:room-compiler:2.6.1")
     
     // DataStore (替代SharedPreferences)
     implementation("androidx.datastore:datastore-preferences:1.0.0")
@@ -195,10 +195,10 @@ dependencies {
     // 日期时间处理
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.5.0")
     
-    // 工作管理器
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
-    implementation("androidx.hilt:hilt-work:1.1.0")
-    kapt("androidx.hilt:hilt-compiler:1.1.0")
+    // 工作管理器 (temporarily commented out for testing)
+    // implementation("androidx.work:work-runtime-ktx:2.9.0")
+    // implementation("androidx.hilt:hilt-work:1.1.0")
+    // kapt("androidx.hilt:hilt-compiler:1.1.0")
     
     // 加密
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
@@ -233,7 +233,7 @@ dependencies {
     androidTestImplementation("androidx.navigation:navigation-testing:2.7.6")
     androidTestImplementation("androidx.work:work-testing:2.9.0")
     androidTestImplementation("com.google.dagger:hilt-android-testing:2.49")
-    kaptAndroidTest("com.google.dagger:hilt-android-compiler:2.49")
+    // kaptAndroidTest("com.google.dagger:hilt-android-compiler:2.49")
     
     // UI调试工具
     debugImplementation("androidx.compose.ui:ui-tooling")
