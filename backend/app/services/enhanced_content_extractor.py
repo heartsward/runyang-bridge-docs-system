@@ -282,6 +282,7 @@ class EnhancedContentExtractor:
         简单直接的PDF OCR处理
         不使用图像预处理，使用最基本的OCR配置
         """
+        doc = None
         try:
             doc = fitz.open(file_path)
             extracted_text = []
@@ -322,7 +323,9 @@ class EnhancedContentExtractor:
                     logger.warning(f"OCR处理第{page_num+1}页失败: {ocr_error}")
                     extracted_text.append(f"[第{page_num+1}页]\n(OCR处理失败)\n")
             
-            doc.close()
+            if doc:
+                doc.close()
+                doc = None
             
             if extracted_text:
                 full_text = "\n".join(extracted_text)
@@ -348,6 +351,11 @@ class EnhancedContentExtractor:
                 return None, "简单OCR未提取到任何文本"
                 
         except Exception as e:
+            if doc:
+                try:
+                    doc.close()
+                except:
+                    pass
             logger.error(f"❌ 简单OCR处理失败: {str(e)}")
             return None, f"简单OCR处理失败: {str(e)}"
     
@@ -406,6 +414,7 @@ class EnhancedContentExtractor:
     
     def _ocr_pdf_with_pymupdf(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
         """使用PyMuPDF进行PDF OCR - 集成图像预处理"""
+        doc = None
         try:
             import io
             doc = fitz.open(file_path)
@@ -462,7 +471,9 @@ class EnhancedContentExtractor:
                     else:
                         extracted_text.append(f"[第{page_num+1}页]\n(OCR未识别到文本)\n")
             
-            doc.close()
+            if doc:
+                doc.close()
+                doc = None
             
             if extracted_text:
                 full_text = "\n".join(extracted_text)
@@ -498,6 +509,11 @@ class EnhancedContentExtractor:
                 return None, "完整OCR未提取到任何文本"
                 
         except Exception as e:
+            if doc:
+                try:
+                    doc.close()
+                except:
+                    pass
             logger.error(f"❌ PyMuPDF完整OCR处理失败: {str(e)}")
             return None, f"PyMuPDF OCR失败: {str(e)}"
     
