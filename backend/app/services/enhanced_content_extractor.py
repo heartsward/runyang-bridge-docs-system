@@ -1181,6 +1181,18 @@ class EnhancedContentExtractor:
         if len(clean_text) < 10:
             return False
         
+        # 快速检测：明显的乱码模式
+        obvious_garbled_patterns = [
+            r'[A-Z0-9]{2,}\s+[A-Z0-9]{2,}\s+[A-Z0-9]{2,}',  # 连续的大写字母数字组合
+            r'\b[A-Z]{1,3}[0-9]{1,3}[A-Z]{1,3}\b',           # 字母数字字母模式
+            r'\b[0-9][A-Z]{2,}[0-9]\b',                      # 数字字母数字模式
+        ]
+        
+        for pattern in obvious_garbled_patterns:
+            if re.search(pattern, clean_text):
+                logger.debug(f"快速检测到明显乱码模式: {pattern}")
+                return True
+        
         # 检测乱码特征
         garbled_indicators = 0
         total_checks = 0
@@ -1243,9 +1255,9 @@ class EnhancedContentExtractor:
             logger.debug(f"匹配到{pattern_matches}个乱码模式")
         total_checks += 1
         
-        # 综合判断
+        # 综合判断 - 降低阈值，提高检测灵敏度
         garbled_ratio = garbled_indicators / total_checks
-        is_garbled = garbled_ratio >= 0.4  # 40%以上指标异常认为是乱码
+        is_garbled = garbled_ratio >= 0.3  # 30%以上指标异常认为是乱码（降低阈值）
         
         if is_garbled:
             logger.info(f"乱码检测结果: {garbled_indicators}/{total_checks} 项异常 (比例: {garbled_ratio:.2f})")
