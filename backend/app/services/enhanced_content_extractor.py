@@ -163,6 +163,7 @@ class EnhancedContentExtractor:
             # 方法1: 简单直接的PDF文本提取
             if file_ext == '.pdf':
                 content, error = self._extract_pdf_content_simple(file_path)
+                logger.info(f"PDF标准提取结果: {'成功' if content else '失败'}, 内容长度: {len(content) if content else 0}")
             else:
                 # 其他文件类型使用原有的搜索服务
                 content = self.search_service.extract_file_content(file_path)
@@ -195,8 +196,25 @@ class EnhancedContentExtractor:
             # 检查是否是乱码内容
             content_is_garbled = content and self._is_garbled_text(content)
             if content_is_garbled:
-                logger.info(f"检测到乱码内容，将使用OCR处理: {file_path}")
+                logger.info(f"检测到乱码内容，将尝试备用方案: {file_path}")
             
+            # 方法2: 如果标准提取失败，先尝试LibreOffice（比OCR更快更准确）
+            if (content_too_short or content_is_placeholder or content_is_garbled) and file_ext == '.pdf':
+                logger.info(f"标准PDF提取不理想，尝试LibreOffice转换: {file_path}")
+                
+                # 尝试LibreOffice提取
+                libreoffice_content, libreoffice_error = self.pdf_extractor._extract_with_libreoffice(file_path)
+                
+                if libreoffice_content and len(libreoffice_content.strip()) > 100:
+                    logger.info(f"LibreOffice PDF提取成功，内容长度: {len(libreoffice_content)}")
+                    content = libreoffice_content
+                    error = None
+                    # 重新检查是否还是乱码
+                    content_is_garbled = self._is_garbled_text(content)
+                elif libreoffice_error:
+                    logger.warning(f"LibreOffice PDF提取失败: {libreoffice_error}")
+            
+            # 方法3: 如果LibreOffice也失败或仍是乱码，最后尝试OCR
             if (content_too_short or content_is_placeholder or content_is_garbled) and self.has_ocr:
                 reason = "未知原因"
                 if content_is_garbled:
@@ -261,20 +279,41 @@ class EnhancedContentExtractor:
         优先使用文本提取，必要时使用OCR
         """
         try:
+            # 添加详细的文件诊断信息
+            file_size = os.path.getsize(file_path)
+            logger.info(f"PDF文件诊断: {file_path}, 大小: {file_size} bytes")
+            
+            if file_size == 0:
+                return None, "PDF文件为空"
+            elif file_size > 100 * 1024 * 1024:  # 100MB
+                logger.warning(f"PDF文件过大: {file_size / 1024 / 1024:.1f}MB")
+            
             # 首先尝试文本提取
             content, error = self.pdf_extractor.extract_pdf_content(file_path)
             
-            if content and len(content.strip()) > 50:
-                return content, None
+            # 详细诊断提取结果
+            if content:
+                content_length = len(content.strip())
+                logger.info(f"PDF标准提取: 成功, 内容长度: {content_length}, 错误: {error or '无'}")
+                
+                if content_length > 50:
+                    return content, None
+                else:
+                    logger.info(f"PDF内容过短({content_length}字符)，可能需要其他方法")
+            else:
+                logger.warning(f"PDF标准提取: 失败, 错误: {error}")
                 
             # 如果文本提取无效果，且支持OCR，则进行OCR
             if self.has_ocr:
-                logger.info(f"文本提取效果不佳，尝试OCR: {file_path}")
+                logger.info(f"PDF标准提取效果不佳，准备OCR处理: {file_path}")
                 return self._ocr_pdf_simple(file_path)
             else:
-                return content, error or "无法提取PDF内容，且OCR不可用"
+                final_error = error or "PDF标准提取失败"
+                logger.warning(f"PDF提取最终失败: {final_error}, OCR不可用")
+                return content, f"{final_error}，且OCR不可用"
                 
         except Exception as e:
+            logger.error(f"PDF内容提取异常: {str(e)}, 文件: {file_path}")
             return None, f"PDF内容提取失败: {str(e)}"
     
     def _ocr_pdf_simple(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:

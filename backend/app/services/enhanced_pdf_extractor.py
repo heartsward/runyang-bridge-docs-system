@@ -57,7 +57,14 @@ class EnhancedPDFExtractor:
                     return content, error
                 logger.warning(f"PyPDF2提取失败: {error}")
             
-            return None, "所有PDF提取方法都失败了，请检查是否安装了pdfplumber或PyPDF2库"
+            # 方法3: 使用LibreOffice (强力备用方案)
+            logger.info("标准PDF提取方法失败，尝试LibreOffice转换...")
+            content, error = self._extract_with_libreoffice(file_path)
+            if content:
+                return content, error
+            logger.warning(f"LibreOffice提取失败: {error}")
+            
+            return None, "所有PDF提取方法都失败了，包括pdfplumber、PyPDF2和LibreOffice"
             
         except Exception as e:
             error_msg = f"PDF内容提取异常: {str(e)}"
@@ -140,6 +147,127 @@ class EnhancedPDFExtractor:
                 
         except Exception as e:
             return None, f"PyPDF2提取失败: {str(e)}"
+    
+    def _extract_with_libreoffice(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
+        """使用LibreOffice提取PDF内容"""
+        try:
+            libreoffice_path = self._find_libreoffice_path()
+            if not libreoffice_path:
+                return None, "未找到LibreOffice安装，无法使用LibreOffice提取"
+            
+            logger.info(f"使用LibreOffice提取PDF: {file_path}")
+            
+            import subprocess
+            import tempfile
+            import time
+            
+            # 创建临时目录
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # LibreOffice转换命令
+                convert_cmd = [
+                    libreoffice_path,
+                    '--headless',
+                    '--invisible', 
+                    '--nologo',
+                    '--nofirststartwizard',
+                    '--convert-to', 'txt',
+                    '--outdir', temp_dir,
+                    file_path
+                ]
+                
+                logger.info("执行LibreOffice PDF转文本...")
+                
+                # 执行转换，设置合理超时
+                try:
+                    result = subprocess.run(
+                        convert_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,  # 60秒超时
+                        encoding='utf-8',
+                        errors='ignore'
+                    )
+                    
+                    if result.returncode != 0:
+                        error_msg = result.stderr if result.stderr else "LibreOffice转换失败"
+                        logger.warning(f"LibreOffice转换失败: {error_msg}")
+                        return None, f"LibreOffice转换失败: {error_msg}"
+                    
+                    # 查找转换生成的文本文件
+                    base_name = Path(file_path).stem
+                    txt_file = Path(temp_dir) / f"{base_name}.txt"
+                    
+                    if not txt_file.exists():
+                        return None, "LibreOffice转换完成但未生成文本文件"
+                    
+                    # 读取转换结果
+                    content = self._read_libreoffice_output(str(txt_file))
+                    if content:
+                        logger.info(f"LibreOffice PDF提取成功，内容长度: {len(content)}")
+                        return content, None
+                    else:
+                        return None, "LibreOffice生成的文本文件为空"
+                        
+                except subprocess.TimeoutExpired:
+                    return None, "LibreOffice转换超时（60秒）"
+                except Exception as e:
+                    return None, f"LibreOffice执行异常: {str(e)}"
+                    
+        except Exception as e:
+            return None, f"LibreOffice PDF提取失败: {str(e)}"
+    
+    def _find_libreoffice_path(self) -> Optional[str]:
+        """查找LibreOffice可执行文件路径"""
+        import os
+        import subprocess
+        
+        # Windows和Linux常见路径
+        possible_paths = [
+            r'C:\Program Files\LibreOffice\program\soffice.exe',      # Windows 64位
+            r'C:\Program Files (x86)\LibreOffice\program\soffice.exe', # Windows 32位
+            '/usr/bin/libreoffice',   # Linux 标准路径
+            '/usr/bin/soffice',       # Linux 备用路径
+            'soffice'                 # PATH环境变量
+        ]
+        
+        for path in possible_paths:
+            try:
+                if path == 'soffice':
+                    # 检查PATH中的命令
+                    subprocess.run([path, '--version'], capture_output=True, timeout=10)
+                    return path
+                elif os.path.exists(path):
+                    return path
+            except:
+                continue
+        
+        return None
+    
+    def _read_libreoffice_output(self, txt_file: str) -> Optional[str]:
+        """读取LibreOffice输出文件"""
+        try:
+            # 尝试多种编码读取
+            encodings = ['utf-8', 'gbk', 'utf-16', 'latin1']
+            
+            for encoding in encodings:
+                try:
+                    with open(txt_file, 'r', encoding=encoding) as f:
+                        content = f.read()
+                    if content and content.strip():
+                        # 清理和优化文本
+                        cleaned_content = self._final_text_cleanup(content)
+                        return cleaned_content
+                except UnicodeDecodeError:
+                    continue
+                except Exception as e:
+                    logger.debug(f"编码 {encoding} 读取失败: {e}")
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"读取LibreOffice输出失败: {e}")
+            return None
     
     def _fix_text_encoding(self, text: str) -> str:
         """修复文本编码问题"""
