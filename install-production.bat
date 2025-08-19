@@ -29,7 +29,7 @@ if errorlevel 1 (
 
 echo.
 echo ==========================================
-echo    安装后端依赖（包含OCR支持）
+echo    安装后端依赖包含OCR支持
 echo ==========================================
 
 cd backend
@@ -51,25 +51,24 @@ echo 升级pip...
 python -m pip install --upgrade pip
 
 echo 安装核心依赖...
-echo Installing FastAPI and core packages...
 pip install fastapi uvicorn[standard] sqlalchemy python-dotenv pydantic aiofiles
 
-echo Installing authentication packages...
+echo 安装认证包...
 pip install PyJWT python-jose[cryptography] passlib[bcrypt] python-multipart alembic pydantic-settings pydantic[email] email-validator
 
-echo Installing document processing packages...
+echo 安装文档处理包...
 pip install pandas PyPDF2 python-docx openpyxl markdown pdfplumber
 
-echo Installing enhanced PDF processing...
-pip install PyMuPDF || echo PyMuPDF安装失败，将影响PDF处理能力
+echo 安装增强PDF处理...
+pip install PyMuPDF
 
 echo ==========================================
-echo    安装OCR相关依赖（生产环境关键）
+echo    安装OCR相关依赖生产环境关键
 echo ==========================================
-echo Installing OCR packages...
+echo 安装OCR包...
 pip install Pillow pytesseract pdf2image
 
-echo Installing text processing and ML packages...
+echo 安装文本处理和机器学习包...
 pip install jieba scikit-learn chardet httpx numpy opencv-python-headless
 
 echo ==========================================
@@ -79,7 +78,7 @@ echo 检查Tesseract OCR安装...
 python -c "import pytesseract; print('pytesseract导入成功')" 2>nul
 if errorlevel 1 (
     echo WARNING: pytesseract导入失败
-    echo 请确保已安装Tesseract OCR: https://github.com/UB-Mannheim/tesseract/wiki
+    echo 请确保已安装Tesseract OCR
 )
 
 python -c "from PIL import Image; print('Pillow导入成功')" 2>nul
@@ -97,38 +96,7 @@ echo    修复已知问题
 echo ==========================================
 
 echo 修复datetime弃用警告...
-python -c "
-import os
-import re
-from pathlib import Path
-
-# 修复database_integrated_server.py中的datetime问题
-server_file = Path('database_integrated_server.py')
-if server_file.exists():
-    content = server_file.read_text(encoding='utf-8')
-    
-    # 检查是否已经修复
-    if 'datetime.utcnow()' in content:
-        print('正在修复datetime.utcnow()弃用警告...')
-        
-        # 添加timezone导入
-        if 'from datetime import datetime, timedelta' in content:
-            content = content.replace(
-                'from datetime import datetime, timedelta',
-                'from datetime import datetime, timedelta, timezone'
-            )
-        
-        # 替换所有datetime.utcnow()调用
-        content = content.replace('datetime.utcnow()', 'datetime.now(timezone.utc)')
-        
-        # 写回文件
-        server_file.write_text(content, encoding='utf-8')
-        print('✅ datetime问题已修复')
-    else:
-        print('✅ datetime问题已经修复过了')
-else:
-    print('⚠️  未找到database_integrated_server.py文件')
-"
+python fix_datetime.py
 
 call venv\Scripts\deactivate.bat
 
@@ -160,27 +128,10 @@ cd ..\backend
 call venv\Scripts\activate.bat
 
 echo 测试数据库连接...
-python -c "
-try:
-    from app.db.database import engine
-    print('✅ 数据库连接正常')
-except Exception as e:
-    print('⚠️  数据库将在首次运行时初始化')
-    print(f'详情: {e}')
-"
+python -c "try: from app.db.database import engine; print('数据库连接正常'); except: print('数据库将在首次运行时初始化')"
 
 echo 测试OCR功能...
-python -c "
-try:
-    from app.services.enhanced_content_extractor import EnhancedContentExtractor
-    extractor = EnhancedContentExtractor()
-    if extractor.has_ocr:
-        print('✅ OCR功能可用')
-    else:
-        print('⚠️  OCR功能不可用，请检查Tesseract安装')
-except Exception as e:
-    print('⚠️  OCR测试失败:', e)
-"
+python -c "try: from app.services.enhanced_content_extractor import EnhancedContentExtractor; e=EnhancedContentExtractor(); print('OCR功能可用' if e.has_ocr else 'OCR功能不可用'); except Exception as ex: print('OCR测试失败:', ex)"
 
 call venv\Scripts\deactivate.bat
 
@@ -207,24 +158,24 @@ echo ==========================================
 echo    安装完成！
 echo ==========================================
 echo.
-echo 🚀 生产环境安装成功
+echo 生产环境安装成功
 echo.
 echo 启动命令:
-echo   start-production.bat     # 启动生产环境
-echo   start-services.bat       # 启动开发环境
+echo   start-production.bat     启动生产环境
+echo   start-services.bat       启动开发环境
 echo.
 echo 访问地址:
-echo   http://localhost:8000    # 生产环境
-echo   http://localhost:5173    # 开发环境（如需要）
+echo   http://localhost:8000    生产环境
+echo   http://localhost:5173    开发环境如需要
 echo.
 echo 默认登录:
 echo   用户名: admin
 echo   密码: admin123
 echo.
 echo 已修复问题:
-echo   ✅ datetime.utcnow() 弃用警告
-echo   ✅ OCR依赖包安装
-echo   ✅ PDF识别功能
-echo   ✅ 前端TypeScript构建
+echo   datetime.utcnow弃用警告
+echo   OCR依赖包安装
+echo   PDF识别功能
+echo   前端TypeScript构建
 echo.
 pause
