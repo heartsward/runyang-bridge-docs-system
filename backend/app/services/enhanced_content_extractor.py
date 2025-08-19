@@ -286,8 +286,14 @@ class EnhancedContentExtractor:
             doc = fitz.open(file_path)
             extracted_text = []
             
-            # 限制处理页数避免超时
-            max_pages = min(10, doc.page_count)
+            # 动态调整页面处理限制（简单OCR模式 - 更保守的策略）
+            if doc.page_count <= 15:
+                max_pages = doc.page_count  # 小文档完全处理
+            elif doc.page_count <= 30:
+                max_pages = min(20, doc.page_count)  # 中等文档
+            else:
+                max_pages = 25  # 大文档保守处理
+                logger.info(f"大型PDF文档({doc.page_count}页)，简单模式处理前{max_pages}页")
             
             for page_num in range(max_pages):
                 logger.info(f"OCR处理PDF第{page_num+1}页")
@@ -302,11 +308,11 @@ class EnhancedContentExtractor:
                 pil_image = Image.open(io.BytesIO(img_data))
                 
                 try:
-                    # 使用简单的OCR配置
+                    # 使用优化的中文OCR配置
                     page_text = pytesseract.image_to_string(
                         pil_image,
                         lang='chi_sim+eng',
-                        config='--psm 3 --oem 3'
+                        config='--psm 4 --oem 3 -c preserve_interword_spaces=0 -c textord_heavy_nr=1'
                     )
                     
                     if page_text and page_text.strip():
@@ -320,11 +326,29 @@ class EnhancedContentExtractor:
             
             if extracted_text:
                 full_text = "\n".join(extracted_text)
+                
+                # 添加详细的处理统计日志
+                total_chars = len(full_text)
+                pages_processed = len(extracted_text)
+                logger.info(f"✅ 简单OCR处理完成 - 处理页数: {pages_processed}/{doc.page_count}, 提取字符: {total_chars}个")
+                
+                # 中文识别质量评估
+                chinese_chars = len([c for c in full_text if '\u4e00' <= c <= '\u9fff'])
+                if chinese_chars > 0:
+                    chinese_ratio = chinese_chars / total_chars * 100
+                    logger.info(f"   中文字符识别: {chinese_chars}个 ({chinese_ratio:.1f}%)")
+                
+                # 内容预览（调试用）
+                preview = full_text.replace('\n', ' ').strip()[:100] + "..." if len(full_text) > 100 else full_text
+                logger.debug(f"   内容预览: {preview}")
+                
                 return full_text, None
             else:
-                return None, "OCR未提取到任何文本"
+                logger.warning(f"⚠️ 简单OCR未提取到文本 - 处理了{max_pages}/{doc.page_count}页")
+                return None, "简单OCR未提取到任何文本"
                 
         except Exception as e:
+            logger.error(f"❌ 简单OCR处理失败: {str(e)}")
             return None, f"简单OCR处理失败: {str(e)}"
     
     def _extract_pdf_content_advanced(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
@@ -387,10 +411,16 @@ class EnhancedContentExtractor:
             doc = fitz.open(file_path)
             extracted_text = []
             
-            # 限制处理页数避免超时
-            max_pages = min(10, doc.page_count)
+            # 智能页面处理策略（完整OCR模式 - 更积极的处理）
+            if doc.page_count <= 20:
+                max_pages = doc.page_count  # 小文档完全处理
+            elif doc.page_count <= 50:
+                max_pages = min(40, doc.page_count)  # 中等文档处理更多页面
+            else:
+                max_pages = 60  # 大文档允许处理更多页面
+                logger.info(f"大型PDF文档({doc.page_count}页)，完整模式处理前{max_pages}页")
             
-            logger.info(f"开始OCR处理，共{max_pages}页，使用图像预处理")
+            logger.info(f"开始OCR处理，共{max_pages}页（总{doc.page_count}页），使用图像预处理")
             
             for page_num in range(max_pages):
                 logger.info(f"OCR处理PDF第{page_num+1}页")
@@ -406,10 +436,11 @@ class EnhancedContentExtractor:
                 
                 # 进行OCR - 使用简单有效的配置
                 try:
+                    # 使用专门针对中文文档优化的OCR配置
                     page_text = pytesseract.image_to_string(
                         pil_image,
                         lang='chi_sim+eng',
-                        config='--psm 3 --oem 3'  # 全自动页面分割，默认引擎
+                        config='--psm 4 --oem 3 -c preserve_interword_spaces=0 -c textord_heavy_nr=1 -c textord_min_linesize=2.5'
                     )
                 except Exception as ocr_error:
                     logger.warning(f"OCR处理第{page_num+1}页失败: {ocr_error}")
@@ -435,22 +466,65 @@ class EnhancedContentExtractor:
             
             if extracted_text:
                 full_text = "\n".join(extracted_text)
+                
+                # 详细的完整OCR处理统计
+                total_chars = len(full_text)
+                pages_processed = len(extracted_text)
+                successful_pages = len([page for page in extracted_text if "OCR处理失败" not in page and "OCR未识别到文本" not in page])
+                
+                logger.info(f"✅ 完整OCR处理完成 - 总页数: {doc.page_count}, 处理: {pages_processed}, 成功: {successful_pages}")
+                logger.info(f"   提取字符总数: {total_chars}个, 平均每页: {total_chars//max(1,successful_pages)}个字符")
+                
+                # 中文识别质量详细分析
+                chinese_chars = len([c for c in full_text if '\u4e00' <= c <= '\u9fff'])
+                english_chars = len([c for c in full_text if c.isalpha() and ord(c) < 128])
+                digit_chars = len([c for c in full_text if c.isdigit()])
+                
+                if chinese_chars > 0:
+                    logger.info(f"   中文字符: {chinese_chars}个 ({chinese_chars/total_chars*100:.1f}%)")
+                if english_chars > 0:
+                    logger.info(f"   英文字符: {english_chars}个 ({english_chars/total_chars*100:.1f}%)")
+                if digit_chars > 0:
+                    logger.info(f"   数字字符: {digit_chars}个 ({digit_chars/total_chars*100:.1f}%)")
+                
+                # 识别质量评估
+                if successful_pages < pages_processed:
+                    failed_pages = pages_processed - successful_pages
+                    logger.warning(f"   ⚠️ {failed_pages}页OCR识别失败")
+                
                 return full_text, None
             else:
-                return None, "OCR未提取到任何文本"
+                logger.warning(f"⚠️ 完整OCR未提取到文本 - 处理了{max_pages}/{doc.page_count}页")
+                return None, "完整OCR未提取到任何文本"
                 
         except Exception as e:
+            logger.error(f"❌ PyMuPDF完整OCR处理失败: {str(e)}")
             return None, f"PyMuPDF OCR失败: {str(e)}"
     
     def _ocr_pdf_with_pdf2image(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
         """使用pdf2image进行PDF OCR（原始方法）"""
         try:
+            # 先获取PDF页数信息来决定处理策略
+            import fitz
+            temp_doc = fitz.open(file_path)
+            total_pages = temp_doc.page_count
+            temp_doc.close()
+            
+            # 动态决定处理页数
+            if total_pages <= 15:
+                last_page = total_pages  # 小文档完全处理
+            elif total_pages <= 40:
+                last_page = min(25, total_pages)  # 中等文档
+            else:
+                last_page = 35  # 大文档限制页数
+                logger.info(f"使用pdf2image处理大型PDF({total_pages}页)，处理前{last_page}页")
+            
             # 将PDF转换为图像
             images = pdf2image.convert_from_path(
                 file_path,
                 dpi=200,  # 提高DPI以获得更好的OCR效果
                 first_page=1,
-                last_page=10  # 限制页数避免处理时间过长
+                last_page=last_page  # 动态调整页数
             )
             
             extracted_text = []
@@ -458,11 +532,11 @@ class EnhancedContentExtractor:
             for i, image in enumerate(images):
                 logger.info(f"OCR处理PDF第{i+1}页")
                 
-                # 对每页进行OCR - 优化的参数配置
+                # 对每页进行OCR - 针对中文文档优化的配置
                 page_text = pytesseract.image_to_string(
                     image, 
                     lang='chi_sim+eng',  # 支持简体中文和英文
-                    config='--psm 3 --oem 3'  # PSM 3: 全自动页面分割，OEM 3: 默认引擎
+                    config='--psm 4 --oem 3 -c preserve_interword_spaces=0 -c textord_heavy_nr=1 -c textord_min_linesize=2.5'
                 )
                 
                 if page_text.strip():
@@ -483,11 +557,11 @@ class EnhancedContentExtractor:
             # 打开图像
             image = Image.open(file_path)
             
-            # 进行OCR - 优化的参数配置
+            # 进行OCR - 针对中文文档优化的配置
             text = pytesseract.image_to_string(
                 image,
                 lang='chi_sim+eng',  # 支持简体中文和英文
-                config='--psm 3 --oem 3'  # 自动页面分割
+                config='--psm 4 --oem 3 -c preserve_interword_spaces=0 -c textord_heavy_nr=1 -c textord_min_linesize=2.5'
             )
             
             if text.strip():
@@ -668,12 +742,13 @@ class EnhancedContentExtractor:
         if not self.has_ocr:
             return None
         
-        # 简单的备用OCR配置
+        # 针对中文优化的备用OCR配置
         backup_configs = [
-            '--psm 6 --oem 3',  # 单一文本块
-            '--psm 4 --oem 3',  # 单列文本
-            '--psm 8 --oem 3',  # 单词模式
-            '--psm 7 --oem 3'   # 单行文本
+            '--psm 6 --oem 3 -c preserve_interword_spaces=0 -c textord_heavy_nr=1',  # 单一文本块
+            '--psm 4 --oem 3 -c preserve_interword_spaces=0 -c textord_heavy_nr=1',  # 单列文本
+            '--psm 3 --oem 3 -c preserve_interword_spaces=0',  # 全自动分割
+            '--psm 11 --oem 3 -c textord_heavy_nr=1',  # 稀疏文本
+            '--psm 12 --oem 3 -c preserve_interword_spaces=0'   # 稀疏文本OSD
         ]
         
         for config in backup_configs:
@@ -729,16 +804,43 @@ class EnhancedContentExtractor:
             for wrong, correct in ocr_corrections.items():
                 text = text.replace(wrong, correct)
             
-            # 清理多余空格和换行
+            # 增强的中文文本空格清理和格式优化
             import re
-            text = re.sub(r'\s+', ' ', text)  # 多个空格合并为一个
-            text = re.sub(r'\n\s*\n', '\n', text)  # 多个换行合并
             
-            # 修正中英文间距
-            text = re.sub(r'([a-zA-Z])\s+([a-zA-Z])', r'\1 \2', text)  # 英文单词间保持空格
-            text = re.sub(r'([\u4e00-\u9fff])\s+([\u4e00-\u9fff])', r'\1\2', text)  # 中文间去除空格
-            text = re.sub(r'([\u4e00-\u9fff])\s+([a-zA-Z])', r'\1 \2', text)  # 中英文间加空格
-            text = re.sub(r'([a-zA-Z])\s+([\u4e00-\u9fff])', r'\1 \2', text)  # 英中文间加空格
+            # 第一步：处理OCR常见的过度分割问题
+            # 清理中文字符间的多余空格（如"网 络 安 全"变为"网络安全"）
+            text = re.sub(r'([\u4e00-\u9fff])\s+([\u4e00-\u9fff])', r'\1\2', text)
+            
+            # 第二步：处理中文与标点符号间的空格
+            text = re.sub(r'([\u4e00-\u9fff])\s+([，。！？；：、])', r'\1\2', text)  # 中文与标点间
+            text = re.sub(r'([，。！？；：、])\s+([\u4e00-\u9fff])', r'\1\2', text)  # 标点与中文间
+            
+            # 第三步：处理数字与中文间的空格（保持合理间距）
+            text = re.sub(r'([\u4e00-\u9fff])\s+(\d)', r'\1\2', text)  # 中文数字间
+            text = re.sub(r'(\d)\s+([\u4e00-\u9fff])', r'\1\2', text)  # 数字中文间
+            
+            # 第四步：处理英文单词间的空格（保持正常）
+            text = re.sub(r'([a-zA-Z])\s{2,}([a-zA-Z])', r'\1 \2', text)  # 英文间多空格合并
+            
+            # 第五步：处理中英文混合的间距
+            text = re.sub(r'([\u4e00-\u9fff])\s+([a-zA-Z])', r'\1 \2', text)  # 中英文间保持一个空格
+            text = re.sub(r'([a-zA-Z])\s+([\u4e00-\u9fff])', r'\1 \2', text)  # 英中文间保持一个空格
+            
+            # 第六步：处理常见的OCR字符连接问题
+            # 修正被错误分离的常见词汇
+            common_fixes = {
+                '网 络': '网络', '安 全': '安全', '数 据': '数据', '系 统': '系统',
+                '信 息': '信息', '管 理': '管理', '技 术': '技术', '服 务': '服务',
+                '工 作': '工作', '建 设': '建设', '发 展': '发展', '运 行': '运行',
+                '维 护': '维护', '监 控': '监控', '检 查': '检查', '测 试': '测试',
+                '配 置': '配置', '部 署': '部署', '升 级': '升级', '优 化': '优化'
+            }
+            for wrong, correct in common_fixes.items():
+                text = text.replace(wrong, correct)
+            
+            # 第七步：清理多余的空白字符
+            text = re.sub(r'\s{3,}', ' ', text)  # 3个以上空格合并为1个
+            text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)  # 3个以上换行合并为2个
             
             return text.strip()
             
