@@ -19,7 +19,7 @@ import time
 import threading
 import socket
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from sqlalchemy.orm import Session
 
@@ -313,7 +313,7 @@ def save_users_to_file():
         data = {
             'users': USERS,
             'next_user_id': next_user_id,
-            'updated_at': datetime.utcnow().isoformat() + "Z"
+            'updated_at': datetime.now(timezone.utc).isoformat() + "Z"
         }
         with open(USERS_DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -404,7 +404,7 @@ def verify_password(plain_password: str, stored_password: str) -> bool:
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(hours=24)
+    expire = datetime.now(timezone.utc) + timedelta(hours=24)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
     return encoded_jwt
@@ -509,7 +509,7 @@ class DatabaseTaskManager:
             "file_path": file_path,
             "title": title,
             "status": "pending",
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "started_at": None,
             "completed_at": None,
             "error": None,
@@ -593,7 +593,7 @@ class DatabaseTaskManager:
         print(f"开始处理任务: {task_id} - {task_type}")
         
         task["status"] = "processing"
-        task["started_at"] = datetime.utcnow().isoformat()
+        task["started_at"] = datetime.now(timezone.utc).isoformat()
         task["progress"] = 10
         self._save_task_status(task_id, task)
         
@@ -607,7 +607,7 @@ class DatabaseTaskManager:
             print(f"任务处理失败: {task_id} - {e}")
             task["status"] = "failed"
             task["error"] = str(e)
-            task["completed_at"] = datetime.utcnow().isoformat()
+            task["completed_at"] = datetime.now(timezone.utc).isoformat()
             self._save_task_status(task_id, task)
     
     def _process_content_extraction(self, task: Dict[str, Any]):
@@ -646,7 +646,7 @@ class DatabaseTaskManager:
                         "content": content,
                         "content_extracted": True,
                         "content_extraction_error": None,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now(timezone.utc)
                     }
                     crud.document.update(db=db, db_obj=document_obj, obj_in=update_data)
                     db.commit()
@@ -662,7 +662,7 @@ class DatabaseTaskManager:
                     update_data = {
                         "content_extracted": False,
                         "content_extraction_error": error,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now(timezone.utc)
                     }
                     crud.document.update(db=db, db_obj=document_obj, obj_in=update_data)
                     db.commit()
@@ -682,7 +682,7 @@ class DatabaseTaskManager:
             db.close()
         
         task["progress"] = 100
-        task["completed_at"] = datetime.utcnow().isoformat()
+        task["completed_at"] = datetime.now(timezone.utc).isoformat()
         self._save_task_status(task_id, task)
         
         print(f"任务完成: {task_id}")
@@ -1739,8 +1739,8 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep), d
             maintenance_assets = len([asset for asset in assets_storage if asset.get('status') == 'maintenance'])
             
             # 计算最近新增资产（最近7天）
-            from datetime import datetime, timedelta
-            recent_date = datetime.utcnow() - timedelta(days=7)
+            from datetime import datetime, timedelta, timezone
+            recent_date = datetime.now(timezone.utc) - timedelta(days=7)
             
             for asset in assets_storage:
                 try:
@@ -1765,8 +1765,8 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep), d
             total_documents = db.query(Document).count()
             
             # 查询最近7天上传的文档
-            from datetime import datetime, timedelta
-            recent_date = datetime.utcnow() - timedelta(days=7)
+            from datetime import datetime, timedelta, timezone
+            recent_date = datetime.now(timezone.utc) - timedelta(days=7)
             recent_uploads = db.query(Document).filter(Document.created_at >= recent_date).count()
             
             print(f"成功获取文档统计: 总数={total_documents}, 最近上传={recent_uploads}")
@@ -1900,7 +1900,7 @@ async def get_analytics_stats(current_user: dict = Depends(require_admin_dep), d
                 "documentViews": document_views,
                 "searches": searches,
                 "assetViews": asset_views,
-                "lastActivity": last_activity or datetime.utcnow().isoformat() + "Z",
+                "lastActivity": last_activity or datetime.now(timezone.utc).isoformat() + "Z",
                 "documentAccess": document_details,
                 "assetAccess": asset_details
             })
@@ -2169,7 +2169,7 @@ def save_assets_to_file():
         data = {
             'assets': assets_storage,
             'next_id': next_asset_id,
-            'updated_at': datetime.utcnow().isoformat() + "Z"
+            'updated_at': datetime.now(timezone.utc).isoformat() + "Z"
         }
         with open(ASSETS_DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -2246,7 +2246,7 @@ def save_user_analytics_to_file():
             'search_keywords_count': SEARCH_KEYWORDS_COUNT,
             'document_views': document_views_serializable,
             'asset_views': asset_views_serializable,
-            'updated_at': datetime.utcnow().isoformat() + "Z"
+            'updated_at': datetime.now(timezone.utc).isoformat() + "Z"
         }
         
         with open(USER_ANALYTICS_DATA_FILE, 'w', encoding='utf-8') as f:
@@ -2275,7 +2275,7 @@ def track_user_activity(user_id: int, activity_type: str, target_id: int, target
         "activity_type": activity_type,  # "view_document", "view_asset", "search"
         "target_id": target_id,
         "target_type": target_type,  # "document", "asset", "search"
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
     }
     
     USER_ACTIVITY_LOG.append(activity)
@@ -2298,7 +2298,7 @@ def track_document_view(document_id: int, user_id: int = 1):
     
     DOCUMENT_VIEWS[document_id]["count"] += 1
     DOCUMENT_VIEWS[document_id]["users"].add(user_id)
-    DOCUMENT_VIEWS[document_id]["last_viewed"] = datetime.utcnow().isoformat() + "Z"
+    DOCUMENT_VIEWS[document_id]["last_viewed"] = datetime.now(timezone.utc).isoformat() + "Z"
     
     # 记录用户活动
     track_user_activity(user_id, "view_document", document_id, "document")
@@ -2315,7 +2315,7 @@ def track_asset_view(asset_id: int, user_id: int = 1):
     
     ASSET_VIEWS[asset_id]["count"] += 1
     ASSET_VIEWS[asset_id]["users"].add(user_id)
-    ASSET_VIEWS[asset_id]["last_viewed"] = datetime.utcnow().isoformat() + "Z"
+    ASSET_VIEWS[asset_id]["last_viewed"] = datetime.now(timezone.utc).isoformat() + "Z"
     
     # 记录用户活动
     track_user_activity(user_id, "view_asset", asset_id, "asset")
@@ -2526,8 +2526,8 @@ async def get_asset_statistics():
             by_department[department] = by_department.get(department, 0) + 1
     
     # 计算最近新增（最近7天）
-    from datetime import datetime, timedelta
-    recent_date = datetime.utcnow() - timedelta(days=7)
+    from datetime import datetime, timedelta, timezone
+    recent_date = datetime.now(timezone.utc) - timedelta(days=7)
     recent_additions = 0
     
     for asset in assets_storage:
@@ -2583,8 +2583,8 @@ async def create_asset(asset_data: dict, current_user: dict = Depends(require_ad
         "status": asset_data.get("status", "active"),
         "notes": asset_data.get("notes", ""),
         "tags": asset_data.get("tags", []),
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "updated_at": datetime.utcnow().isoformat() + "Z"
+        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "updated_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
     
     # 添加到存储
@@ -2610,7 +2610,7 @@ async def update_asset(asset_id: int, asset_data: dict, current_user: dict = Dep
                 **asset,  # 保留原有信息
                 **asset_data,  # 更新新信息
                 "id": asset_id,  # 确保ID不被更改
-                "updated_at": datetime.utcnow().isoformat() + "Z"
+                "updated_at": datetime.now(timezone.utc).isoformat() + "Z"
             }
             assets_storage[i] = updated_asset
             
@@ -2655,7 +2655,7 @@ async def view_asset_details(asset_id: int, current_user: dict = Depends(get_cur
     # 返回统计记录结果
     return {
         "asset_id": asset_id,
-        "viewed_at": datetime.utcnow().isoformat() + "Z",
+        "viewed_at": datetime.now(timezone.utc).isoformat() + "Z",
         "view_count": ASSET_VIEWS.get(asset_id, {"count": 0})["count"],
         "message": "资产详情查看已记录"
     }
@@ -2897,8 +2897,8 @@ async def extract_assets_from_file(
                             "status": asset_data.get("status", "active"),
                             "notes": asset_data.get("notes", f"从文件 {file.filename} 提取"),
                             "tags": asset_data.get("tags", ["extracted"]),
-                            "created_at": datetime.utcnow().isoformat() + "Z",
-                            "updated_at": datetime.utcnow().isoformat() + "Z",
+                            "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+                            "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
                             "confidence_score": asset_data.get("confidence_score", 75),
                             "is_merged": asset_data.get("is_merged", False)
                         }
@@ -2975,8 +2975,8 @@ async def extract_assets_from_file(
                                 "status": "active",
                                 "notes": f"从文件 {file.filename} 基础提取",
                                 "tags": ["extracted", "basic"],
-                                "created_at": datetime.utcnow().isoformat() + "Z",
-                                "updated_at": datetime.utcnow().isoformat() + "Z",
+                                "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+                                "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
                                 "confidence_score": 60,
                                 "is_merged": False
                             }
@@ -3061,7 +3061,7 @@ async def get_all_users(current_user: dict = Depends(require_admin_dep)):
             "phone": user_data.get("phone"),
             "is_active": user_data.get("is_active", True),
             "is_superuser": user_data.get("is_superuser", False),
-            "created_at": user_data.get("created_at", datetime.utcnow().isoformat() + "Z")
+            "created_at": user_data.get("created_at", datetime.now(timezone.utc).isoformat() + "Z")
         })
     
     return users_list
@@ -3092,7 +3092,7 @@ async def create_user(user_data: UserCreate, current_user: dict = Depends(requir
         "phone": user_data.phone,
         "is_active": True,
         "is_superuser": user_data.is_superuser,
-        "created_at": datetime.utcnow().isoformat() + "Z"
+        "created_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
     
     USERS[user_data.username] = new_user
@@ -3152,7 +3152,7 @@ async def update_user(user_id: int, user_data: UserUpdate, current_user: dict = 
         target_user["password"] = user_data.password  # 新增密码修改功能
         print(f"用户 {target_username} 的密码已更新")
     
-    target_user["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    target_user["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
     
     # 保存到文件
     save_users_to_file()
@@ -3209,7 +3209,7 @@ async def get_ai_analysis(current_user: dict = Depends(require_admin_dep), db: S
     
     # 分析用户行为模式
     analysis_results = {
-        "analysis_time": datetime.utcnow().isoformat() + "Z",
+        "analysis_time": datetime.now(timezone.utc).isoformat() + "Z",
         "insights": [],
         "recommendations": [],
         "risk_alerts": [],
