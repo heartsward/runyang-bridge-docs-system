@@ -369,6 +369,7 @@ class UserCreate(BaseModel):
     is_superuser: bool = False
 
 class UserUpdate(BaseModel):
+    username: Optional[str] = None
     email: Optional[str] = None
     full_name: Optional[str] = None
     department: Optional[str] = None
@@ -389,6 +390,10 @@ class UserResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     created_at: str
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
 
 # 数据库依赖
 def get_db():
@@ -756,6 +761,28 @@ async def get_current_user_info(current_user: dict = Depends(require_auth_dep)):
         "is_active": current_user.get("is_active", True),
         "is_superuser": current_user.get("is_superuser", False)
     }
+
+@app.post("/api/v1/auth/change-password")
+async def change_password(password_data: PasswordChange, current_user: dict = Depends(require_auth_dep)):
+    """修改用户密码"""
+    global USERS
+    
+    # 验证当前密码
+    if not verify_password(password_data.current_password, current_user["password"]):
+        raise HTTPException(status_code=400, detail="当前密码错误")
+    
+    # 查找并更新用户密码
+    username = current_user["username"]
+    if username in USERS:
+        USERS[username]["password"] = password_data.new_password
+        USERS[username]["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
+        
+        # 保存到文件
+        save_users_to_file()
+        
+        return {"message": "密码修改成功"}
+    else:
+        raise HTTPException(status_code=404, detail="用户不存在")
 
 # 文档上传API - 仅管理员
 @app.post("/api/v1/upload", response_model=DocumentInfo)
@@ -3133,6 +3160,14 @@ async def update_user(user_id: int, user_data: UserUpdate, current_user: dict = 
     if not target_user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
+    # 检查用户名冲突
+    new_username = target_username  # 默认保持原用户名
+    if user_data.username is not None and user_data.username != target_username:
+        # 检查新用户名是否已存在
+        if user_data.username in USERS:
+            raise HTTPException(status_code=400, detail="用户名已被使用")
+        new_username = user_data.username
+    
     # 更新用户信息
     if user_data.email is not None:
         target_user["email"] = user_data.email
@@ -3152,6 +3187,14 @@ async def update_user(user_id: int, user_data: UserUpdate, current_user: dict = 
         target_user["password"] = user_data.password  # 新增密码修改功能
         print(f"用户 {target_username} 的密码已更新")
     
+    # 更新用户名（如果有变化）
+    if new_username != target_username:
+        target_user["username"] = new_username
+        # 更新字典键
+        USERS[new_username] = target_user
+        del USERS[target_username]
+        print(f"用户名已从 {target_username} 更新为 {new_username}")
+    
     target_user["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
     
     # 保存到文件
@@ -3161,7 +3204,7 @@ async def update_user(user_id: int, user_data: UserUpdate, current_user: dict = 
     
     return {
         "id": target_user["id"],
-        "username": target_username,
+        "username": new_username,
         "email": target_user["email"],
         "full_name": target_user.get("full_name"),
         "department": target_user.get("department"),
