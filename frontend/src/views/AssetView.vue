@@ -1215,7 +1215,20 @@ const handleBulkDelete = () => {
       try {
         const assetIds = selectedAssets.value.map(asset => asset.id)
         
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/v1/assets/bulk-delete`, {
+        // 使用动态地址检测，支持跨机器访问
+        const currentHost = window.location.hostname
+        const currentProtocol = window.location.protocol
+        let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+        
+        if (!apiBaseUrl) {
+          if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+            apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+          } else {
+            apiBaseUrl = 'http://localhost:8002'
+          }
+        }
+        
+        const response = await fetch(`${apiBaseUrl}/api/v1/assets/bulk-delete`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
