@@ -33,6 +33,7 @@ interface UserCreate {
 }
 
 interface UserUpdate {
+  username?: string
   email?: string
   full_name?: string
   department?: string

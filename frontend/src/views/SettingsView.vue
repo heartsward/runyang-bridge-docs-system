@@ -76,6 +76,9 @@
     <!-- 编辑用户模态框 -->
     <n-modal v-model:show="showEditUserModal" preset="dialog" title="编辑用户信息">
       <n-form :model="editUserForm" label-placement="left" label-width="100px">
+        <n-form-item label="用户名" required>
+          <n-input v-model:value="editUserForm.username" placeholder="请输入用户名" />
+        </n-form-item>
         <n-form-item label="邮箱" required>
           <n-input v-model:value="editUserForm.email" placeholder="请输入邮箱" />
         </n-form-item>
@@ -176,6 +179,7 @@ const newUserForm = ref<UserCreate>({
 
 // 编辑用户表单
 const editUserForm = ref<UserUpdate>({
+  username: '',
   email: '',
   full_name: '',
   department: '',
@@ -328,6 +332,7 @@ const handleCreateUser = async () => {
 const handleEditUser = (user: User) => {
   editingUser.value = user
   editUserForm.value = {
+    username: user.username,
     email: user.email,
     full_name: user.full_name || '',
     department: user.department || '',

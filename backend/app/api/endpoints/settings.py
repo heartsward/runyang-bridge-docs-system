@@ -27,6 +27,7 @@ class UserCreate(BaseModel):
     is_superuser: bool = False
 
 class UserUpdate(BaseModel):
+    username: str = None
     email: str = None
     full_name: str = None
     department: str = None
@@ -152,7 +153,12 @@ async def update_user(
     
     # 更新用户信息
     for field, value in user_data.dict(exclude_unset=True).items():
-        if field == "email" and value:
+        if field == "username" and value:
+            # 检查用户名是否已被其他用户使用
+            existing_user = db.query(User).filter(User.username == value, User.id != user_id).first()
+            if existing_user:
+                raise HTTPException(status_code=400, detail="用户名已被其他用户使用")
+        elif field == "email" and value:
             # 检查邮箱是否已被其他用户使用
             existing_user = db.query(User).filter(User.email == value, User.id != user_id).first()
             if existing_user:
