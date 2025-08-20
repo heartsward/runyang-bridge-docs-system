@@ -932,14 +932,20 @@ const previewDocument = async (document: Document) => {
 // 下载文档
 const downloadDocument = async (doc: Document) => {
   try {
-    // 使用fetch获取文件，然后创建安全的下载
-    // 检测当前访问环境，如果是本地访问就使用localhost，避免CORS问题
+    // 使用动态地址检测，支持多机器访问
     const currentHost = window.location.hostname
-    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+    const currentProtocol = window.location.protocol
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
     
-    // 如果当前访问是localhost但配置的API是其他IP，改为localhost避免CORS
-    if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
-      apiBaseUrl = 'http://localhost:8002'
+    // 如果没有环境变量配置，自动推断API地址
+    if (!apiBaseUrl) {
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        // 如果是通过IP访问，使用相同IP的8002端口
+        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+      } else {
+        // 本地访问使用localhost
+        apiBaseUrl = 'http://localhost:8002'
+      }
     }
     
     const token = localStorage.getItem('access_token')

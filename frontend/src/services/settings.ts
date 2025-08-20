@@ -99,7 +99,16 @@ export class SettingsService {
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API
-      const response = await fetch('http://localhost:8002/direct-users', {
+      // 使用动态地址检测
+      const currentHost = window.location.hostname
+      const currentProtocol = window.location.protocol
+      let baseUrl = 'http://localhost:8002'
+      
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        baseUrl = `${currentProtocol}//${currentHost}:8002`
+      }
+      
+      const response = await fetch(`${baseUrl}/direct-users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -135,7 +144,16 @@ export class SettingsService {
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API
-      const response = await fetch(`http://localhost:8002/direct-users/${userId}`, {
+      // 使用动态地址检测
+      const currentHost = window.location.hostname
+      const currentProtocol = window.location.protocol
+      let baseUrl = 'http://localhost:8002'
+      
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        baseUrl = `${currentProtocol}//${currentHost}:8002`
+      }
+      
+      const response = await fetch(`${baseUrl}/direct-users/${userId}`, {
         method: 'DELETE'
       })
       

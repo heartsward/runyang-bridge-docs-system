@@ -1110,7 +1110,19 @@ const handleExtract = async () => {
     formData.append('auto_merge', extractForm.auto_merge.toString())
     formData.append('merge_threshold', extractForm.merge_threshold.toString())
     
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+    // 使用动态地址检测，支持多机器访问
+    const currentHost = window.location.hostname
+    const currentProtocol = window.location.protocol
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+    
+    if (!apiBaseUrl) {
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+      } else {
+        apiBaseUrl = 'http://localhost:8002'
+      }
+    }
+    
     const token = localStorage.getItem('access_token')
     
     const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract`, {
@@ -1264,7 +1276,19 @@ const handleExport = async () => {
     const assetIds = selectedAssets.value.map(asset => asset.id)
     
     // 导出功能需要直接使用fetch来处理文件下载
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+    // 使用动态地址检测，支持多机器访问
+    const currentHost = window.location.hostname
+    const currentProtocol = window.location.protocol
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+    
+    if (!apiBaseUrl) {
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+      } else {
+        apiBaseUrl = 'http://localhost:8002'
+      }
+    }
+    
     const token = localStorage.getItem('access_token')
     
     const response = await fetch(`${apiBaseUrl}/api/v1/assets/export`, {
