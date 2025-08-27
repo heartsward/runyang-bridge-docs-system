@@ -60,16 +60,13 @@ def init_default_users():
         from sqlalchemy.orm import Session
         from app.crud.user import user as crud_user
         from app.schemas.user import UserCreate
-        from app.models.user import User
         
         db = Session(bind=engine)
         try:
-            # 检查admin用户是否已存在（同时检查用户名和邮箱）
-            existing_admin_by_username = crud_user.get_by_username(db, username="admin")
-            existing_admin_by_email = db.query(User).filter(User.email == "admin@system.com").first()
-            
-            if not existing_admin_by_username and not existing_admin_by_email:
-                # 用户名和邮箱都不存在，可以创建新用户
+            # 检查admin用户是否已存在
+            existing_admin = crud_user.get_by_username(db, username="admin")
+            if not existing_admin:
+                # 创建默认管理员用户
                 admin_user = UserCreate(
                     username="admin",
                     email="admin@system.com",
@@ -84,75 +81,21 @@ def init_default_users():
                 
                 created_user = crud_user.create(db, obj_in=admin_user)
                 print("OK: 默认管理员用户创建成功 (admin/admin123)")
-                
-            elif existing_admin_by_username:
-                # admin用户名已存在，检查权限
-                if not existing_admin_by_username.is_superuser:
+            else:
+                # 检查现有admin用户是否具有管理员权限
+                if not existing_admin.is_superuser:
                     print("INFO: admin用户存在但缺少管理员权限，正在修复...")
-                    existing_admin_by_username.is_superuser = True
-                    db.add(existing_admin_by_username)
+                    existing_admin.is_superuser = True
+                    db.add(existing_admin)
                     db.commit()
                     print("OK: admin用户管理员权限已修复")
                 else:
                     print("OK: 管理员用户已存在且权限正常")
-                    
-            elif existing_admin_by_email:
-                # 邮箱已被其他用户使用
-                if existing_admin_by_email.username != "admin":
-                    print(f"WARNING: 邮箱 admin@system.com 已被用户 '{existing_admin_by_email.username}' 使用")
-                    # 尝试用不同邮箱创建admin用户
-                    if not existing_admin_by_username:
-                        admin_user = UserCreate(
-                            username="admin",
-                            email="admin@localhost.com",  # 使用不同的邮箱
-                            password="admin123",
-                            full_name="系统管理员",
-                            department="技术部",
-                            position="系统管理员",
-                            phone="13800138000",
-                            is_active=True,
-                            is_superuser=True
-                        )
-                        created_user = crud_user.create(db, obj_in=admin_user)
-                        print("OK: 使用备用邮箱创建管理员用户成功 (admin/admin123, admin@localhost.com)")
-                else:
-                    # 同一用户，检查权限
-                    if not existing_admin_by_email.is_superuser:
-                        existing_admin_by_email.is_superuser = True
-                        db.add(existing_admin_by_email)
-                        db.commit()
-                        print("OK: 管理员用户权限已修复")
-                    else:
-                        print("OK: 管理员用户已存在且权限正常")
-                        
         finally:
             db.close()
-            
     except Exception as e:
-        error_msg = str(e)
-        if "UNIQUE constraint failed" in error_msg:
-            if "users.email" in error_msg:
-                print("ERROR: 用户初始化失败: 邮箱地址已被使用")
-            elif "users.username" in error_msg:
-                print("ERROR: 用户初始化失败: 用户名已被使用")
-            else:
-                print(f"ERROR: 用户初始化失败: 唯一约束冲突 - {error_msg}")
-        else:
-            print(f"ERROR: 用户初始化失败: {error_msg}")
-        
-        # 尝试显示现有管理员用户信息
-        try:
-            db = Session(bind=engine)
-            admin_users = db.query(User).filter(
-                (User.username == "admin") | (User.is_superuser == True)
-            ).all()
-            if admin_users:
-                print("INFO: 现有管理员用户:")
-                for user in admin_users:
-                    print(f"   - 用户名: {user.username}, 邮箱: {user.email}, 超级用户: {user.is_superuser}")
-            db.close()
-        except Exception:
-            pass
+        print(f"WARNING: 用户初始化异常: {e}")
+        print("INFO: 管理员用户可能已存在，系统继续启动")
 
 # 启动后台任务处理器
 def startup_background_tasks():
