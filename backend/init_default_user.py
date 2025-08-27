@@ -30,16 +30,12 @@ def init_default_users():
             department="技术部",
             position="系统管理员",
             phone="13800138000",
-            is_active=True
+            is_active=True,
+            is_superuser=True  # 直接设置为超级用户
         )
         
-        # 创建用户
+        # 创建用户（包含超级用户权限）
         created_user = crud_user.create(db, obj_in=admin_user)
-        
-        # 设置为超级用户
-        created_user.is_superuser = True
-        db.add(created_user)
-        db.commit()
         
         print(f"✓ 默认管理员用户创建成功")
         print(f"  用户名: admin")

@@ -29,6 +29,7 @@ class CRUDUser:
             position=obj_in.position,
             phone=obj_in.phone,
             is_active=obj_in.is_active,
+            is_superuser=obj_in.is_superuser,
         )
         db.add(db_obj)
         db.commit()
