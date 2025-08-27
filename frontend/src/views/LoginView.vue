@@ -159,8 +159,18 @@ const handleLogin = async () => {
       console.log('Token已设置，检查认证状态:', authService.isAuthenticated())
       console.log('Token内容:', authService.getToken()?.substring(0, 20) + '...')
       
-      // 小延迟确保token完全设置
-      await new Promise(resolve => setTimeout(resolve, 100))
+      // 获取用户详细信息
+      try {
+        const userInfo = await authService.getCurrentUser()
+        console.log('用户信息:', userInfo)
+        console.log('用户权限:', userInfo.is_superuser ? '管理员' : '普通用户')
+        
+        // 将用户信息存储到localStorage以供其他组件使用
+        localStorage.setItem('currentUser', JSON.stringify(userInfo))
+      } catch (error) {
+        console.error('获取用户信息失败:', error)
+        // 即使获取用户信息失败也继续登录流程
+      }
       
       console.log('准备跳转到文档页面...')
       message.success('登录成功')

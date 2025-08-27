@@ -92,7 +92,8 @@
       "Bash(\"C:\\Program Files\\LibreOffice\\program\\soffice.exe\" --headless --convert-to txt backend/uploads/22.xls --outdir backend/uploads/temp)",
       "Bash(\"C:\\Program Files\\LibreOffice\\program\\soffice.exe\" --headless --convert-to txt --outdir C:Usersccclyyunweiruanjianbackenduploadstemp C:Usersccclyyunweiruanjianbackenduploads11.xlsx)",
       "Bash(\"C:\\Program Files\\LibreOffice\\program\\soffice.exe\" --help)",
-      "Bash(\"C:\\Program Files\\LibreOffice\\program\\soffice.exe\" --headless --convert-to txt --outdir . test_document.pdf)"
+      "Bash(\"C:\\Program Files\\LibreOffice\\program\\soffice.exe\" --headless --convert-to txt --outdir . test_document.pdf)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "additionalDirectories": [

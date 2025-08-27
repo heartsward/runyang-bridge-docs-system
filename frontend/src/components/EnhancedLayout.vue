@@ -286,7 +286,24 @@ const toggleTheme = () => {
 
 const loadCurrentUser = async () => {
   try {
+    // 首先尝试从localStorage读取用户信息
+    const storedUser = localStorage.getItem('currentUser')
+    if (storedUser) {
+      try {
+        currentUser.value = JSON.parse(storedUser)
+        console.log('从localStorage加载用户信息:', currentUser.value)
+        return
+      } catch (e) {
+        console.warn('解析localStorage中的用户信息失败:', e)
+      }
+    }
+    
+    // 如果localStorage中没有，从API获取
     currentUser.value = await authService.getCurrentUser()
+    console.log('从API获取用户信息:', currentUser.value)
+    
+    // 保存到localStorage
+    localStorage.setItem('currentUser', JSON.stringify(currentUser.value))
   } catch (error) {
     console.error('加载用户信息失败:', error)
   }

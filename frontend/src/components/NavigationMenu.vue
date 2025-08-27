@@ -339,6 +339,8 @@ const handleChangePassword = async () => {
 
 const handleLogout = () => {
   authService.logout()
+  currentUser.value = null
+  localStorage.removeItem('currentUser')
   message.success('已退出登录')
   router.push('/login')
 }
@@ -347,18 +349,39 @@ const loadCurrentUser = async () => {
   try {
     userLoading.value = true
     if (authService.isAuthenticated()) {
-      console.log('开始获取用户信息...')
+      // 首先尝试从localStorage读取用户信息
+      const storedUser = localStorage.getItem('currentUser')
+      if (storedUser) {
+        try {
+          currentUser.value = JSON.parse(storedUser)
+          console.log('从localStorage加载用户信息:', currentUser.value)
+          console.log('用户权限:', currentUser.value?.is_superuser ? '管理员' : '普通用户')
+          userLoading.value = false
+          return
+        } catch (e) {
+          console.warn('解析localStorage中的用户信息失败:', e)
+        }
+      }
+      
+      // 如果localStorage中没有或解析失败，从API获取
+      console.log('从API获取用户信息...')
       currentUser.value = await authService.getCurrentUser()
       console.log('用户信息获取成功:', currentUser.value)
+      console.log('用户权限:', currentUser.value?.is_superuser ? '管理员' : '普通用户')
+      
+      // 保存到localStorage
+      localStorage.setItem('currentUser', JSON.stringify(currentUser.value))
     } else {
       console.log('用户未登录')
       currentUser.value = null
+      localStorage.removeItem('currentUser')
     }
   } catch (error: any) {
     console.error('获取用户信息失败:', error)
     // 如果获取用户信息失败，可能是token过期，直接退出登录
     authService.logout()
     currentUser.value = null
+    localStorage.removeItem('currentUser')
     // 只有在需要认证的页面才跳转到登录页
     if (router.currentRoute.value.meta.requiresAuth) {
       console.log('跳转到登录页面')
