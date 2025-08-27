@@ -1128,8 +1128,8 @@ const handleSubmit = async () => {
     
     showCreateModal.value = false
     resetForm()
-    // 创建/编辑后重新加载资产列表
-    await loadAssets()
+    // 创建/编辑后保持当前筛选状态重新搜索
+    await handleSearch()
     await loadStatistics()
   } catch (error: any) {
     message.error(error.detail || '操作失败')
@@ -1195,8 +1195,8 @@ const deleteAsset = async (id: number) => {
       try {
         await assetService.deleteAsset(id)
         message.success('设备删除成功')
-        // 删除后重新加载资产列表
-        await loadAssets()
+        // 删除后保持当前筛选状态重新搜索
+        await handleSearch()
         await loadStatistics()
       } catch (error: any) {
         message.error(error.detail || '删除失败')
@@ -1373,9 +1373,9 @@ const confirmExtractedAssets = async () => {
         console.warn('保存过程中的错误:', result.errors)
       }
       
-      // 关闭确认对话框并刷新列表
+      // 关闭确认对话框并保持筛选状态刷新列表
       showExtractResult.value = false
-      await loadAssets()
+      await handleSearch()
       await loadStatistics()
     } else {
       message.error('保存失败')
@@ -1472,8 +1472,8 @@ const handleBulkDelete = () => {
         // 清空选择
         selectedAssets.value = []
         
-        // 重新加载资产列表
-        await loadAssets()
+        // 批量删除后保持当前筛选状态重新搜索
+        await handleSearch()
         await loadStatistics()
       } catch (error: any) {
         message.error(error.message || '批量删除失败')
