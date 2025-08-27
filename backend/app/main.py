@@ -1,27 +1,27 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import warnings
+
+# 在所有其他导入之前设置警告过滤器，抑制bcrypt版本警告
+warnings.filterwarnings("ignore", message=".*bcrypt.*")
+warnings.filterwarnings("ignore", message=".*trapped.*error reading bcrypt version.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="passlib.*")
+
 from app.api.api_v1 import api_router
 from app.core.config import settings
 from app.db.database import engine
 from app.models import user, document, asset
-import os
-import warnings
 
 # 设置时区环境变量
 os.environ['TZ'] = settings.TIMEZONE
 
-# 验证bcrypt功能并处理版本警告
+# 验证bcrypt功能
 def verify_bcrypt_functionality():
     """验证bcrypt密码哈希功能是否正常工作"""
-    import warnings
-    
-    # 抑制bcrypt版本警告
-    warnings.filterwarnings("ignore", message=".*bcrypt.*__about__.*", category=UserWarning)
-    warnings.filterwarnings("ignore", message=".*trapped.*error reading bcrypt version.*")
-    
     try:
-        # 直接使用CryptContext避免版本检测问题
+        # 直接使用CryptContext测试密码功能
         from passlib.context import CryptContext
         
         pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -39,7 +39,18 @@ def verify_bcrypt_functionality():
             return False
             
     except Exception as e:
-        print(f"ERROR: bcrypt功能测试失败: {e}")
+        # 即使有版本警告，只要功能正常就继续
+        print(f"WARNING: bcrypt测试遇到问题: {e}")
+        # 尝试使用应用的实际安全函数
+        try:
+            from app.core.security import get_password_hash, verify_password
+            test_hash = get_password_hash("test123")
+            if verify_password("test123", test_hash):
+                print("OK: bcrypt密码哈希功能正常（通过应用安全函数验证）")
+                return True
+        except Exception:
+            pass
+        print("ERROR: bcrypt功能不可用")
         return False
 
 # 创建数据库表

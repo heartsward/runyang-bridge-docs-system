@@ -89,9 +89,12 @@ async def search_documents(
                             "match_type": "content"  # 标记匹配类型
                         })
                     else:
+                        pass
                         
                 except Exception as e:
+                    pass
             else:
+                pass
             
             # 如果内容中没有找到，检查标题和描述
             if not content_found:
@@ -397,6 +400,7 @@ async def preview_document(
         is_truncated = False
         # 添加安全检查：如果内容超过10MB，提供警告但仍显示完整内容
         if len(content) > 10 * 1024 * 1024:  # 10MB
+            pass  # 大文件处理，暂时无特殊操作
         
         return {
             "document_id": document_id,
