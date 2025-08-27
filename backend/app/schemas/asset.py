@@ -132,9 +132,20 @@ class Asset(AssetBase):
                 return []
         return v
     
-    @validator('created_at', 'updated_at', 'purchase_date', 'warranty_expiry', 'last_maintenance', 'next_maintenance', pre=True, always=True)
-    def convert_timezone(cls, v):
-        """将时间转换为北京时间"""
+    @validator('created_at', 'updated_at', pre=True, always=True)
+    def ensure_timezone_aware(cls, v):
+        """确保时间戳有时区信息（数据库层已处理转换）"""
+        if v is None:
+            return v
+        if isinstance(v, datetime):
+            # 如果时间戳已经有时区信息，直接返回
+            # BeijingDateTime 类型会自动处理时区转换
+            return v
+        return v
+    
+    @validator('purchase_date', 'warranty_expiry', 'last_maintenance', 'next_maintenance', pre=True, always=True)
+    def convert_maintenance_dates(cls, v):
+        """维护日期时间转换为北京时间"""
         if v is None:
             return v
         if isinstance(v, datetime):
