@@ -376,6 +376,12 @@
                     {{ getAssetStatusLabel(viewingAsset.status) }}
                   </n-tag>
                 </n-descriptions-item>
+                <n-descriptions-item label="备注信息" span="2">
+                  <div v-if="viewingAsset.notes && viewingAsset.notes.trim()">
+                    {{ viewingAsset.notes }}
+                  </div>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
                 <n-descriptions-item label="创建时间" span="2">
                   {{ formatDateTime(viewingAsset.created_at) }}
                 </n-descriptions-item>
@@ -416,15 +422,6 @@
               </n-form>
             </n-tab-pane>
 
-            <!-- 备注信息标签页 -->
-            <n-tab-pane name="notes" tab="备注信息">
-              <div v-if="viewingAsset.notes && viewingAsset.notes.trim()">
-                <n-text>{{ viewingAsset.notes }}</n-text>
-              </div>
-              <div v-else>
-                <n-empty description="暂无备注信息" size="medium" />
-              </div>
-            </n-tab-pane>
           </n-tabs>
         </n-space>
       </div>
