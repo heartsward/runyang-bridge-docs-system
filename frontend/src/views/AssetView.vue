@@ -1068,7 +1068,7 @@ const loadStatistics = async () => {
 }
 
 // 创建防抖搜索函数
-const debouncedSearch = debounce(async () => {
+const debouncedSearch = debounce(async (resetPage = true) => {
   try {
     loading.value = true
     
@@ -1094,7 +1094,11 @@ const debouncedSearch = debounce(async () => {
     const searchResults = await assetService.searchAssets(query)
     assets.value = searchResults
     pagination.itemCount = searchResults.length
-    pagination.page = 1
+    
+    // 只有在指定重置页码时才重置，否则保持当前页码
+    if (resetPage) {
+      pagination.page = 1
+    }
   } catch (error: any) {
     console.error('搜索失败:', error)
     message.error(error.message || error.detail || '搜索失败')
@@ -1105,7 +1109,7 @@ const debouncedSearch = debounce(async () => {
 }, 300)
 
 // 替换原来的handleSearch函数为防抖版本
-const handleSearch = debouncedSearch
+const handleSearch = (resetPage = true) => debouncedSearch(resetPage)
 
 const handleDepartmentFilter = async (value: string | null) => {
   // 无论选择值还是清空，都调用统一的搜索逻辑
@@ -1177,8 +1181,8 @@ const handleSubmit = async () => {
     
     showCreateModal.value = false
     resetForm()
-    // 创建/编辑后保持当前筛选状态重新搜索
-    await handleSearch()
+    // 创建/编辑后保持当前筛选状态和页码重新搜索
+    await handleSearch(false)  // 不重置页码
     await loadStatistics()
   } catch (error: any) {
     message.error(error.detail || '操作失败')
@@ -1244,8 +1248,8 @@ const deleteAsset = async (id: number) => {
       try {
         await assetService.deleteAsset(id)
         message.success('设备删除成功')
-        // 删除后保持当前筛选状态重新搜索
-        await handleSearch()
+        // 删除后保持当前筛选状态和页码重新搜索
+        await handleSearch(false)  // 不重置页码
         await loadStatistics()
       } catch (error: any) {
         message.error(error.detail || '删除失败')
@@ -1422,9 +1426,9 @@ const confirmExtractedAssets = async () => {
         console.warn('保存过程中的错误:', result.errors)
       }
       
-      // 关闭确认对话框并保持筛选状态刷新列表
+      // 关闭确认对话框并保持筛选状态和页码刷新列表
       showExtractResult.value = false
-      await handleSearch()
+      await handleSearch(false)  // 不重置页码
       await loadStatistics()
     } else {
       message.error('保存失败')
@@ -1521,8 +1525,8 @@ const handleBulkDelete = () => {
         // 清空选择
         selectedAssets.value = []
         
-        // 批量删除后保持当前筛选状态重新搜索
-        await handleSearch()
+        // 批量删除后保持当前筛选状态和页码重新搜索
+        await handleSearch(false)  // 不重置页码
         await loadStatistics()
       } catch (error: any) {
         message.error(error.message || '批量删除失败')
