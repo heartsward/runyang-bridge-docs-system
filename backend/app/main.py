@@ -15,6 +15,47 @@ user.Base.metadata.create_all(bind=engine)
 document.Base.metadata.create_all(bind=engine)
 asset.Base.metadata.create_all(bind=engine)
 
+# 初始化默认用户
+def init_default_users():
+    """初始化默认用户"""
+    try:
+        from sqlalchemy.orm import Session
+        from app.crud.user import user as crud_user
+        from app.schemas.user import UserCreate
+        
+        db = Session(bind=engine)
+        try:
+            # 检查admin用户是否已存在
+            existing_admin = crud_user.get_by_username(db, username="admin")
+            if not existing_admin:
+                # 创建默认管理员用户
+                admin_user = UserCreate(
+                    username="admin",
+                    email="admin@system.com",
+                    password="admin123",
+                    full_name="系统管理员",
+                    department="技术部",
+                    position="系统管理员",
+                    phone="13800138000",
+                    is_active=True
+                )
+                
+                # 创建用户
+                created_user = crud_user.create(db, obj_in=admin_user)
+                
+                # 设置为超级用户
+                created_user.is_superuser = True
+                db.add(created_user)
+                db.commit()
+                
+                print("✓ 默认管理员用户创建成功 (admin/admin123)")
+            else:
+                print("✓ 管理员用户已存在")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"默认用户初始化失败: {e}")
+
 # 启动后台任务处理器
 def startup_background_tasks():
     try:
@@ -27,6 +68,7 @@ def startup_background_tasks():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时执行
+    init_default_users()  # 初始化默认用户
     startup_background_tasks()
     yield
     # 关闭时执行（如果需要的话）
