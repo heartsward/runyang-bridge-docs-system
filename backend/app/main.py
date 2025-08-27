@@ -46,7 +46,15 @@ def init_default_users():
                 
                 print("✓ 默认管理员用户创建成功 (admin/admin123)")
             else:
-                print("✓ 管理员用户已存在")
+                # 检查现有admin用户是否具有管理员权限
+                if not existing_admin.is_superuser:
+                    print("⚠️  admin用户存在但缺少管理员权限，正在修复...")
+                    existing_admin.is_superuser = True
+                    db.add(existing_admin)
+                    db.commit()
+                    print("✅ admin用户管理员权限已修复")
+                else:
+                    print("✓ 管理员用户已存在且权限正常")
         finally:
             db.close()
     except Exception as e:
