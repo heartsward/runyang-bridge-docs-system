@@ -27,6 +27,11 @@ export default defineConfig(({ mode }) => {
         // Vite会自动生成自签名证书
       } : false
     },
+    preview: {
+      host: '0.0.0.0',
+      port: 5173,
+      strictPort: true
+    },
     build: {
       outDir: env.VITE_BUILD_OUTPUT || 'dist',
       sourcemap: env.VITE_BUILD_SOURCEMAP === 'true',

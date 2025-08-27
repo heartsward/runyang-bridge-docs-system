@@ -91,11 +91,7 @@ echo ==========================================
 echo   System Started Successfully!
 echo ==========================================
 echo.
-if "%FRONTEND_MODE%"=="preview" (
-    echo Frontend: http://localhost:4173 (Production Preview)
-) else (
-    echo Frontend: http://localhost:5173 (Development)
-)
+echo Frontend: http://localhost:5173 (Development & Production)
 echo Backend API: http://localhost:8002/docs
 echo System Status: http://localhost:8002/health
 echo.
@@ -103,11 +99,7 @@ echo Default Login: admin / admin123
 echo.
 
 timeout /t 3 /nobreak >nul
-if "%FRONTEND_MODE%"=="preview" (
-    start http://localhost:4173
-) else (
-    start http://localhost:5173
-)
+start http://localhost:5173
 
 echo Press any key to exit...
 pause >nul

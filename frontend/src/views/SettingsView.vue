@@ -282,28 +282,9 @@ const userColumns = [
 // 获取当前用户信息
 const loadCurrentUser = async () => {
   try {
-    // 首先尝试从localStorage读取用户信息
-    const storedUser = localStorage.getItem('currentUser')
-    if (storedUser) {
-      try {
-        currentUser.value = JSON.parse(storedUser)
-        console.log('SettingsView: 从localStorage加载用户信息:', currentUser.value)
-        console.log('SettingsView: 用户权限:', currentUser.value?.is_superuser ? '管理员' : '普通用户')
-        return
-      } catch (e) {
-        console.warn('SettingsView: 解析localStorage中的用户信息失败:', e)
-      }
-    }
-    
-    // 如果localStorage中没有，从API获取
-    console.log('SettingsView: 从API获取用户信息...')
     currentUser.value = await authService.getCurrentUser()
-    console.log('SettingsView: 从API获取用户信息成功:', currentUser.value)
-    
-    // 保存到localStorage
-    localStorage.setItem('currentUser', JSON.stringify(currentUser.value))
   } catch (error) {
-    console.error('获取用户信息失败:', error)
+    console.error('获取当前用户信息失败:', error)
   }
 }
 

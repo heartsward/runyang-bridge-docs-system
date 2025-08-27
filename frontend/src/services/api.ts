@@ -6,6 +6,10 @@ function getApiBaseUrl(): string {
   // 1. 优先使用环境变量配置
   const envApiUrl = import.meta.env.VITE_API_BASE_URL
   if (envApiUrl) {
+    // 检查是否已经包含 /api/v1 路径，避免重复
+    if (envApiUrl.endsWith('/api/v1')) {
+      return envApiUrl
+    }
     return envApiUrl + '/api/v1'
   }
   

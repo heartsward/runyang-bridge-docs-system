@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     CORS_AUTO_DETECT: bool = True  # 是否自动检测本机IP
     CORS_INCLUDE_LOCALHOST: bool = True  # 是否包含localhost
     CORS_INCLUDE_HTTPS: bool = True  # 是否包含HTTPS变体
-    CORS_FRONTEND_PORT: str = "5173"  # 新增：前端端口
-    CORS_EXTRA_PORTS: str = "4173"  # 额外端口（逗号分隔） - 支持生产预览模式
+    CORS_FRONTEND_PORT: str = "5173"  # 前端端口（开发和生产统一）
+    CORS_EXTRA_PORTS: str = ""  # 额外端口（已统一到5173）
     
     @property
     def BACKEND_CORS_ORIGINS(self) -> List[str]:
