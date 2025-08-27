@@ -78,41 +78,62 @@
       </n-grid-item>
     </n-grid>
 
-    <!-- 筛选器 -->
+    <!-- 筛选器和排序 -->
     <n-card style="margin-bottom: 16px;">
-      <n-space>
-        <n-select
-          v-model:value="filters.asset_type"
-          placeholder="设备类型"
-          :options="assetTypeOptions"
-          clearable
-          style="width: 150px"
-          @update:value="handleSearch"
-        />
-        <n-select
-          v-model:value="filters.status"
-          placeholder="状态"
-          :options="assetStatusOptions"
-          clearable
-          style="width: 120px"
-          @update:value="handleSearch"
-        />
-        <n-select
-          v-model:value="filters.department"
-          placeholder="部门"
-          :options="departmentOptions"
-          clearable
-          style="width: 120px"
-          @update:value="handleDepartmentFilter"
-        />
-        <n-select
-          v-model:value="filters.network_location"
-          placeholder="所处网络"
-          :options="networkLocationOptions"
-          clearable
-          style="width: 120px"
-          @update:value="handleSearch"
-        />
+      <n-space vertical size="medium">
+        <!-- 第一行：筛选器 -->
+        <n-space>
+          <n-select
+            v-model:value="filters.asset_type"
+            placeholder="设备类型"
+            :options="assetTypeOptions"
+            clearable
+            style="width: 150px"
+            @update:value="handleSearch"
+          />
+          <n-select
+            v-model:value="filters.status"
+            placeholder="状态"
+            :options="assetStatusOptions"
+            clearable
+            style="width: 120px"
+            @update:value="handleSearch"
+          />
+          <n-select
+            v-model:value="filters.department"
+            placeholder="部门"
+            :options="departmentOptions"
+            clearable
+            style="width: 120px"
+            @update:value="handleDepartmentFilter"
+          />
+          <n-select
+            v-model:value="filters.network_location"
+            placeholder="所处网络"
+            :options="networkLocationOptions"
+            clearable
+            style="width: 120px"
+            @update:value="handleSearch"
+          />
+        </n-space>
+        
+        <!-- 第二行：排序选项 -->
+        <n-space align="center">
+          <n-text depth="3" style="white-space: nowrap;">排序方式:</n-text>
+          <n-select
+            v-model:value="sortConfig.sortBy"
+            placeholder="排序字段"
+            :options="sortByOptions"
+            style="width: 150px"
+            @update:value="handleSortChange"
+          />
+          <n-select
+            v-model:value="sortConfig.sortOrder"
+            :options="sortOrderOptions"
+            style="width: 100px"
+            @update:value="handleSortChange"
+          />
+        </n-space>
       </n-space>
     </n-card>
 
@@ -656,6 +677,12 @@ const filters = reactive({
   network_location: null as string | null
 })
 
+// 排序配置
+const sortConfig = reactive({
+  sortBy: 'created_at' as string,
+  sortOrder: 'desc' as 'asc' | 'desc'
+})
+
 // 表单数据
 const assetForm = reactive<AssetCreate>({
   name: '',
@@ -706,6 +733,24 @@ const networkLocationOptions = computed(() => [
   { label: '办公网', value: 'office' },
   { label: '监控网', value: 'monitoring' },
   { label: '收费网', value: 'billing' }
+])
+
+// 排序字段选项
+const sortByOptions = computed(() => [
+  { label: '创建时间', value: 'created_at' },
+  { label: '更新时间', value: 'updated_at' },
+  { label: '设备名称', value: 'name' },
+  { label: '设备类型', value: 'asset_type' },
+  { label: '所属部门', value: 'department' },
+  { label: '所处网络', value: 'network_location' },
+  { label: 'IP地址', value: 'ip_address' },
+  { label: '状态', value: 'status' }
+])
+
+// 排序顺序选项
+const sortOrderOptions = computed(() => [
+  { label: '降序', value: 'desc' },
+  { label: '升序', value: 'asc' }
 ])
 
 // 从现有资产中获取部门选项
@@ -1042,6 +1087,8 @@ const debouncedSearch = debounce(async () => {
       status: filters.status || undefined,
       department: filters.department || undefined,
       network_location: filters.network_location || undefined,
+      sort_by: sortConfig.sortBy,
+      sort_order: sortConfig.sortOrder,
       page: 1,
       per_page: 1000
     }
@@ -1065,6 +1112,11 @@ const handleSearch = debouncedSearch
 
 const handleDepartmentFilter = async (value: string | null) => {
   // 无论选择值还是清空，都调用统一的搜索逻辑
+  await handleSearch()
+}
+
+// 处理排序变化
+const handleSortChange = async () => {
   await handleSearch()
 }
 

@@ -168,6 +168,8 @@ export interface AssetSearchQuery {
   department?: string
   network_location?: string
   tags?: string[]
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
   page?: number
   per_page?: number
 }

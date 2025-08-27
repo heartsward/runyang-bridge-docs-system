@@ -35,6 +35,7 @@ class UserUpdate(BaseModel):
     phone: str = None
     is_active: bool = None
     is_superuser: bool = None
+    password: str = None  # 添加密码字段
 
 class UserResponse(BaseModel):
     id: int
@@ -163,7 +164,15 @@ async def update_user(
             existing_user = db.query(User).filter(User.email == value, User.id != user_id).first()
             if existing_user:
                 raise HTTPException(status_code=400, detail="邮箱已被其他用户使用")
-        setattr(db_user, field, value)
+        elif field == "password" and value and value.strip():
+            # 特殊处理密码字段 - 需要加密存储
+            hashed_password = pwd_context.hash(value.strip())
+            setattr(db_user, "hashed_password", hashed_password)
+            continue  # 跳过设置原始密码
+        
+        # 设置其他字段（跳过空的密码字段）
+        if field != "password":
+            setattr(db_user, field, value)
     
     db.commit()
     db.refresh(db_user)

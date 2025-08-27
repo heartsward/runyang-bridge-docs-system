@@ -32,6 +32,9 @@ export class AssetService {
     if (query.tags) {
       query.tags.forEach(tag => params.append('tags', tag))
     }
+    // 添加排序参数
+    if (query.sort_by) params.append('sort_by', query.sort_by)
+    if (query.sort_order) params.append('sort_order', query.sort_order)
     
     const response = await apiService.get<{items: Asset[], total: number}>(`/assets/?${params.toString()}`)
     return response.items || []
