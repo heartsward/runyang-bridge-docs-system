@@ -39,7 +39,6 @@ async def upload_multiple_files(
             "tags": tags.split(',') if tags else [],
             "status": "uploaded",
             "content_extracted": None,
-            "ai_summary": None,
             "created_at": "2025-08-06T12:00:00",
             "updated_at": None,
             "owner": {"username": current_user.username, "full_name": "管理员"}

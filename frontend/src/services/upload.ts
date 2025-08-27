@@ -16,17 +16,15 @@ class UploadService {
     formData.append('file', data.file)
     formData.append('title', data.title)
     
-    if (data.description) {
-      formData.append('description', data.description)
-    }
+    // 总是发送这些字段，即使是空值
+    formData.append('description', data.description || '')
+    formData.append('tags', data.tags || '')
+    
     if (data.category_id) {
       formData.append('category_id', data.category_id.toString())
     }
-    if (data.tags) {
-      formData.append('tags', data.tags)
-    }
 
-    return await apiService.upload<Document>('/upload', formData)
+    return await apiService.upload<Document>('/upload/', formData)
   }
 
   // 多文件上传
@@ -53,7 +51,7 @@ class UploadService {
       formData.append('tags', options.tags)
     }
 
-    return await apiService.upload<Document[]>('/upload/upload-multiple', formData)
+    return await apiService.upload<Document[]>('/upload/multiple', formData)
   }
 
   // 下载文件

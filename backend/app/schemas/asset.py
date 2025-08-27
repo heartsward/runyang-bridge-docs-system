@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field, validator
 from app.models.asset import AssetStatus, AssetType, NetworkLocation
 
@@ -131,6 +131,21 @@ class Asset(AssetBase):
             except json.JSONDecodeError:
                 return []
         return v
+    
+    @validator('created_at', 'updated_at', 'purchase_date', 'warranty_expiry', 'last_maintenance', 'next_maintenance', pre=True, always=True)
+    def convert_timezone(cls, v):
+        """将时间转换为北京时间"""
+        if v is None:
+            return v
+        if isinstance(v, datetime):
+            # 北京时区
+            beijing_tz = timezone(timedelta(hours=8))
+            if v.tzinfo is None:
+                # 无时区信息，假设为UTC时间
+                v = v.replace(tzinfo=timezone.utc)
+            # 转换为北京时间
+            return v.astimezone(beijing_tz)
+        return v
 
 
 class AssetSearchQuery(BaseModel):
@@ -174,6 +189,15 @@ class AssetBulkImportRequest(BaseModel):
     file_type: str = Field(..., description="文件类型: csv/xlsx/json")
     mapping: Dict[str, str] = Field(..., description="字段映射关系")
     auto_merge: bool = Field(True, description="是否自动合并")
+
+
+class AssetList(BaseModel):
+    """资产列表响应模型"""
+    items: List[Asset]
+    total: int
+    page: int
+    per_page: int
+    pages: int
 
 
 class AssetStatistics(BaseModel):

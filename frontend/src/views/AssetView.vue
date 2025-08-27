@@ -283,9 +283,14 @@
     </n-modal>
 
     <!-- 提取结果模态框 -->
-    <n-modal v-model:show="showExtractResult" preset="card" style="width: 800px" title="提取结果">
+    <n-modal v-model:show="showExtractResult" preset="card" style="width: 800px" title="提取结果确认">
       <div v-if="extractResult">
-        <n-alert v-if="extractResult.errors.length > 0" type="warning" style="margin-bottom: 16px;">
+        <n-alert type="info" style="margin-bottom: 16px;">
+          <template #header>文件提取完成</template>
+          请确认是否要将以下提取的设备信息保存到数据库中
+        </n-alert>
+        
+        <n-alert v-if="extractResult.errors && extractResult.errors.length > 0" type="warning" style="margin-bottom: 16px;">
           <template #header>提取过程中遇到问题</template>
           <ul>
             <li v-for="error in extractResult.errors" :key="error">{{ error }}</li>
@@ -293,35 +298,74 @@
         </n-alert>
         
         <n-descriptions bordered :column="2" style="margin-bottom: 16px;">
-          <n-descriptions-item label="提取数量">{{ extractResult.extracted_count }}</n-descriptions-item>
-          <n-descriptions-item label="合并数量">{{ extractResult.merged_count }}</n-descriptions-item>
-          <n-descriptions-item label="成功创建">{{ extractResult.assets.length }}</n-descriptions-item>
-          <n-descriptions-item label="错误数量">{{ extractResult.errors.length }}</n-descriptions-item>
+          <n-descriptions-item label="提取数量">{{ extractResult.extracted_count || extractResult.assets.length }}</n-descriptions-item>
+          <n-descriptions-item label="待确认创建">{{ extractResult.assets.length }}</n-descriptions-item>
+          <n-descriptions-item label="冲突数量">{{ extractResult.assets.filter(asset => asset.conflicts && asset.conflicts.length > 0).length }}</n-descriptions-item>
         </n-descriptions>
 
-        <n-h4>提取的设备列表</n-h4>
-        <n-data-table :columns="extractColumns" :data="extractResult.assets" max-height="400" />
+        <n-h4>待创建的设备列表</n-h4>
+        <n-data-table :columns="extractConfirmColumns" :data="extractResult.assets" max-height="400" />
       </div>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showExtractResult = false">关闭</n-button>
-          <n-button type="primary" @click="refreshAssets">刷新列表</n-button>
+          <n-button @click="showExtractResult = false">取消</n-button>
+          <n-button type="primary" @click="confirmExtractedAssets" :loading="confirming">
+            确认创建 {{ extractResult?.assets.length || 0 }} 个设备
+          </n-button>
         </n-space>
       </template>
     </n-modal>
 
-    <!-- 资产凭据查看模态框 -->
-    <n-modal v-model:show="showViewModal" preset="card" style="width: 600px" title="设备登录凭据">
+    <!-- 设备详情查看模态框 -->
+    <n-modal v-model:show="showViewModal" preset="card" style="width: 700px" title="设备详情">
       <div v-if="viewingAsset">
         <n-space vertical size="large">
           <div style="text-align: center; margin-bottom: 20px;">
             <n-h3 style="margin: 0;">{{ viewingAsset.name }}</n-h3>
-            <n-text depth="3">{{ viewingAsset.ip_address }}</n-text>
+            <n-text depth="3">{{ viewingAsset.ip_address || '无IP地址' }}</n-text>
           </div>
           
-          <n-space vertical size="medium">
-            <!-- 登录凭据信息 -->
-            <n-card size="small" title="登录凭据">
+          <n-tabs type="line" animated>
+            <!-- 基本信息标签页 -->
+            <n-tab-pane name="basic" tab="基本信息">
+              <n-descriptions bordered :column="2">
+                <n-descriptions-item label="设备名称">
+                  {{ viewingAsset.name }}
+                </n-descriptions-item>
+                <n-descriptions-item label="设备类型">
+                  {{ getAssetTypeLabel(viewingAsset.asset_type) }}
+                </n-descriptions-item>
+                <n-descriptions-item label="IP地址">
+                  {{ viewingAsset.ip_address || '未设置' }}
+                </n-descriptions-item>
+                <n-descriptions-item label="主机名">
+                  {{ viewingAsset.hostname || '未设置' }}
+                </n-descriptions-item>
+                <n-descriptions-item label="设备型号">
+                  {{ viewingAsset.device_model || '未设置' }}
+                </n-descriptions-item>
+                <n-descriptions-item label="所处网络">
+                  {{ getNetworkLocationLabel(viewingAsset.network_location) }}
+                </n-descriptions-item>
+                <n-descriptions-item label="所属部门">
+                  {{ viewingAsset.department || '未设置' }}
+                </n-descriptions-item>
+                <n-descriptions-item label="状态">
+                  <n-tag :type="getStatusType(viewingAsset.status)">
+                    {{ getAssetStatusLabel(viewingAsset.status) }}
+                  </n-tag>
+                </n-descriptions-item>
+                <n-descriptions-item label="创建时间" span="2">
+                  {{ formatDateTime(viewingAsset.created_at) }}
+                </n-descriptions-item>
+                <n-descriptions-item label="更新时间" span="2" v-if="viewingAsset.updated_at">
+                  {{ formatDateTime(viewingAsset.updated_at) }}
+                </n-descriptions-item>
+              </n-descriptions>
+            </n-tab-pane>
+
+            <!-- 登录凭据标签页 -->
+            <n-tab-pane name="credentials" tab="登录凭据">
               <n-form label-placement="left" label-width="80px">
                 <n-form-item label="用户名">
                   <n-text code v-if="viewingAsset.username">{{ viewingAsset.username }}</n-text>
@@ -339,19 +383,28 @@
                   />
                   <n-text depth="3" v-else>未设置</n-text>
                 </n-form-item>
+                <n-form-item label="SSH密钥" v-if="viewingAsset.ssh_key">
+                  <n-input
+                    :value="viewingAsset.ssh_key"
+                    type="textarea"
+                    readonly
+                    :rows="4"
+                    style="max-width: 400px;"
+                  />
+                </n-form-item>
               </n-form>
-            </n-card>
+            </n-tab-pane>
 
-            <!-- 设备备注信息 -->
-            <n-card size="small" title="设备备注" v-if="viewingAsset.notes && viewingAsset.notes.trim()">
-              <n-text>{{ viewingAsset.notes }}</n-text>
-            </n-card>
-            
-            <!-- 当没有备注时显示提示 -->
-            <n-card size="small" title="设备备注" v-else>
-              <n-text depth="3" italic>暂无备注信息</n-text>
-            </n-card>
-          </n-space>
+            <!-- 备注信息标签页 -->
+            <n-tab-pane name="notes" tab="备注信息">
+              <div v-if="viewingAsset.notes && viewingAsset.notes.trim()">
+                <n-text>{{ viewingAsset.notes }}</n-text>
+              </div>
+              <div v-else>
+                <n-empty description="暂无备注信息" size="medium" />
+              </div>
+            </n-tab-pane>
+          </n-tabs>
         </n-space>
       </div>
       <template #footer>
@@ -379,19 +432,53 @@
           </n-form-item>
           
           <n-form-item label="包含字段">
+            <div style="margin-bottom: 8px;">
+              <n-button size="small" @click="selectAllFields">全选</n-button>
+              <n-button size="small" @click="clearAllFields" style="margin-left: 8px;">清空</n-button>
+              <n-button size="small" @click="selectBasicFields" style="margin-left: 8px;">基本字段</n-button>
+            </div>
             <n-checkbox-group v-model:value="exportFields">
-              <n-space vertical>
-                <n-checkbox value="name">设备名称</n-checkbox>
-                <n-checkbox value="asset_type">设备类型</n-checkbox>
-                <n-checkbox value="ip_address">IP地址</n-checkbox>
-                <n-checkbox value="hostname">主机名</n-checkbox>
-                <n-checkbox value="device_model">设备型号</n-checkbox>
-                <n-checkbox value="network_location">所处网络</n-checkbox>
-                <n-checkbox value="department">部门</n-checkbox>
-                <n-checkbox value="status">状态</n-checkbox>
-                <n-checkbox value="notes">备注</n-checkbox>
-                <n-checkbox value="created_at">创建时间</n-checkbox>
-              </n-space>
+              <n-grid cols="2" responsive="screen" :x-gap="8" :y-gap="4">
+                <n-grid-item>
+                  <n-checkbox value="name">设备名称</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="asset_type">设备类型</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="ip_address">IP地址</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="hostname">主机名</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="username">用户名</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="password">密码</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="device_model">设备型号</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="network_location">所处网络</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="department">所属部门</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="status">状态</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="notes">备注</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="created_at">创建时间</n-checkbox>
+                </n-grid-item>
+                <n-grid-item>
+                  <n-checkbox value="updated_at">更新时间</n-checkbox>
+                </n-grid-item>
+              </n-grid>
             </n-checkbox-group>
           </n-form-item>
         </n-form>
@@ -475,7 +562,7 @@ import {
   CopyOutline
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
-import { assetService, documentService, authService, analyticsService } from '@/services'
+import { assetService, documentService, authService } from '@/services'
 import apiService from '@/services/api'
 import type { Asset, AssetCreate, AssetExtractRequest, AssetExtractResult, AssetStatistics } from '@/types/asset'
 import { AssetType, AssetStatus } from '@/types/asset'
@@ -491,6 +578,7 @@ const extractFormRef = ref<FormInst | null>(null)
 const loading = ref(false)
 const submitting = ref(false)
 const extracting = ref(false)
+const confirming = ref(false)
 const assets = ref<Asset[]>([])
 const currentUser = ref<User | null>(null)
 const statistics = ref<AssetStatistics>({
@@ -785,6 +873,54 @@ const extractColumns: DataTableColumns<Asset> = [
   }
 ]
 
+// 提取确认表格列（用于确认界面）
+const extractConfirmColumns: DataTableColumns<any> = [
+  {
+    title: '设备名称',
+    key: 'name',
+    width: 150
+  },
+  {
+    title: '类型',
+    key: 'asset_type',
+    width: 100,
+    render: (row) => {
+      const typeLabels = {
+        'server': '服务器',
+        'network': '网络设备',
+        'storage': '存储设备',
+        'security': '安全设备',
+        'database': '数据库',
+        'application': '应用程序',
+        'other': '其他'
+      }
+      return typeLabels[row.asset_type] || row.asset_type
+    }
+  },
+  {
+    title: 'IP地址',
+    key: 'ip_address',
+    width: 120
+  },
+  {
+    title: '置信度',
+    key: 'confidence_score',
+    width: 80,
+    render: (row) => `${row.confidence_score || 85}%`
+  },
+  {
+    title: '状态',
+    key: 'conflicts',
+    width: 100,
+    render: (row) => {
+      if (row.conflicts && row.conflicts.length > 0) {
+        return h(NTag, { type: 'error', size: 'small' }, { default: () => '有冲突' })
+      }
+      return h(NTag, { type: 'success', size: 'small' }, { default: () => '可创建' })
+    }
+  }
+]
+
 // 表单验证规则
 const rules = {
   name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }],
@@ -1039,13 +1175,6 @@ const viewAsset = async (asset: Asset) => {
     viewingAsset.value = fullAsset
     showViewModal.value = true
     
-    // 记录资产凭据查看统计 - 使用analytics服务
-    try {
-      await analyticsService.recordAssetView(asset.id, 'credentials')
-      console.log('资产凭据查看统计已记录')
-    } catch (error) {
-      console.warn('记录资产查看统计失败:', error)
-    }
   } catch (error: any) {
     console.error('查看资产详情失败:', error)
     message.error('获取资产详情失败')
@@ -1105,12 +1234,27 @@ const handleExtract = async () => {
   
   extracting.value = true
   try {
+    // 检查是否已登录
+    if (!authService.isAuthenticated()) {
+      message.error('请先登录后再使用文件提取功能')
+      extracting.value = false
+      return
+    }
+    
     const formData = new FormData()
     formData.append('file', fileList.value[0].file)
     formData.append('auto_merge', extractForm.auto_merge.toString())
     formData.append('merge_threshold', extractForm.merge_threshold.toString())
     
-    // 使用动态地址检测，支持多机器访问
+    // 调试信息
+    console.log('=== 文件提取调试信息 ===')
+    console.log('文件名:', fileList.value[0].file.name)
+    console.log('文件大小:', fileList.value[0].file.size)
+    console.log('文件类型:', fileList.value[0].file.type)
+    console.log('auto_merge:', extractForm.auto_merge.toString())
+    console.log('merge_threshold:', extractForm.merge_threshold.toString())
+    
+    // 使用原来的fetch方法，因为这个是工作的
     const currentHost = window.location.hostname
     const currentProtocol = window.location.protocol
     let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
@@ -1123,7 +1267,12 @@ const handleExtract = async () => {
       }
     }
     
-    const token = localStorage.getItem('access_token')
+    const token = authService.getToken()
+    if (!token) {
+      message.error('请先登录')
+      extracting.value = false
+      return
+    }
     
     const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract`, {
       method: 'POST',
@@ -1151,7 +1300,13 @@ const handleExtract = async () => {
       message.warning('未能提取到有效的设备信息')
     }
   } catch (error: any) {
-    message.error(error.message || '提取失败')
+    console.error('文件提取错误:', error)
+    // 处理认证错误
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      message.error('登录状态已过期，请重新登录后再使用文件提取功能')
+    } else {
+      message.error(error.message || '提取失败')
+    }
   } finally {
     extracting.value = false
   }
@@ -1162,6 +1317,75 @@ const refreshAssets = async () => {
   // 刷新后重新加载资产列表
   await loadAssets()
   await loadStatistics()
+}
+
+// 确认提取的资产并保存到数据库
+const confirmExtractedAssets = async () => {
+  if (!extractResult.value || !extractResult.value.assets.length) {
+    message.error('没有可确认的资产')
+    return
+  }
+  
+  confirming.value = true
+  try {
+    // 检查是否已登录
+    if (!authService.isAuthenticated()) {
+      message.error('请先登录后再确认保存')
+      confirming.value = false
+      return
+    }
+    
+    // 使用原来的fetch方法
+    const currentHost = window.location.hostname
+    const currentProtocol = window.location.protocol
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+    
+    if (!apiBaseUrl) {
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+      } else {
+        apiBaseUrl = 'http://localhost:8002'
+      }
+    }
+    
+    const token = authService.getToken()
+    
+    const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract/confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(extractResult.value.assets)
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.detail || '确认保存失败')
+    }
+    
+    const result = await response.json()
+    
+    if (result.success) {
+      message.success(`成功创建 ${result.saved_count} 个设备${result.error_count > 0 ? `，${result.error_count} 个失败` : ''}`)
+      
+      if (result.errors && result.errors.length > 0) {
+        console.warn('保存过程中的错误:', result.errors)
+      }
+      
+      // 关闭确认对话框并刷新列表
+      showExtractResult.value = false
+      await loadAssets()
+      await loadStatistics()
+    } else {
+      message.error('保存失败')
+    }
+  } catch (error: any) {
+    console.error('确认保存失败:', error)
+    message.error(error.message || '确认保存失败')
+  } finally {
+    confirming.value = false
+  }
 }
 
 // 复制资产 - 打开添加表单并预填充数据
@@ -1215,7 +1439,7 @@ const handleBulkDelete = () => {
       try {
         const assetIds = selectedAssets.value.map(asset => asset.id)
         
-        // 使用动态地址检测，支持跨机器访问
+        // 使用原来的fetch方法
         const currentHost = window.location.hostname
         const currentProtocol = window.location.protocol
         let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
@@ -1228,13 +1452,13 @@ const handleBulkDelete = () => {
           }
         }
         
-        const response = await fetch(`${apiBaseUrl}/api/v1/assets/bulk-delete`, {
+        const response = await fetch(`${apiBaseUrl}/api/v1/assets/batch/delete`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`
           },
-          body: JSON.stringify(assetIds)
+          body: JSON.stringify({ asset_ids: assetIds })
         })
         
         if (!response.ok) {
@@ -1288,8 +1512,24 @@ const handleExport = async () => {
   try {
     const assetIds = selectedAssets.value.map(asset => asset.id)
     
-    // 导出功能需要直接使用fetch来处理文件下载
-    // 使用动态地址检测，支持多机器访问
+    // 检查是否已登录
+    if (!authService.isAuthenticated()) {
+      message.error('请先登录后再使用导出功能')
+      exporting.value = false
+      return
+    }
+    
+    // 导出功能需要处理文件下载，使用apiService的download方法
+    const filename = `assets_export_${new Date().getTime()}.${exportFormat.value === 'excel' ? 'xlsx' : 'csv'}`
+    
+    // 构建查询参数
+    const exportData = {
+      asset_ids: assetIds,
+      format: exportFormat.value,
+      fields: exportFields.value
+    }
+    
+    // 使用fetch进行导出（因为需要处理blob响应）
     const currentHost = window.location.hostname
     const currentProtocol = window.location.protocol
     let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
@@ -1302,7 +1542,10 @@ const handleExport = async () => {
       }
     }
     
-    const token = localStorage.getItem('access_token')
+    const token = authService.getToken()
+    if (!token) {
+      throw new Error('请先登录')
+    }
     
     const response = await fetch(`${apiBaseUrl}/api/v1/assets/export`, {
       method: 'POST',
@@ -1310,11 +1553,7 @@ const handleExport = async () => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({
-        asset_ids: assetIds,
-        format: exportFormat.value,
-        fields: exportFields.value
-      })
+      body: JSON.stringify(exportData)
     })
     
     if (response.ok) {
@@ -1325,7 +1564,7 @@ const handleExport = async () => {
       // 创建下载链接
       const link = document.createElement('a')
       link.href = url
-      link.download = `assets_export_${new Date().getTime()}.${exportFormat.value === 'excel' ? 'xlsx' : 'csv'}`
+      link.download = filename
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -1363,6 +1602,86 @@ const loadCurrentUser = async () => {
   } catch (error) {
     console.error('获取用户信息失败:', error)
   }
+}
+
+// 辅助方法
+const getAssetTypeLabel = (type: string) => {
+  const types = {
+    server: '服务器',
+    network: '网络设备',
+    storage: '存储设备',
+    security: '安全设备',
+    database: '数据库',
+    application: '应用程序',
+    other: '其他'
+  }
+  return types[type] || type
+}
+
+const getAssetStatusLabel = (status: string) => {
+  const statuses = {
+    active: '在用',
+    inactive: '停用',
+    maintenance: '维护中',
+    retired: '已退役'
+  }
+  return statuses[status] || status
+}
+
+const getNetworkLocationLabel = (location: string) => {
+  const locations = {
+    office: '办公网',
+    monitoring: '监控网',
+    billing: '收费网'
+  }
+  return locations[location] || location
+}
+
+const getStatusType = (status: string) => {
+  const types = {
+    active: 'success',
+    inactive: 'default',
+    maintenance: 'warning',
+    retired: 'error'
+  }
+  return types[status] || 'default'
+}
+
+const formatDateTime = (dateString: string) => {
+  if (!dateString) return '未设置'
+  const date = new Date(dateString)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
+// 导出字段选择辅助方法（仅包含编辑表单中的字段和时间戳）
+const allExportFields = [
+  'name', 'asset_type', 'ip_address', 'hostname', 'username', 'password',
+  'device_model', 'network_location', 'department', 'status', 'notes',
+  'created_at', 'updated_at'
+]
+
+const basicExportFields = [
+  'name', 'asset_type', 'ip_address', 'hostname', 'device_model',
+  'network_location', 'department', 'status', 'created_at'
+]
+
+const selectAllFields = () => {
+  exportFields.value = [...allExportFields]
+}
+
+const clearAllFields = () => {
+  exportFields.value = []
+}
+
+const selectBasicFields = () => {
+  exportFields.value = [...basicExportFields]
 }
 
 onMounted(async () => {

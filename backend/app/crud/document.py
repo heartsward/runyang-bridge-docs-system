@@ -104,11 +104,93 @@ class CRUDDocument:
         return db_obj
 
     def delete(self, db: Session, id: int) -> Document:
-        """删除文档"""
+        """删除文档（仅数据库记录，不推荐直接使用）"""
         obj = db.query(Document).get(id)
         db.delete(obj)
         db.commit()
         return obj
+    
+    def delete_with_file(self, db: Session, id: int, backup_before_delete: bool = False) -> dict:
+        """
+        原子性删除文档记录和物理文件
+        
+        Args:
+            db: 数据库会话
+            id: 文档ID
+            backup_before_delete: 删除前是否备份文件
+            
+        Returns:
+            删除操作的详细结果
+        """
+        from app.services.file_manager import FileManagerService
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        result = {
+            "success": False,
+            "document_deleted": False,
+            "file_deleted": False,
+            "document": None,
+            "file_result": None,
+            "error": None
+        }
+        
+        # 开始数据库事务
+        try:
+            # 1. 获取文档信息
+            document = db.query(Document).get(id)
+            if not document:
+                result["error"] = "文档不存在"
+                return result
+            
+            result["document"] = {
+                "id": document.id,
+                "title": document.title,
+                "file_path": document.file_path
+            }
+            
+            # 2. 初始化文件管理器
+            file_manager = FileManagerService()
+            
+            # 3. 删除物理文件（如果存在）
+            file_deleted = False
+            if document.file_path:
+                file_result = file_manager.safe_delete_file(
+                    document.file_path, 
+                    backup_before_delete=backup_before_delete
+                )
+                result["file_result"] = file_result
+                file_deleted = file_result["success"] or not file_result["existed"]
+                
+                # 如果文件存在但删除失败，回滚事务
+                if file_result["existed"] and not file_result["success"]:
+                    db.rollback()
+                    result["error"] = f"文件删除失败: {file_result['error']}"
+                    logger.error(f"文档 {id} 的文件删除失败，操作回滚: {file_result['error']}")
+                    return result
+            else:
+                # 没有文件路径，认为文件已删除
+                file_deleted = True
+                logger.info(f"文档 {id} 没有关联的物理文件")
+            
+            # 4. 删除数据库记录
+            db.delete(document)
+            db.commit()
+            
+            result["document_deleted"] = True
+            result["file_deleted"] = file_deleted
+            result["success"] = True
+            
+            logger.info(f"文档删除成功 - ID: {id}, 标题: {document.title}, 文件: {document.file_path}")
+            
+        except Exception as e:
+            # 发生异常时回滚数据库事务
+            db.rollback()
+            result["error"] = f"删除操作失败: {str(e)}"
+            logger.error(f"文档删除异常 - ID: {id}, 错误: {str(e)}")
+        
+        return result
 
     def search(
         self, 

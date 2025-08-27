@@ -251,7 +251,7 @@
             </n-tag>
           </n-space>
           <n-space>
-            <n-button size="small" @click="copyContent">
+            <n-button size="small" @click="copyContent" v-if="!previewDocumentData?.is_pdf_original">
               <template #icon>
                 <n-icon :component="CopyOutline" />
               </template>
@@ -285,9 +285,60 @@
         </n-alert>
         
         <n-divider style="margin: 12px 0;" />
-        <n-scrollbar style="max-height: 60vh;">
+        
+        <!-- 预览模式切换 (仅对OCR提取的图片和PDF显示) -->
+        <n-space align="center" style="margin-bottom: 16px;" v-if="shouldShowViewToggle(previewDocumentData)">
+          <n-radio-group v-model:value="previewMode" size="small">
+            <n-radio-button value="extracted">提取内容</n-radio-button>
+            <n-radio-button value="original">原文件</n-radio-button>
+          </n-radio-group>
+        </n-space>
+        
+        <!-- 提取内容模式 -->
+        <n-scrollbar 
+          v-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
+          style="max-height: 60vh;"
+        >
           <pre v-html="previewContent" class="preview-content"></pre>
         </n-scrollbar>
+        
+        <!-- 原文件模式 (仅对支持的文件类型显示) -->
+        <div v-else-if="shouldShowViewToggle(previewDocumentData) && previewMode === 'original'" class="original-file-preview" style="height: 60vh;">
+          <!-- PDF 文件使用 iframe 预览 -->
+          <iframe 
+            v-if="isPDFFile(previewDocumentData)"
+            :src="getFileUrl(previewDocumentData)" 
+            style="width: 100%; height: 100%; border: none; border-radius: 4px;"
+            title="PDF预览"
+          ></iframe>
+          
+          <!-- 图片文件预览 -->
+          <div v-else-if="isImageFile(previewDocumentData?.file_type)" style="text-align: center; height: 100%; display: flex; align-items: center; justify-content: center;">
+            <img 
+              :src="getFileUrl(previewDocumentData)" 
+              style="max-width: 100%; max-height: 100%; object-fit: contain;"
+              :alt="previewDocumentData.title"
+            />
+          </div>
+          
+          <!-- 其他文件类型显示下载信息 -->
+          <div v-else class="file-download-info">
+            <n-empty description="此文件类型不支持在线预览">
+              <template #extra>
+                <n-space vertical align="center">
+                  <n-text>文件名：{{ previewDocumentData.title }}</n-text>
+                  <n-text depth="3">文件大小：{{ formatFileSize(previewDocumentData.file_size) }}</n-text>
+                  <n-button type="primary" @click="downloadDocument(previewDocumentData?.document_id)">
+                    <template #icon>
+                      <n-icon><DownloadOutline /></n-icon>
+                    </template>
+                    下载文件
+                  </n-button>
+                </n-space>
+              </template>
+            </n-empty>
+          </div>
+        </div>
       </div>
       <div v-else-if="previewLoading" style="text-align: center; padding: 40px;">
         <n-spin size="large" />
@@ -372,6 +423,9 @@ interface PreviewData {
   original_length: number
   is_truncated: boolean
   file_size: number
+  view_mode?: string
+  is_pdf_original?: boolean
+  supports_dual_mode?: boolean
 }
 
 const message = useMessage()
@@ -394,6 +448,7 @@ const showPreviewModal = ref(false)
 const previewLoading = ref(false)
 const previewContent = ref('')
 const previewDocumentData = ref<PreviewData | null>(null)
+const previewMode = ref<'extracted' | 'original'>('extracted')
 
 // 搜索结果
 const documentResults = ref<DocumentSearchResult[]>([])
@@ -513,6 +568,25 @@ const formatFileSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
+const isImageFile = (fileType?: string) => {
+  if (!fileType) return false
+  const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp']
+  return imageTypes.includes(fileType.toLowerCase())
+}
+
+// PDF文件检测函数
+const isPDFFile = (document: any): boolean => {
+  if (!document) return false
+  return document.file_type?.toLowerCase() === 'pdf'
+}
+
+// 判断是否应该显示视图切换按钮 (仅对OCR提取的图片和PDF)
+const shouldShowViewToggle = (document: any): boolean => {
+  if (!document) return false
+  // 只有图片和PDF文件显示切换按钮
+  return isPDFFile(document) || isImageFile(document.file_type)
+}
+
 
 // 实时输入建议
 const handleInputChange = async () => {
@@ -595,7 +669,7 @@ const previewDocument = async (doc: DocumentSearchResult) => {
   previewLoading.value = true
   showPreviewModal.value = true
   previewContent.value = ''
-  // 直接使用预处理内容
+  previewMode.value = 'extracted' // 重置预览模式
   
   await loadPreviewContent(doc.id)
 }
@@ -603,15 +677,27 @@ const previewDocument = async (doc: DocumentSearchResult) => {
 // 加载预览内容
 const loadPreviewContent = async (documentId: number) => {
   try {
-    // 使用统一API
+    // 使用统一API，添加新参数启用完整内容显示和智能格式化
     const response = await apiService.get(`/search/preview/${documentId}`, {
       params: {
-        highlight: searchQuery.value
+        highlight: searchQuery.value,
+        format_mode: 'formatted',  // 启用智能格式化
+        max_length: null,          // 移除长度限制
+        source: 'auto',            // 自动选择最佳内容源
+        view_mode: 'content'       // 默认内容提取模式
       }
     })
     
     previewDocumentData.value = response
     previewContent.value = response.content
+    
+    // 调试：检查PDF切换功能相关数据
+    console.log('文档预览数据:', {
+      file_type: response.file_type,
+      supports_dual_mode: response.supports_dual_mode,
+      is_pdf_original: response.is_pdf_original,
+      view_mode: response.view_mode
+    })
   } catch (error) {
     console.error('预览文档失败:', error)
     message.error('预览文档失败')
@@ -619,6 +705,13 @@ const loadPreviewContent = async (documentId: number) => {
   } finally {
     previewLoading.value = false
   }
+}
+
+// 获取文件URL用于预览
+const getFileUrl = (document: any): string => {
+  if (!document) return ''
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+  return `${baseUrl}/api/v1/search/original/${document.document_id}`
 }
 
 // 已移除预览来源切换功能，直接使用预处理内容
@@ -671,6 +764,44 @@ const clearSearch = () => {
 }
 
 // 搜索范围监听已移除 - 只搜索文档
+
+// 监听预览模式变化
+watch(previewMode, async (newMode) => {
+  if (!previewDocumentData.value) return
+  
+  previewLoading.value = true
+  
+  try {
+    if (newMode === 'original') {
+      // 原文查看模式，获取PDF/图片文件信息
+      const response = await apiService.get(`/search/preview/${previewDocumentData.value.document_id}`, {
+        params: {
+          view_mode: 'original'
+        }
+      })
+      previewDocumentData.value = response
+      previewContent.value = response.content
+    } else {
+      // 内容提取模式
+      const response = await apiService.get(`/search/preview/${previewDocumentData.value.document_id}`, {
+        params: {
+          view_mode: 'content',
+          highlight: searchQuery.value,
+          format_mode: 'formatted',
+          max_length: null,
+          source: 'auto'
+        }
+      })
+      previewDocumentData.value = response
+      previewContent.value = response.content
+    }
+  } catch (error) {
+    console.error('切换预览模式失败:', error)
+    message.error('切换预览模式失败')
+  } finally {
+    previewLoading.value = false
+  }
+})
 
 onMounted(async () => {
   // 初始化搜索建议
@@ -777,5 +908,21 @@ onMounted(async () => {
 
 .search-stats :deep(.n-card__content) {
   padding: 12px 16px;
+}
+
+/* 原文件预览样式 */
+.original-file-preview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-download-info {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 300px;
+  padding: 40px;
 }
 </style>

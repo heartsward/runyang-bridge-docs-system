@@ -8,11 +8,11 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(200), nullable=False, index=True)
+    title = Column(String(500), nullable=False, index=True)
     description = Column(Text)
     content = Column(Text)
     file_path = Column(String(500))
-    file_name = Column(String(255))
+    file_name = Column(String(500))
     file_size = Column(Integer)
     file_type = Column(String(50))
     mime_type = Column(String(100))
@@ -31,10 +31,6 @@ class Document(Base):
     content_extracted = Column(Boolean, default=None)  # None=提取中, True=已完成, False=失败
     content_extraction_error = Column(Text)  # 内容提取错误信息
     
-    # AI分析结果
-    ai_summary = Column(Text)  # AI生成的摘要
-    ai_tags = Column(JSON)  # AI生成的标签
-    confidence_score = Column(Float)  # AI分类置信度
     
     # 版本控制
     version = Column(String(20), default="1.0.0")

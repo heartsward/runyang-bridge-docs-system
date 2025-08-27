@@ -778,16 +778,7 @@ class UnifiedSearchEngine:
         
         return common_misspellings.get(query.lower())
     
-    def get_search_analytics(self, db: Session, days: int = 30) -> Dict[str, Any]:
-        """获取搜索分析数据"""
-        # 这里可以实现搜索分析逻辑
-        return {
-            "total_searches": 0,
-            "popular_queries": [],
-            "search_success_rate": 0.0,
-            "avg_results_per_search": 0.0,
-            "top_result_types": []
-        }
+    # Analytics functionality removed
 
 
 # 全局搜索引擎实例

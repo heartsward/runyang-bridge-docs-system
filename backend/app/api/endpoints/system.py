@@ -87,7 +87,7 @@ async def get_system_info(
             "voice_query": True,  # 准备支持
             "file_upload": True,
             "multi_file_upload": True,
-            "analytics": True,
+            "analytics": False,
             "user_management": True,
             "offline_cache": True,  # 移动端支持
             "push_notifications": False  # 待实现

@@ -77,7 +77,7 @@ def get_current_superuser(
 
 def get_optional_user(
     db: Session = Depends(get_db),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
 ) -> Optional[User]:
     """获取可选用户（允许匿名）"""
     if not credentials:

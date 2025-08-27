@@ -25,7 +25,7 @@ class DocumentService {
     if (params?.category_id) queryParams.append('category_id', params.category_id.toString())
     if (params?.status) queryParams.append('status', params.status)
     
-    const url = `/documents?${queryParams.toString()}`
+    const url = `/documents/?${queryParams.toString()}`
     const response = await apiService.get<{items: Document[], total: number}>(url)
     return response.items || []
   }

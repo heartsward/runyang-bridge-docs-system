@@ -15,6 +15,7 @@ from app.core.deps import get_db, get_current_active_user, get_optional_user
 from app.models.user import User
 from app.models.document import Document, SearchLog
 from app.services.search_service import SearchService
+from app.services.document_formatter import DocumentFormatter, DocumentType, FormatMode
 import time
 
 router = APIRouter()
@@ -30,8 +31,8 @@ async def search_documents(
 ):
     """搜索文档内容"""
     print("=" * 50)
-    print("🚀 SEARCH ENDPOINT HIT!")
-    print(f"🔍 搜索API调用: q={q}")
+    print("[DEBUG] SEARCH ENDPOINT HIT!")
+    print(f"[INFO] 搜索API调用: q={q}")
     print("=" * 50)
     start_time = time.time()
     
@@ -47,7 +48,7 @@ async def search_documents(
         
         # 获取所有相关文档进行搜索
         documents = query.all()  # 搜索所有文档以确保完整性
-        print(f"🔍 找到 {len(documents)} 个文档进行搜索")
+        print(f"[INFO] 找到 {len(documents)} 个文档进行搜索")
         
         # 搜索结果分类
         content_results = []     # 内容匹配的结果
@@ -55,22 +56,22 @@ async def search_documents(
         description_results = [] # 仅描述匹配的结果
         
         for i, doc in enumerate(documents):
-            print(f"🔍 处理第 {i+1}/{len(documents)} 个文档: {doc.title}")
+            print(f"[INFO] 处理第 {i+1}/{len(documents)} 个文档: {doc.title}")
             
             content_found = False
             
             # 优先搜索文档的预处理内容（不直接读取文件）
             if doc.content_extracted and doc.content:
-                print(f"🔍 搜索预处理内容: {doc.title} (内容长度: {len(doc.content)})")
+                print(f"[INFO] 搜索预处理内容: {doc.title} (内容长度: {len(doc.content)})")
                 
                 try:
                     # 只搜索数据库中已提取的内容
                     matches = search_service.search_in_text(doc.content, q)
-                    print(f"🔍 搜索结果: 找到 {len(matches) if matches else 0} 个匹配")
+                    print(f"[INFO] 搜索结果: 找到 {len(matches) if matches else 0} 个匹配")
                     
                     if matches:
                         content_found = True
-                        print(f"🔍 内容匹配成功: {doc.title} - 匹配数量: {len(matches)}")
+                        print(f"[INFO] 内容匹配成功: {doc.title} - 匹配数量: {len(matches)}")
                         # 计算相关度分数 - 内容匹配给最高分
                         base_content_score = 0.8  # 内容匹配基础分最高
                         match_bonus = min(len(matches) / 20.0, 0.15)  # 根据匹配数量给予奖励分
@@ -80,7 +81,7 @@ async def search_documents(
                         highlights = []
                         for match in matches[:3]:  # 显示前3个匹配片段
                             highlights.append({
-                                "text": match["text"],
+                                "text": match["content"],  # 修复：使用正确的键名
                                 "line_number": match["line_number"]
                             })
                         
@@ -97,13 +98,13 @@ async def search_documents(
                             "match_type": "content"  # 标记匹配类型
                         })
                     else:
-                        print(f"🔍 预处理内容无匹配: {doc.title}")
+                        print(f"[INFO] 预处理内容无匹配: {doc.title}")
                         
                 except Exception as e:
-                    print(f"🔍 搜索预处理内容 {doc.id} 失败: {str(e)}")
-                    print(f"🔍 错误详情: {type(e).__name__}: {e}")
+                    print(f"[ERROR] 搜索预处理内容 {doc.id} 失败: {str(e)}")
+                    print(f"[ERROR] 错误详情: {type(e).__name__}: {e}")
             else:
-                print(f"🔍 文档无预处理内容: {doc.title} - content_extracted={doc.content_extracted}")
+                print(f"[INFO] 文档无预处理内容: {doc.title} - content_extracted={doc.content_extracted}")
             
             # 如果内容中没有找到，检查标题和描述
             if not content_found:
@@ -248,10 +249,14 @@ async def preview_document(
     document_id: int,
     highlight: Optional[str] = Query(None, description="高亮关键词"),
     source: Optional[str] = Query("auto", description="内容来源: auto(自动选择), extracted(预处理内容), file(原始文件)"),
+    format_mode: Optional[str] = Query("formatted", description="格式化模式: original(原始), formatted(格式化), compact(紧凑), structured(结构化)"),
+    view_mode: Optional[str] = Query("content", description="查看模式: content(内容提取), original(原文查看) - 仅PDF文件支持"),
+    max_length: Optional[int] = Query(None, description="内容长度限制(字符数)，不设置表示无限制"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_user)
 ):
     """预览文档内容"""
+    print(f"[INFO] 预览API调用: document_id={document_id}, format_mode={format_mode}, max_length={max_length}, source={source}, view_mode={view_mode}")
     try:
         # 获取文档 - 所有用户都可以预览所有文档
         document = db.query(Document).filter(
@@ -261,16 +266,50 @@ async def preview_document(
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
         
+        # PDF/图片文件原文查看模式
+        is_pdf_file = document.file_type and document.file_type.lower() == 'pdf'
+        is_image_file = document.file_type and document.file_type.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp']
+        
+        if (is_pdf_file or is_image_file) and view_mode == "original":
+            file_type_name = "PDF" if is_pdf_file else "图片"
+            print(f"[INFO] {file_type_name}原文查看模式: {document.title}")
+            if not document.file_path or not os.path.exists(document.file_path):
+                raise HTTPException(status_code=400, detail=f"{file_type_name}文件不存在")
+            
+            # 返回原始文件信息，前端将直接显示原始文件
+            return {
+                "document_id": document_id,
+                "title": document.title,
+                "file_type": document.file_type,
+                "view_mode": view_mode,
+                "file_path": document.file_path,
+                "file_size": os.path.getsize(document.file_path),
+                "content": f"{file_type_name}原文查看模式 - 前端将直接渲染{file_type_name}文件",
+                "content_source": "original_pdf" if is_pdf_file else "original_image",
+                "content_extracted": document.content_extracted,
+                "content_extraction_error": document.content_extraction_error,
+                "original_length": 0,
+                "formatted_length": 0,
+                "is_truncated": False,
+                "format_mode": format_mode,
+                "is_pdf_original": True,
+                "supports_dual_mode": True,
+                "document_type": "PDF" if is_pdf_file else "IMAGE",
+                "format_statistics": {},
+                "document_structure": {},
+                "message": f"请在前端使用{'PDF查看器' if is_pdf_file else '图片查看器'}显示原始{file_type_name}文件"
+            }
+        
         content = None
         content_source = "unknown"
         
-        # 根据source参数决定内容来源
+        # 根据source参数决定内容来源  
         if source == "extracted" or (source == "auto" and document.content_extracted and document.content):
             # 使用预处理的内容
             if document.content_extracted and document.content:
                 content = document.content
                 content_source = "extracted"
-                print(f"🔍 使用预处理内容预览: {document.title} (长度: {len(content)})")
+                print(f"[INFO] 使用预处理内容预览: {document.title} (长度: {len(content)})")
             else:
                 # 如果没有预处理内容但请求预处理内容，返回错误信息
                 if source == "extracted":
@@ -285,10 +324,72 @@ async def preview_document(
             search_service = SearchService()
             content = search_service.extract_file_content(document.file_path)
             content_source = "file"
-            print(f"🔍 使用文件直接预览: {document.title}")
+            
+            print(f"[INFO] 使用文件直接预览: {document.title}")
             
             if not content:
                 raise HTTPException(status_code=400, detail="无法读取文档内容")
+        
+        # 智能文档格式化 - 对Excel文件进行优化处理
+        original_length = len(content)
+        
+        # Excel文件优化：跳过额外格式化，LibreOffice已经提供了良好的格式
+        if document.file_type and document.file_type.lower() in ['xls', 'xlsx']:
+            print(f"[INFO] Excel文件跳过额外格式化，使用LibreOffice原生格式")
+            format_stats = {
+                "processing_time": 0.001,  # 几乎无延迟
+                "original_length": original_length,
+                "formatted_length": len(content)
+            }
+            document_structure = {}
+            doc_type = DocumentType.EXCEL  # 设置Excel文档类型
+        else:
+            # 对其他文档类型进行正常格式化
+            formatter = DocumentFormatter()
+            
+            # 根据文件类型确定文档类型
+            doc_type = DocumentType.GENERAL
+            if document.file_type:
+                if document.file_type.lower() == 'pdf':
+                    doc_type = DocumentType.PDF
+                elif document.file_type.lower() in ['doc', 'docx']:
+                    doc_type = DocumentType.WORD
+                elif document.file_type.lower() in ['ppt', 'pptx']:
+                    doc_type = DocumentType.POWERPOINT
+                elif any(keyword in document.title.lower() for keyword in ['技术', '系统', 'api', '手册']):
+                    doc_type = DocumentType.TECHNICAL
+                elif any(keyword in document.title.lower() for keyword in ['法', '规定', '条例', '办法']):
+                    doc_type = DocumentType.LEGAL
+                elif any(keyword in document.title.lower() for keyword in ['报告', '总结', '分析']):
+                    doc_type = DocumentType.REPORT
+            
+            # 确定格式化模式
+            try:
+                format_enum = FormatMode(format_mode)
+            except ValueError:
+                format_enum = FormatMode.FORMATTED
+            
+            # 执行智能格式化
+            format_result = formatter.format_document(
+                content=content,
+                doc_type=doc_type,
+                format_mode=format_enum,
+                options={
+                    'max_line_length': 120,
+                    'preserve_whitespace': True,
+                    'enhance_tables': True,
+                    'add_navigation': format_enum == FormatMode.STRUCTURED,
+                    'highlight_keywords': bool(highlight)
+                }
+            )
+            
+            # 获取格式化后的内容
+            content = format_result.get('formatted_content', content)
+            format_stats = format_result.get('statistics', {})
+            document_structure = format_result.get('structure', {})
+        
+        print(f"[INFO] 格式化统计: 原长度={original_length}, 格式化后长度={len(content)}")
+        print(f"[INFO] 文档结构: {len(document_structure.get('headings', []))}个标题, {len(document_structure.get('tables', []))}个表格")
         
         # 如果有高亮关键词，添加高亮标记
         if highlight:
@@ -313,10 +414,11 @@ async def preview_document(
                 print(f"记录文档查看统计失败: {e}")
                 db.rollback()
         
-        # 限制预览内容长度
-        original_length = len(content)
-        if len(content) > 10000:
-            content = content[:10000] + "\n\n... (内容过长，已截断)"
+        # 移除内容长度限制，支持完整显示
+        is_truncated = False
+        # 添加安全检查：如果内容超过10MB，提供警告但仍显示完整内容
+        if len(content) > 10 * 1024 * 1024:  # 10MB
+            print(f"警告：文档内容较大({len(content)/1024/1024:.1f}MB)，完整显示可能影响性能")
         
         return {
             "document_id": document_id,
@@ -327,7 +429,15 @@ async def preview_document(
             "content_extracted": document.content_extracted,
             "content_extraction_error": document.content_extraction_error,
             "original_length": original_length,
-            "is_truncated": len(content) < original_length,
+            "formatted_length": len(content),
+            "is_truncated": is_truncated,
+            "format_mode": format_mode,
+            "view_mode": view_mode,
+            "is_pdf_original": False,
+            "supports_dual_mode": is_pdf_file or is_image_file,
+            "document_type": doc_type.value,
+            "format_statistics": format_stats,
+            "document_structure": document_structure,
             "file_size": os.path.getsize(document.file_path) if document.file_path and os.path.exists(document.file_path) else 0
         }
         
@@ -335,6 +445,75 @@ async def preview_document(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"预览失败: {str(e)}")
+
+@router.get("/original/{document_id}", summary="获取原始PDF/图片文件")
+async def get_original_file(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user)
+):
+    """获取原始PDF/图片文件用于前端直接显示"""
+    try:
+        # 获取文档信息
+        document = db.query(Document).filter(
+            Document.id == document_id
+        ).first()
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        
+        # 检查是否为PDF或图片文件
+        is_pdf_file = document.file_type and document.file_type.lower() == 'pdf'
+        is_image_file = document.file_type and document.file_type.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp']
+        
+        if not (is_pdf_file or is_image_file):
+            raise HTTPException(status_code=400, detail="仅支持PDF和图片文件的原文查看")
+        
+        # 检查文件是否存在
+        if not document.file_path or not os.path.exists(document.file_path):
+            file_type_name = "PDF" if is_pdf_file else "图片"
+            raise HTTPException(status_code=404, detail=f"{file_type_name}文件不存在")
+        
+        # 返回文件流，设置正确的MIME类型
+        from fastapi.responses import FileResponse
+        
+        # 根据文件类型设置正确的MIME类型
+        if is_pdf_file:
+            media_type = 'application/pdf'
+            filename = f"{document.title}.pdf"
+        else:
+            # 图片文件MIME类型映射
+            mime_types = {
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'png': 'image/png',
+                'gif': 'image/gif',
+                'bmp': 'image/bmp',
+                'tiff': 'image/tiff',
+                'webp': 'image/webp'
+            }
+            file_ext = document.file_type.lower()
+            media_type = mime_types.get(file_ext, 'image/jpeg')  # 默认使用jpeg
+            filename = f"{document.title}.{file_ext}"
+        
+        # 使用Response而不是FileResponse，确保在线预览而不是下载
+        from fastapi.responses import Response
+        with open(document.file_path, 'rb') as f:
+            file_content = f.read()
+        
+        return Response(
+            content=file_content,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": "inline",  # 关键：inline 而不是 attachment
+                "Cache-Control": "public, max-age=3600"  # 缓存1小时
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取原始文件失败: {str(e)}")
 
 # 资产搜索功能已移除 - 智能搜索模块现在只搜索文档内容
 

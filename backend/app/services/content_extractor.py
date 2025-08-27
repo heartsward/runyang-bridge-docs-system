@@ -10,7 +10,7 @@ from pathlib import Path
 
 # 导入现有的搜索服务来复用文件读取逻辑
 from app.services.search_service import SearchService
-from app.services.enhanced_pdf_extractor import EnhancedPDFExtractor
+from app.services.ocr_extractor import OCRExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class ContentExtractor:
     
     def __init__(self):
         self.search_service = SearchService()
-        self.pdf_extractor = EnhancedPDFExtractor()
+        self.ocr_extractor = OCRExtractor()
         
     def extract_content(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
         """
@@ -49,15 +49,13 @@ class ContentExtractor:
             # 检查文件类型
             file_ext = Path(file_path).suffix.lower()
             
-            # 对PDF文件使用增强提取器
-            if file_ext == '.pdf':
-                content, error = self.pdf_extractor.extract_pdf_content(file_path)
-                if error:
-                    logger.warning(f"PDF提取警告: {error}")
+            # 对图片文件使用OCR提取
+            if self._is_image_file(file_ext):
+                content, error = self._extract_image_with_ocr(file_path)
                 if not content:
-                    return None, error or "PDF内容提取失败"
+                    return None, error or "图片OCR内容提取失败"
             else:
-                # 其他文件类型使用原有的搜索服务
+                # PDF和Office文档统一通过搜索服务处理（内部使用LibreOffice）
                 content = self.search_service.extract_file_content(file_path)
             
             if content:
@@ -96,6 +94,53 @@ class ContentExtractor:
             logger.error(f"{error_msg} - 文件: {file_path}")
             return None, error_msg
     
+    
+    def get_extraction_methods(self) -> dict:
+        """
+        获取可用的提取方法信息
+        
+        Returns:
+            dict: 提取方法状态
+        """
+        return {
+            "libreoffice": True,  # LibreOffice通过搜索服务提供
+            "ocr": self.ocr_extractor.tesseract_available,
+            "search_service": True  # 搜索服务总是可用
+        }
+    
+    def _is_image_file(self, file_ext: str) -> bool:
+        """检查文件扩展名是否为图片文件"""
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.svg'}
+        return file_ext.lower() in image_extensions
+    
+    def _extract_image_with_ocr(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        使用OCR提取图片文件中的文本
+        
+        Args:
+            file_path: 图片文件路径
+            
+        Returns:
+            Tuple[content, error]: (提取的内容, 错误信息)
+        """
+        if not self.ocr_extractor.tesseract_available:
+            return None, "OCR功能不可用，需要安装Tesseract"
+        
+        try:
+            logger.info(f"尝试使用OCR提取图片内容: {file_path}")
+            content, error = self.ocr_extractor.extract_text_from_image(file_path)
+            
+            if content and content.strip():
+                logger.info(f"图片OCR成功提取内容，长度: {len(content)}")
+                return content, None
+            else:
+                return None, error or "OCR未能从图片中提取到文本内容"
+                
+        except Exception as e:
+            error_msg = f"图片OCR提取异常: {str(e)}"
+            logger.error(error_msg)
+            return None, error_msg
+    
     def is_supported_file(self, file_path: str) -> bool:
         """
         检查文件是否支持内容提取
@@ -109,7 +154,9 @@ class ContentExtractor:
         supported_formats = {
             '.txt', '.md', '.csv', '.json', '.xml', '.log',
             '.py', '.js', '.html', '.css', '.sql', '.yml', '.yaml',
-            '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt'
+            '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
+            # 添加图片格式支持（OCR识别）
+            '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.gif', '.webp'
         }
         
         return file_ext in supported_formats

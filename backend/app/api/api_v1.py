@@ -4,7 +4,7 @@ api_router = APIRouter()
 
 # 临时禁用有问题的路由，使用直接API替代
 try:
-    from app.api.endpoints import auth, documents, upload, upload_multiple, search, categories, settings, tasks, analytics, mobile, system, voice, file_upload, encoding_fix
+    from app.api.endpoints import auth, documents, upload, upload_multiple, search, categories, settings, tasks, assets, mobile, system, voice, file_upload, encoding_fix
     
     # 包含核心路由
     api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
@@ -15,7 +15,7 @@ try:
     api_router.include_router(categories.router, prefix="/categories", tags=["分类管理"])
     api_router.include_router(settings.router, prefix="/settings", tags=["用户设置"])
     api_router.include_router(tasks.router, prefix="/tasks", tags=["后台任务"])
-    api_router.include_router(analytics.router, prefix="/analytics", tags=["数据分析"])
+    api_router.include_router(assets.router, prefix="/assets", tags=["资产管理"])
     
     # 移动端和系统API路由
     api_router.include_router(mobile.router, prefix="/mobile", tags=["移动端API"])

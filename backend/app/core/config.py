@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8002
     
     # 数据库配置 - 从环境变量读取，默认使用本地文件
-    # 使用相对路径，数据库文件在backend目录下
-    DATABASE_URL: str = "sqlite:///./yunwei_docs.db"
+    # 使用绝对路径，确保数据库文件在backend目录下
+    DATABASE_URL: str = f"sqlite:///{os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'yunwei_docs.db'))}"
     TEST_DATABASE_URL: Optional[str] = None
     
     # 安全配置
@@ -32,15 +32,18 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
     # 文件上传配置
-    UPLOAD_DIR: str = "./uploads"
+    UPLOAD_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'uploads'))
     MAX_FILE_SIZE: int = 10485760  # 10MB
-    ALLOWED_EXTENSIONS: str = "pdf,doc,docx,txt,md,xls,xlsx,csv,jpg,jpeg,png"
+    ALLOWED_EXTENSIONS: str = "pdf,doc,docx,txt,md,xls,xlsx,csv,jpg,jpeg,png,bmp,tiff,gif,webp"
     
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379"
     
     # Elasticsearch配置
     ELASTICSEARCH_URL: str = "http://localhost:9200"
+    
+    # 时区配置
+    TIMEZONE: str = "Asia/Shanghai"  # 默认时区为北京时间
     
     # CORS配置 - 新的灵活配置系统
     CORS_ORIGINS: str = ""  # 手动指定的CORS源（逗号分隔）
@@ -50,7 +53,7 @@ class Settings(BaseSettings):
     CORS_INCLUDE_LOCALHOST: bool = True  # 是否包含localhost
     CORS_INCLUDE_HTTPS: bool = True  # 是否包含HTTPS变体
     CORS_FRONTEND_PORT: str = "5173"  # 新增：前端端口
-    CORS_EXTRA_PORTS: str = "3000,8080,9000"  # 额外端口（逗号分隔）
+    CORS_EXTRA_PORTS: str = ""  # 额外端口（逗号分隔） - 精简配置，只使用主要端口
     
     @property
     def BACKEND_CORS_ORIGINS(self) -> List[str]:
@@ -111,7 +114,7 @@ class Settings(BaseSettings):
                 try:
                     detected_ips = self._detect_local_ips()
                     if detected_ips:
-                        base_ports = [5173, 5174, 8002]
+                        base_ports = [5173]  # 只使用主要前端端口
                         extra_ports = []
                         if self.CORS_EXTRA_PORTS:
                             try:

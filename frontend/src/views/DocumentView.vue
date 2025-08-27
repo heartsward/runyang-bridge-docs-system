@@ -161,7 +161,7 @@
           :file-list="fileList"
           multiple
           @update:file-list="handleFileChange"
-          accept=".pdf,.doc,.docx,.txt,.md,.xls,.xlsx,.csv"
+          accept=".pdf,.doc,.docx,.txt,.md,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.bmp,.tiff,.gif,.webp"
         >
           <n-button>
             <template #icon>
@@ -175,7 +175,7 @@
           </n-button>
         </n-upload>
         <n-text depth="3" style="font-size: 12px; margin-top: 4px;">
-          支持格式：PDF、DOC、DOCX、TXT、MD、XLS、XLSX、CSV，支持多文件同时选择
+          支持格式：PDF、DOC、DOCX、TXT、MD、XLS、XLSX、CSV、JPG、PNG、BMP、TIFF、GIF、WEBP等，支持多文件同时选择
         </n-text>
       </n-form-item>
     </n-form>
@@ -190,15 +190,84 @@
   </n-modal>
 
   <!-- 文档预览模态框 -->
-  <n-modal v-model:show="showPreviewModal" preset="card" style="width: 90%; height: 85%; max-width: 1200px;" :title="`预览文档 - ${currentDocument?.title || ''}`">
+  <n-modal v-model:show="showPreviewModal" preset="card" style="width: 98%; height: 95%; max-width: none; min-width: 1200px;" :title="`预览文档 - ${currentDocument?.title || ''}`">
     <div v-if="previewLoading" style="text-align: center; padding: 40px;">
       <n-spin size="large" />
       <div style="margin-top: 16px;">加载中...</div>
     </div>
     <div v-else>
-      <n-scrollbar style="max-height: 70vh;">
-        <pre style="white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 13px; line-height: 1.8; padding: 16px; background-color: #fafafa; border-radius: 4px;">{{ previewContent }}</pre>
-      </n-scrollbar>
+      <!-- 预览模式切换 (仅对OCR提取的图片和PDF显示) -->
+      <n-space align="center" style="margin-bottom: 16px;">
+        <n-radio-group v-if="shouldShowViewToggle(currentDocument)" v-model:value="previewMode" size="small">
+          <n-radio-button value="extracted">提取内容</n-radio-button>
+          <n-radio-button value="original">原文件</n-radio-button>
+        </n-radio-group>
+        
+        <!-- 搜索高亮信息（仅在提取内容模式下显示） -->
+        <n-space v-if="previewMode === 'extracted' && searchKeyword && highlightedCount > 0" size="small">
+          <n-tag type="warning" size="small">
+            🔍 "{{ searchKeyword }}" 共 {{ highlightedCount }} 处
+          </n-tag>
+          <n-button-group size="tiny">
+            <n-button @click="scrollToHighlight(-1)" :disabled="currentHighlightIndex <= 0">
+              ↑
+            </n-button>
+            <n-button @click="scrollToHighlight(1)" :disabled="currentHighlightIndex >= highlightedCount - 1">
+              ↓  
+            </n-button>
+          </n-button-group>
+          <n-text depth="3" style="font-size: 11px;">
+            {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
+          </n-text>
+        </n-space>
+      </n-space>
+
+      <div class="preview-container">
+        <!-- 提取内容模式 -->
+        <pre 
+          v-if="previewMode === 'extracted' || !shouldShowViewToggle(currentDocument)"
+          v-html="previewContent" 
+          class="preview-content-table"
+        ></pre>
+        
+        <!-- 原文件模式 (仅对支持的文件类型显示) -->
+        <div v-else-if="shouldShowViewToggle(currentDocument) && previewMode === 'original'" class="original-file-preview">
+          <!-- PDF 文件使用 iframe 预览 -->
+          <iframe 
+            v-if="isPDFFile(currentDocument)"
+            :src="getFileUrl(currentDocument)" 
+            style="width: 100%; height: 600px; border: none; border-radius: 4px;"
+            title="PDF预览"
+          ></iframe>
+          
+          <!-- 图片文件预览 -->
+          <div v-else-if="isImageFile(currentDocument)" style="text-align: center;">
+            <n-image 
+              :src="getFileUrl(currentDocument)" 
+              style="max-width: 100%; max-height: 600px;"
+              :alt="currentDocument.title"
+            />
+          </div>
+          
+          <!-- 其他文件类型显示下载信息 -->
+          <div v-else class="file-download-info">
+            <n-empty description="此文件类型不支持在线预览">
+              <template #extra>
+                <n-space vertical align="center">
+                  <n-text>文件名：{{ currentDocument.title }}</n-text>
+                  <n-text depth="3">文件大小：{{ formatFileSize(currentDocument.file_size) }}</n-text>
+                  <n-button type="primary" @click="downloadDocument(currentDocument!)">
+                    <template #icon>
+                      <n-icon><DownloadOutline /></n-icon>
+                    </template>
+                    下载文件
+                  </n-button>
+                </n-space>
+              </template>
+            </n-empty>
+          </div>
+        </div>
+      </div>
     </div>
     <template #footer>
       <n-space justify="end">
@@ -221,9 +290,6 @@
             <n-tag v-for="tag in currentDocument.tags" :key="tag" size="small" type="info">{{ tag }}</n-tag>
           </n-space>
           <span v-else>暂无标签</span>
-        </n-descriptions-item>
-        <n-descriptions-item label="AI摘要" v-if="currentDocument.ai_summary">
-          <n-text>{{ currentDocument.ai_summary }}</n-text>
         </n-descriptions-item>
         <n-descriptions-item label="创建时间">{{ formatDate(currentDocument.created_at) }}</n-descriptions-item>
         <n-descriptions-item label="更新时间">{{ formatDate(currentDocument.updated_at) }}</n-descriptions-item>
@@ -381,13 +447,15 @@ import {
   NProgress,
   NAlert,
   NRadioGroup,
+  NRadioButton,
+  NImage,
   NRadio,
   useMessage,
   useDialog
 } from 'naive-ui'
-import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline } from '@vicons/ionicons5'
+import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
-import { documentService, uploadService, authService, taskService, analyticsService } from '@/services'
+import { documentService, uploadService, authService, taskService } from '@/services'
 import type { Document, Category, User } from '@/types/api'
 import apiService from '@/services/api'
 import { debounce } from '@/utils'
@@ -412,8 +480,14 @@ const showDetailModal = ref(false)
 const showEditModal = ref(false)
 const previewContent = ref('')
 const previewLoading = ref(false)
+const previewMode = ref<'extracted' | 'original'>('extracted')
 const currentDocument = ref<Document | null>(null)
 const editLoading = ref(false)
+
+// 搜索相关状态
+const searchKeyword = ref('')  // 存储当前搜索关键词用于高亮
+const highlightedCount = ref(0)  // 高亮匹配数量
+const currentHighlightIndex = ref(0)  // 当前高亮索引
 
 // 分页配置
 const pagination = reactive({
@@ -548,12 +622,6 @@ const columns = [
             })
           )
         ) : null,
-        // 显示AI摘要（如果有的话）
-        row.ai_summary ? h(
-          'div',
-          { style: { marginTop: '4px', fontSize: '11px', color: '#666', fontStyle: 'italic' } },
-          row.ai_summary.length > 50 ? row.ai_summary.substring(0, 50) + '...' : row.ai_summary
-        ) : null
       ]
     )
   },
@@ -724,7 +792,7 @@ const uploadDocument = async () => {
     if (fileList.value.length === 1) {
       // 单文件上传
       const fileItem = fileList.value[0]
-      const title = fileItem.renamedName ? 
+      const title = (fileItem.renamedName && fileItem.renamedName !== 'undefined') ? 
         fileItem.renamedName.replace(/\.[^/.]+$/, '') : // 使用重命名后的标题
         uploadForm.value.title // 使用用户输入的标题
       
@@ -757,7 +825,7 @@ const uploadDocument = async () => {
         
         try {
           // 使用重命名后的文件名或原始文件名
-          const fileName = fileItem && fileItem.renamedName ? fileItem.renamedName : file.name
+          const fileName = (fileItem && fileItem.renamedName && fileItem.renamedName !== 'undefined') ? fileItem.renamedName : file.name
           const titleWithoutExt = fileName.replace(/\.[^/.]+$/, '')
           
           console.log(`上传文件: 原始名称="${file.name}", 处理后名称="${fileName}", 标题="${titleWithoutExt}"`)
@@ -780,7 +848,7 @@ const uploadDocument = async () => {
           message.success(`文档 "${fileName}" 上传成功 (${successCount}/${files.length})`)
           
         } catch (error) {
-          const fileName = fileItem && fileItem.renamedName ? fileItem.renamedName : file.name
+          const fileName = (fileItem && fileItem.renamedName && fileItem.renamedName !== 'undefined') ? fileItem.renamedName : file.name
           console.error(`上传文档 "${fileName}" 失败:`, error)
           message.error(`文档 "${fileName}" 上传失败`)
         }
@@ -800,7 +868,34 @@ const uploadDocument = async () => {
     
   } catch (error: any) {
     console.error('文档上传失败:', error)
-    message.error('文档上传失败')
+    console.log('错误详细信息:')
+    console.log('  error.response:', error.response)
+    console.log('  error.response?.data:', error.response?.data)
+    console.log('  error.response?.data?.detail:', error.response?.data?.detail)
+    console.log('  error.response?.status:', error.response?.status)
+    console.log('  error.message:', error.message)
+    
+    // 详细打印验证错误
+    if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
+      console.log('  验证错误详情:')
+      error.response.data.detail.forEach((err, index) => {
+        console.log(`    [${index}]:`, err)
+        console.log(`       字段路径:`, err.loc)
+        console.log(`       错误类型:`, err.type)
+        console.log(`       错误信息:`, err.msg)
+        console.log(`       输入值:`, err.input)
+      })
+    }
+    
+    let errorMessage = '文档上传失败'
+    if (error.response?.data?.detail) {
+      if (Array.isArray(error.response.data.detail)) {
+        errorMessage = error.response.data.detail.map((d: any) => d.msg || d).join(', ')
+      } else {
+        errorMessage = error.response.data.detail
+      }
+    }
+    message.error(errorMessage)
   } finally {
     uploading.value = false
   }
@@ -905,28 +1000,141 @@ const showDocumentDetail = async (document: Document) => {
   }
 }
 
+
 // 预览文档
-const previewDocument = async (document: Document) => {
+const previewDocument = async (document: Document, keyword: string = '') => {
   currentDocument.value = document
   showPreviewModal.value = true
   previewLoading.value = true
   previewContent.value = ''
+  searchKeyword.value = keyword // 保存搜索关键词用于高亮
   
   const startTime = Date.now()
   
   try {
-    // 调用搜索API的预览端点
-    const data = await apiService.get(`/search/preview/${document.id}`)
-    previewContent.value = data.content || '无法获取文档内容'
+    // 调用搜索API的预览端点，启用完整内容显示和智能格式化
+    const params: any = {
+      format_mode: 'formatted',  // 启用智能格式化
+      max_length: null,          // 移除长度限制
+      source: 'auto'             // 自动选择最佳内容源
+    }
+    
+    // 如果有搜索关键词，添加到参数中用于后端高亮处理
+    if (keyword) {
+      params.highlight = keyword
+    }
+    
+    const data = await apiService.get(`/search/preview/${document.id}`, { params })
+    
+    const content = data.content || '无法获取文档内容'
+    previewContent.value = content
+    
+    // 如果有搜索关键词但后端没有处理高亮，前端补充处理
+    if (keyword && !content.includes('<mark>')) {
+      applyClientHighlight(keyword)
+    } else if (keyword && content.includes('<mark>')) {
+      // 后端已处理高亮，统计数量
+      updateHighlightCount()
+    }
     
     // 文档访问统计已在后端预览API中自动记录，无需前端额外调用
   } catch (error) {
     console.error('预览文档失败:', error)
-    previewContent.value = '无法获取文档内容'
+    const errorContent = '无法获取文档内容'
+    previewContent.value = errorContent
     message.error('预览失败')
   } finally {
     previewLoading.value = false
   }
+}
+
+// 前端补充关键词高亮处理
+const applyClientHighlight = (keyword: string) => {
+  if (!keyword || !previewContent.value) return
+  
+  try {
+    // 创建正则表达式，忽略大小写，避免在HTML标签内匹配
+    const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`(?!<[^>]*)(${escapedKeyword})(?![^<]*>)`, 'gi')
+    
+    // 对预览内容应用高亮，添加索引用于导航
+    let highlightIndex = 0
+    const highlightedContent = previewContent.value.replace(regex, (match, p1) => {
+      return `<mark data-highlight-index="${highlightIndex++}">${p1}</mark>`
+    })
+    
+    // 更新预览内容
+    previewContent.value = highlightedContent
+    
+    // 更新高亮计数
+    highlightedCount.value = highlightIndex
+    currentHighlightIndex.value = 0
+    
+    console.log(`Applied client-side highlighting: ${highlightIndex} matches for "${keyword}"`)
+  } catch (error) {
+    console.error('前端高亮处理失败:', error)
+  }
+}
+
+// 统计现有高亮数量（用于后端已处理高亮的情况）
+const updateHighlightCount = () => {
+  if (!previewContent.value) {
+    highlightedCount.value = 0
+    currentHighlightIndex.value = 0
+    return
+  }
+  
+  // 统计<mark>标签数量
+  const markMatches = previewContent.value.match(/<mark[^>]*>/g)
+  highlightedCount.value = markMatches ? markMatches.length : 0
+  currentHighlightIndex.value = 0
+  
+  // 为现有的mark标签添加索引（如果还没有的话）
+  if (highlightedCount.value > 0 && !previewContent.value.includes('data-highlight-index')) {
+    addHighlightIndexes()
+  }
+}
+
+// 为现有高亮添加索引
+const addHighlightIndexes = () => {
+  let highlightIndex = 0
+  const contentWithIndexes = previewContent.value.replace(/<mark>/g, () => {
+    return `<mark data-highlight-index="${highlightIndex++}">`
+  })
+  
+  previewContent.value = contentWithIndexes
+}
+
+// 滚动到指定高亮位置
+const scrollToHighlight = (direction: number) => {
+  if (highlightedCount.value === 0) return
+  
+  // 计算新的索引
+  let newIndex = currentHighlightIndex.value + direction
+  if (newIndex < 0) newIndex = 0
+  if (newIndex >= highlightedCount.value) newIndex = highlightedCount.value - 1
+  
+  currentHighlightIndex.value = newIndex
+  
+  // 查找对应的高亮元素并滚动到视图
+  setTimeout(() => {
+    const targetMark = document.querySelector(`[data-highlight-index="${newIndex}"]`)
+    if (targetMark) {
+      // 移除之前的活跃高亮样式
+      document.querySelectorAll('mark.active-highlight').forEach(el => {
+        el.classList.remove('active-highlight')
+      })
+      
+      // 添加当前高亮样式
+      targetMark.classList.add('active-highlight')
+      
+      // 滚动到视图
+      targetMark.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      })
+    }
+  }, 100)
 }
 
 // 下载文档
@@ -1044,7 +1252,34 @@ const saveDocumentEdit = async () => {
     updateStatistics()
   } catch (error: any) {
     console.error('更新文档失败:', error)
-    message.error('更新文档失败')
+    console.log('更新错误详细信息:')
+    console.log('  error.response:', error.response)
+    console.log('  error.response?.data:', error.response?.data)
+    console.log('  error.response?.data?.detail:', error.response?.data?.detail)
+    console.log('  error.response?.status:', error.response?.status)
+    console.log('  error.message:', error.message)
+    
+    // 详细打印验证错误
+    if (error.response?.data?.detail && Array.isArray(error.response.data.detail)) {
+      console.log('  更新验证错误详情:')
+      error.response.data.detail.forEach((err, index) => {
+        console.log(`    [${index}]:`, err)
+        console.log(`       字段路径:`, err.loc)
+        console.log(`       错误类型:`, err.type)
+        console.log(`       错误信息:`, err.msg)
+        console.log(`       输入值:`, err.input)
+      })
+    }
+    
+    let errorMessage = '更新文档失败'
+    if (error.response?.data?.detail) {
+      if (Array.isArray(error.response.data.detail)) {
+        errorMessage = error.response.data.detail.map((d: any) => d.msg || d).join(', ')
+      } else {
+        errorMessage = error.response.data.detail
+      }
+    }
+    message.error(errorMessage)
   } finally {
     editLoading.value = false
   }
@@ -1365,7 +1600,7 @@ const validateFinalFileNames = async () => {
   
   // 收集所有最终的文件名
   for (const fileItem of fileList.value) {
-    const finalName = fileItem.renamedName || fileItem.file.name
+    const finalName = (fileItem.renamedName && fileItem.renamedName !== 'undefined') ? fileItem.renamedName : fileItem.file.name
     
     // 检查是否有内部重复
     if (finalFileNames.includes(finalName)) {
@@ -1427,8 +1662,127 @@ onMounted(async () => {
     console.error('初始化页面失败:', error)
   }
 })
+
+// 文件类型检测方法
+const isPDFFile = (document: Document | null): boolean => {
+  if (!document) return false
+  return document.file_path.toLowerCase().endsWith('.pdf')
+}
+
+const isImageFile = (document: Document | null): boolean => {
+  if (!document) return false
+  const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
+  return imageExtensions.some(ext => document.file_path.toLowerCase().endsWith(ext))
+}
+
+// 判断是否应该显示视图切换按钮 (仅对OCR提取的图片和PDF)
+const shouldShowViewToggle = (document: Document | null): boolean => {
+  if (!document) return false
+  // 只有图片和PDF文件显示切换按钮
+  return isPDFFile(document) || isImageFile(document)
+}
+
+// 获取文件URL用于预览
+const getFileUrl = (document: Document | null): string => {
+  if (!document) return ''
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+  return `${baseUrl}/api/v1/documents/${document.id}/preview`
+}
+
 </script>
 
 <style scoped>
 /* DocumentView specific styles can be added here if needed */
+
+.preview-content {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background-color: #f8f9fa;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+}
+
+
+.preview-content :deep(mark) {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+/* 预览容器 - 支持宽表格自适应显示 */
+.preview-container {
+  width: 100%;
+  height: 100%;
+  max-height: 80vh;
+  overflow: auto;
+  background-color: #ffffff;
+  border-radius: 6px;
+}
+
+/* 优化表格显示样式 */
+.preview-content-table {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre;  /* 保持空格和对齐 */
+  word-break: normal; /* 不破坏单词，保持对齐 */
+  background-color: #f8f9fa;
+  padding: 16px;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+  margin: 0;
+  width: 100%;
+  min-width: 800px; /* 设置最小宽度，确保表格有足够空间 */
+  tab-size: 4; /* 设置制表符宽度 */
+  unicode-bidi: embed;
+  direction: ltr;
+}
+
+
+/* 文本模式的高亮样式 */
+.preview-content-table mark {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.preview-content-table mark.active-highlight {
+  background-color: #ffc107;
+  color: #212529;
+  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
+  font-weight: bold;
+}
+
+/* 显示模式控制样式 */
+.display-mode-controls {
+  padding: 12px 16px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+}
+
+/* 原文件预览样式 */
+.original-file-preview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-download-info {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 300px;
+  padding: 40px;
+}
 </style>

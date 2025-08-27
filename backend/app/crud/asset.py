@@ -148,8 +148,11 @@ class CRUDAsset(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         
         # 设置基本字段
         obj_data['creator_id'] = creator_id
-        obj_data['created_at'] = datetime.now()
-        obj_data['updated_at'] = datetime.now()
+        from datetime import timezone, timedelta
+        beijing_tz = timezone(timedelta(hours=8))
+        now = datetime.now(beijing_tz)
+        obj_data['created_at'] = now
+        obj_data['updated_at'] = now
         
         db_obj = Asset(**obj_data)
         db.add(db_obj)
@@ -173,8 +176,10 @@ class CRUDAsset(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             
             # 设置基本字段
             obj_data['creator_id'] = creator_id
-            obj_data['created_at'] = datetime.now()
-            obj_data['updated_at'] = datetime.now()
+            beijing_tz = timezone(timedelta(hours=8))
+            now = datetime.now(beijing_tz)
+            obj_data['created_at'] = now
+            obj_data['updated_at'] = now
             obj_data['is_merged'] = False
             
             db_obj = Asset(**obj_data)

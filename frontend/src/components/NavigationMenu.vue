@@ -227,14 +227,6 @@ const menuOptions = computed(() => {
     }
   ]
 
-  // 只有管理员才能看到数据分析模块
-  if (currentUser.value?.is_superuser) {
-    baseOptions.splice(3, 0, {
-      label: '数据分析',
-      key: 'analytics',
-      icon: () => h(NIcon, { component: BarChartOutline })
-    })
-  }
 
   return baseOptions
 })
@@ -268,15 +260,6 @@ const handleMenuClick = (key: string) => {
       break
     case 'search':
       router.push('/search')
-      break
-    case 'analytics':
-      // 只有管理员才能访问数据分析
-      if (currentUser.value?.is_superuser) {
-        router.push('/analytics')
-      } else {
-        message.error('您没有权限访问数据分析模块，请联系管理员')
-        return
-      }
       break
     case 'categories':
       router.push('/categories')
@@ -394,8 +377,6 @@ const updateActiveKey = () => {
     activeKey.value = 'assets'
   } else if (path.startsWith('/search')) {
     activeKey.value = 'search'
-  } else if (path.startsWith('/analytics')) {
-    activeKey.value = 'analytics'
   } else if (path.startsWith('/categories')) {
     activeKey.value = 'categories'
   } else if (path.startsWith('/settings')) {

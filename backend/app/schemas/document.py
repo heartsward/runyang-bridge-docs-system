@@ -43,8 +43,8 @@ class DocumentBase(BaseModel):
     content: Optional[str] = None
     category_id: Optional[int] = None
     tags: Optional[List[str]] = []
-    status: str = "published"
-    is_public: bool = True
+    status: Optional[str] = "published"
+    is_public: Optional[bool] = True
 
 
 class DocumentCreate(DocumentBase):
@@ -78,9 +78,6 @@ class DocumentInDBBase(DocumentBase):
     # 内容提取状态
     content_extracted: Optional[bool] = None
     content_extraction_error: Optional[str] = None
-    ai_summary: Optional[str] = None
-    ai_tags: Optional[List[str]] = None
-    confidence_score: Optional[float] = None
     version: str = "1.0.0"
     parent_id: Optional[int] = None
     owner_id: int
@@ -148,7 +145,6 @@ class DocumentStats(BaseModel):
     categories_count: int
     total_views: int
     total_downloads: int
-    avg_confidence_score: Optional[float] = None
 
 
 class CategoryStats(BaseModel):

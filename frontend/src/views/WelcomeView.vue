@@ -144,13 +144,6 @@ const handleSearch = () => {
   }
 }
 
-const handleAnalytics = () => {
-  if (authService.isAuthenticated()) {
-    router.push('/analytics')
-  } else {
-    router.push('/login')
-  }
-}
 
 const viewDocument = (doc: RecentDocument) => {
   if (authService.isAuthenticated()) {

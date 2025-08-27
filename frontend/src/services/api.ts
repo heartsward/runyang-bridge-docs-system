@@ -144,7 +144,8 @@ class ApiService {
   async upload<T>(url: string, formData: FormData): Promise<T> {
     const response = await this.api.post<T>(url, formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        // 明确移除Content-Type，让浏览器自动设置multipart/form-data
+        'Content-Type': undefined,
       },
     })
     return response.data
@@ -154,7 +155,8 @@ class ApiService {
   async putForm<T>(url: string, formData: FormData): Promise<T> {
     const response = await this.api.put<T>(url, formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        // 明确移除Content-Type，让浏览器自动设置multipart/form-data
+        'Content-Type': undefined,
       },
     })
     return response.data

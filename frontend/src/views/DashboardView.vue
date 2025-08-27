@@ -337,28 +337,27 @@ const popularKeywords = ref([])
 const loadDashboardData = async () => {
   loading.value = true
   try {
-    // 加载统计数据
-    const analyticsData = await apiService.get('/analytics/stats')
+    // 加载基础统计数据（不依赖analytics端点）
+    const documents = await apiService.get('/documents?limit=100')
+    const assets = await apiService.getUnified('/unified-assets?limit=100')
+    
     stats.value = {
       ...stats.value,
-      totalDocuments: analyticsData.totalDocuments || 0,
-      totalAssets: analyticsData.totalAssets || 0,
-      activeUsers: analyticsData.activeUsers || 0,
-      todayViews: analyticsData.documentViews + analyticsData.assetViews || 0
+      totalDocuments: Array.isArray(documents) ? documents.length : (documents?.items?.length || 0),
+      totalAssets: Array.isArray(assets) ? assets.length : 0,
+      activeUsers: 1, // 简化统计
+      todayViews: 0 // 简化统计
     }
 
     // 加载最近文档
-    const documents = await apiService.get('/documents?limit=5')
-    recentDocuments.value = documents.slice(0, 5)
+    const recentDocs = Array.isArray(documents) ? documents : (documents?.items || [])
+    recentDocuments.value = recentDocs.slice(0, 5)
 
     // 加载最近资产
-    const assets = await apiService.getUnified('/unified-assets?limit=5')
-    recentAssets.value = assets.slice(0, 5)
+    recentAssets.value = Array.isArray(assets) ? assets.slice(0, 5) : []
 
-    // 加载热门搜索关键词
-    if (analyticsData.searchKeywords) {
-      popularKeywords.value = analyticsData.searchKeywords.slice(0, 8)
-    }
+    // 清空热门搜索关键词（analytics功能已移除）
+    popularKeywords.value = []
 
   } catch (error) {
     console.error('加载仪表板数据失败:', error)

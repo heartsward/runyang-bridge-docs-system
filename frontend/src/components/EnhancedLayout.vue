@@ -164,7 +164,6 @@ const pageTitle = computed(() => {
   const routeMap: Record<string, string> = {
     documents: '文档管理',
     assets: '资产管理',
-    analytics: '数据分析',
     categories: '分类管理',
     settings: '系统设置',
     search: '搜索结果'
@@ -179,8 +178,6 @@ const breadcrumbs = computed(() => {
     crumbs.push({ label: '文档管理', path: '/documents', clickable: false })
   } else if (route.name === 'assets') {
     crumbs.push({ label: '资产管理', path: '/assets', clickable: false })
-  } else if (route.name === 'analytics') {
-    crumbs.push({ label: '数据分析', path: '/analytics', clickable: false })
   } else if (route.name === 'categories') {
     crumbs.push({ label: '分类管理', path: '/categories', clickable: false })
   } else if (route.name === 'settings') {
@@ -218,11 +215,6 @@ const menuOptions = computed(() => {
   // 管理员菜单
   if (currentUser.value?.is_superuser) {
     options.push(
-      {
-        label: '数据分析',
-        key: 'analytics',
-        icon: () => h(NIcon, null, { default: () => h(BarChartOutlined) })
-      },
       {
         label: '系统设置',
         key: 'settings',

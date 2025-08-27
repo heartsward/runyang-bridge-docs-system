@@ -15,7 +15,7 @@ export class AssetService {
 
   // 获取资产列表
   async getAllAssets(): Promise<Asset[]> {
-    const response = await apiService.get<{items: Asset[], total: number}>(`/assets`)
+    const response = await apiService.get<{items: Asset[], total: number}>(`/assets/`)
     return response.items
   }
 
@@ -23,7 +23,7 @@ export class AssetService {
   async searchAssets(query: AssetSearchQuery): Promise<Asset[]> {
     const params = new URLSearchParams()
     
-    if (query.query) params.append('query', query.query)
+    if (query.query) params.append('search', query.query)
     if (query.asset_type) params.append('asset_type', query.asset_type)
     if (query.status) params.append('status', query.status)
     if (query.ip_address) params.append('ip_address', query.ip_address)
@@ -33,7 +33,7 @@ export class AssetService {
       query.tags.forEach(tag => params.append('tags', tag))
     }
     
-    const response = await apiService.get<{items: Asset[], total: number}>(`/assets?${params.toString()}`)
+    const response = await apiService.get<{items: Asset[], total: number}>(`/assets/?${params.toString()}`)
     return response.items || []
   }
 

@@ -1,9 +1,14 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.api_v1 import api_router
 from app.core.config import settings
 from app.db.database import engine
 from app.models import user, document, asset
+import os
+
+# 设置时区环境变量
+os.environ['TZ'] = settings.TIMEZONE
 
 # 创建数据库表
 user.Base.metadata.create_all(bind=engine)
@@ -19,17 +24,21 @@ def startup_background_tasks():
     except Exception as e:
         print(f"后台任务处理器启动失败: {e}")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时执行
+    startup_background_tasks()
+    yield
+    # 关闭时执行（如果需要的话）
+    print("应用程序正在关闭...")
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="运维文档管理系统后端API",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan
 )
-
-# 添加启动事件
-@app.on_event("startup")
-async def startup_event():
-    startup_background_tasks()
 
 # 设置CORS
 app.add_middleware(
@@ -66,7 +75,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "app.main:app",
-        host="127.0.0.1",
-        port=8000,
+        host="0.0.0.0",
+        port=8002,
         reload=False
     )

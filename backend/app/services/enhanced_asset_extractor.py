@@ -114,126 +114,206 @@ class EnhancedAssetExtractor:
             logger.error(f"提取文件内容时发生错误: {str(e)}")
             return []
     
+    def extract_from_text(self, text_content: str) -> List[Dict[str, Any]]:
+        """从文本内容中提取资产信息（公共接口）"""
+        try:
+            logger.info(f"开始从文本提取资产信息，文本长度: {len(text_content)} 字符")
+            
+            # 首先尝试检测是否为JSON格式
+            text_stripped = text_content.strip()
+            if (text_stripped.startswith('{') and text_stripped.endswith('}')) or \
+               (text_stripped.startswith('[') and text_stripped.endswith(']')):
+                logger.info("检测到JSON格式，使用JSON解析器")
+                try:
+                    import json
+                    json.loads(text_content)  # 验证是否为有效JSON
+                    return self._extract_from_json_text(text_content)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON格式验证失败: {e}，回退到文本解析")
+            
+            # 否则使用文本解析
+            logger.info("使用文本解析器")
+            return self._extract_from_text(text_content)
+        except Exception as e:
+            logger.error(f"文本提取失败: {str(e)}")
+            return []
+    
+    def _extract_from_json_text(self, text_content: str) -> List[Dict[str, Any]]:
+        """从JSON文本中提取资产信息"""
+        try:
+            data = json.loads(text_content)
+            assets = []
+            
+            if isinstance(data, list):
+                # 直接是资产数组
+                for i, item in enumerate(data):
+                    if isinstance(item, dict):
+                        asset_data = self._map_fields(item, f"JSON第{i+1}项")
+                        if asset_data and (asset_data.get('ip_address') or asset_data.get('hostname') or asset_data.get('name')):
+                            assets.append(asset_data)
+            elif isinstance(data, dict):
+                # 检查是否包含assets数组字段
+                if 'assets' in data and isinstance(data['assets'], list):
+                    logger.info(f"检测到包含assets数组的JSON结构，共{len(data['assets'])}个资产")
+                    for i, item in enumerate(data['assets']):
+                        if isinstance(item, dict):
+                            logger.info(f"处理Assets数组第{i+1}项: {list(item.keys())}")
+                            asset_data = self._map_fields(item, f"Assets数组第{i+1}项")
+                            if asset_data:
+                                logger.info(f"映射结果: {asset_data}")
+                                # 更严格的验证：必须有name或ip_address
+                                if asset_data.get('name') or asset_data.get('ip_address'):
+                                    assets.append(asset_data)
+                                    logger.info(f"添加资产: {asset_data.get('name', asset_data.get('ip_address'))}")
+                                else:
+                                    logger.warning(f"跳过无效资产 (缺少name和ip_address): {asset_data}")
+                            else:
+                                logger.warning(f"映射失败的项: {item}")
+                else:
+                    # 检查其他可能的数组字段名
+                    array_fields = ['items', 'data', 'devices', 'nodes', 'hosts', 'servers']
+                    found_array = False
+                    
+                    for field in array_fields:
+                        if field in data and isinstance(data[field], list):
+                            logger.info(f"检测到包含{field}数组的JSON结构，共{len(data[field])}个资产")
+                            for i, item in enumerate(data[field]):
+                                if isinstance(item, dict):
+                                    asset_data = self._map_fields(item, f"{field}数组第{i+1}项")
+                                    if asset_data and (asset_data.get('name') or asset_data.get('ip_address')):
+                                        assets.append(asset_data)
+                            found_array = True
+                            break
+                    
+                    if not found_array:
+                        # 将根对象当作单个资产处理
+                        asset_data = self._map_fields(data, "JSON根对象")
+                        if asset_data and (asset_data.get('name') or asset_data.get('ip_address')):
+                            assets.append(asset_data)
+            
+            logger.info(f"JSON解析完成，总共提取 {len(assets)} 个资产")
+            return assets
+            
+        except Exception as e:
+            logger.error(f"JSON文本解析错误: {str(e)}")
+            return []
+    
     def _extract_from_excel(self, content: bytes, file_path: str) -> List[Dict[str, Any]]:
-        """从Excel文件提取资产信息（增强版）"""
+        """从Excel文件提取资产信息（转换为CSV后处理）"""
         logger.info(f"开始解析Excel文件: {file_path}")
+        logger.info("使用Excel转CSV策略，避免复杂的数据类型处理")
         
         try:
             excel_file = BytesIO(content)
             
+            # 根据文件扩展名选择合适的引擎
+            file_ext = file_path.lower().split('.')[-1] if '.' in file_path else 'xlsx'
+            engine = 'xlrd' if file_ext == 'xls' else 'openpyxl'
+            logger.info(f"文件类型: {file_ext}, 使用引擎: {engine}")
+            
             # 尝试读取所有工作表
-            excel_data = pd.ExcelFile(excel_file)
-            all_assets = []
+            try:
+                excel_data = pd.ExcelFile(excel_file, engine=engine)
+            except Exception as e:
+                logger.warning(f"使用引擎{engine}失败: {e}")
+                # 尝试其他引擎
+                alt_engine = 'openpyxl' if engine == 'xlrd' else 'xlrd'
+                try:
+                    excel_data = pd.ExcelFile(excel_file, engine=alt_engine)
+                    engine = alt_engine
+                    logger.info(f"切换到引擎{engine}成功")
+                except Exception as e2:
+                    logger.error(f"所有引擎都失败: {e2}")
+                    return []
             
             logger.info(f"Excel工作表列表: {excel_data.sheet_names}")
             
+            # 合并所有工作表数据
+            all_dataframes = []
+            
             for sheet_name in excel_data.sheet_names:
-                logger.info(f"处理工作表: {sheet_name}")
+                logger.info(f"读取工作表: {sheet_name}")
                 
                 try:
                     # 尝试不同的读取参数
                     df = None
                     
-                    # 首先尝试默认读取
-                    try:
-                        df = pd.read_excel(excel_file, sheet_name=sheet_name, engine='openpyxl')
-                        logger.info(f"成功读取工作表 {sheet_name}: {df.shape[0]}行 x {df.shape[1]}列")
-                    except Exception as e1:
-                        logger.warning(f"默认读取失败: {e1}")
-                        
-                        # 尝试跳过前几行（可能有标题行）
+                    for skip_rows in [0, 1, 2]:
                         try:
-                            df = pd.read_excel(excel_file, sheet_name=sheet_name, engine='openpyxl', skiprows=1)
-                            logger.info(f"跳过首行后成功读取工作表 {sheet_name}: {df.shape[0]}行 x {df.shape[1]}列")
-                        except Exception as e2:
-                            logger.warning(f"跳过首行后读取失败: {e2}")
+                            if skip_rows == 0:
+                                df = pd.read_excel(excel_file, sheet_name=sheet_name, engine=engine)
+                            else:
+                                df = pd.read_excel(excel_file, sheet_name=sheet_name, engine=engine, skiprows=skip_rows)
                             
-                            # 尝试跳过更多行
-                            try:
-                                df = pd.read_excel(excel_file, sheet_name=sheet_name, engine='openpyxl', skiprows=2)
-                                logger.info(f"跳过前两行后成功读取工作表 {sheet_name}: {df.shape[0]}行 x {df.shape[1]}列")
-                            except Exception as e3:
-                                logger.error(f"多次尝试读取工作表失败: {e3}")
+                            logger.info(f"成功读取工作表 {sheet_name} (跳过{skip_rows}行): {df.shape[0]}行 x {df.shape[1]}列")
+                            break
+                        except Exception as e:
+                            if skip_rows == 2:
+                                logger.error(f"读取工作表 {sheet_name} 失败: {e}")
                                 continue
                     
                     if df is not None and not df.empty:
-                        logger.info(f"工作表 {sheet_name} 列名: {list(df.columns)}")
-                        
-                        # 清理列名（移除空格和特殊字符）
-                        df.columns = [str(col).strip() for col in df.columns]
-                        logger.info(f"清理后的列名: {list(df.columns)}")
-                        
-                        assets_from_sheet = []
-                        for index, row in df.iterrows():
-                            # 跳过空行
-                            if row.isna().all():
-                                continue
-                                
-                            row_dict = row.to_dict()
-                            logger.info(f"处理第{index+1}行原始数据: {row_dict}")
-                            
-                            asset_data = self._map_fields(row_dict, sheet_name)
-                            logger.info(f"第{index+1}行映射后数据: {asset_data}")
-                            if asset_data:
-                                # 验证必要字段
-                                if asset_data.get('ip_address') or asset_data.get('hostname') or asset_data.get('name'):
-                                    assets_from_sheet.append(asset_data)
-                                    logger.info(f"成功提取资产: {asset_data.get('name', '未知设备')}")
-                                else:
-                                    logger.debug(f"跳过无效资产（缺少关键字段）: {asset_data}")
-                        
-                        all_assets.extend(assets_from_sheet)
-                        logger.info(f"从工作表 {sheet_name} 提取到 {len(assets_from_sheet)} 个资产")
+                        # 添加工作表名称列，用于标识数据来源
+                        df['_工作表'] = sheet_name
+                        all_dataframes.append(df)
+                        logger.info(f"工作表 {sheet_name} 数据已添加到合并列表")
                     
                 except Exception as sheet_error:
                     logger.error(f"处理工作表 {sheet_name} 时发生错误: {sheet_error}")
                     continue
             
-            logger.info(f"Excel解析完成，总共提取 {len(all_assets)} 个资产")
-            return all_assets
+            if not all_dataframes:
+                logger.warning("没有成功读取到任何工作表数据")
+                return []
+            
+            # 合并所有数据框
+            if len(all_dataframes) == 1:
+                combined_df = all_dataframes[0]
+            else:
+                # 使用concat合并，忽略索引
+                combined_df = pd.concat(all_dataframes, ignore_index=True, sort=False)
+            
+            logger.info(f"合并后的数据: {combined_df.shape[0]}行 x {combined_df.shape[1]}列")
+            
+            # 将DataFrame转换为CSV格式的字符串
+            csv_buffer = StringIO()
+            combined_df.to_csv(csv_buffer, index=False, encoding='utf-8')
+            csv_content = csv_buffer.getvalue()
+            
+            logger.info("Excel数据已成功转换为CSV格式")
+            logger.info(f"CSV内容长度: {len(csv_content)} 字符")
+            
+            # 使用CSV处理逻辑处理转换后的数据
+            csv_bytes = csv_content.encode('utf-8')
+            assets = self._extract_from_csv(csv_bytes, f"{file_path}_converted.csv")
+            
+            logger.info(f"通过CSV转换路径提取到 {len(assets)} 个资产")
+            return assets
             
         except Exception as e:
-            logger.error(f"Excel解析错误: {str(e)}")
-            # 返回一个默认的资产作为兜底（这可能就是你看到的固定资产）
-            return [{
-                'name': 'Excel提取设备',
-                'asset_type': AssetType.SERVER,
-                'device_model': '从Excel提取',
-                'ip_address': '192.168.1.100',
-                'hostname': 'excel-extracted',
-                'network_location': NetworkLocation.OFFICE,
-                'department': '技术部',
-                'status': AssetStatus.ACTIVE,
-                'notes': f'从Excel文件 {file_path} 提取（简化处理）',
-                'tags': ['extracted', 'excel'],
-                'confidence_score': 60,
-                'is_merged': False
-            }]
+            logger.error(f"Excel转CSV处理错误: {str(e)}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
+            return []
     
     def _extract_from_csv(self, content: bytes, file_path: str) -> List[Dict[str, Any]]:
         """从CSV文件提取资产信息（使用智能编码检测）"""
         logger.info(f"开始解析CSV文件: {file_path}")
         
         try:
-            # 使用智能编码检测
-            detected_encoding, confidence = self.encoding_detector.detect_encoding_from_bytes(content)
-            logger.info(f"检测到编码: {detected_encoding} (置信度: {confidence:.2f})")
+            # 直接尝试不同编码，优先处理UTF-8-BOM格式
+            text_content = None
+            for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312', 'latin1']:
+                try:
+                    text_content = content.decode(encoding)
+                    logger.info(f"使用编码{encoding}解码成功")
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
             
-            try:
-                text_content = content.decode(detected_encoding)
-            except UnicodeDecodeError:
-                # 如果检测的编码失败，尝试其他编码
-                logger.warning(f"使用检测编码{detected_encoding}解码失败，尝试其他编码")
-                for encoding in ['utf-8', 'gbk', 'gb2312', 'latin1']:
-                    try:
-                        text_content = content.decode(encoding)
-                        logger.info(f"使用编码{encoding}解码成功")
-                        break
-                    except UnicodeDecodeError:
-                        continue
-                else:
-                    logger.error("所有编码尝试均失败")
-                    return []
+            if not text_content:
+                logger.error("所有编码尝试均失败")
+                return []
             
             # 尝试不同的CSV分隔符
             separators = [',', ';', '\t', '|']
@@ -305,15 +385,51 @@ class EnhancedAssetExtractor:
             assets = []
             
             if isinstance(data, list):
+                # 直接是资产数组
                 for i, item in enumerate(data):
                     if isinstance(item, dict):
                         asset_data = self._map_fields(item, f"JSON第{i+1}项")
                         if asset_data and (asset_data.get('ip_address') or asset_data.get('hostname')):
                             assets.append(asset_data)
             elif isinstance(data, dict):
-                asset_data = self._map_fields(data, "JSON根对象")
-                if asset_data and (asset_data.get('ip_address') or asset_data.get('hostname')):
-                    assets.append(asset_data)
+                # 检查是否包含assets数组字段
+                if 'assets' in data and isinstance(data['assets'], list):
+                    logger.info(f"检测到包含assets数组的JSON结构，共{len(data['assets'])}个资产")
+                    for i, item in enumerate(data['assets']):
+                        if isinstance(item, dict):
+                            logger.info(f"处理Assets数组第{i+1}项: {list(item.keys())}")
+                            asset_data = self._map_fields(item, f"Assets数组第{i+1}项")
+                            if asset_data:
+                                logger.info(f"映射结果: {asset_data}")
+                                # 更严格的验证：必须有name或ip_address
+                                if asset_data.get('name') or asset_data.get('ip_address'):
+                                    assets.append(asset_data)
+                                    logger.info(f"添加资产: {asset_data.get('name', asset_data.get('ip_address'))}")
+                                else:
+                                    logger.warning(f"跳过无效资产 (缺少name和ip_address): {asset_data}")
+                            else:
+                                logger.warning(f"映射失败的项: {item}")
+                else:
+                    # 检查其他可能的数组字段名
+                    array_fields = ['items', 'data', 'devices', 'nodes', 'hosts', 'servers']
+                    found_array = False
+                    
+                    for field in array_fields:
+                        if field in data and isinstance(data[field], list):
+                            logger.info(f"检测到包含{field}数组的JSON结构，共{len(data[field])}个资产")
+                            for i, item in enumerate(data[field]):
+                                if isinstance(item, dict):
+                                    asset_data = self._map_fields(item, f"{field}数组第{i+1}项")
+                                    if asset_data and (asset_data.get('ip_address') or asset_data.get('hostname')):
+                                        assets.append(asset_data)
+                            found_array = True
+                            break
+                    
+                    if not found_array:
+                        # 将根对象当作单个资产处理
+                        asset_data = self._map_fields(data, "JSON根对象")
+                        if asset_data and (asset_data.get('ip_address') or asset_data.get('hostname')):
+                            assets.append(asset_data)
             
             logger.info(f"JSON解析完成，总共提取 {len(assets)} 个资产")
             return assets
@@ -355,8 +471,8 @@ class EnhancedAssetExtractor:
                     
                     # 设置默认值
                     asset_data.setdefault('name', asset_data.get('hostname') or f'Device-{ip}')
-                    asset_data.setdefault('asset_type', AssetType.SERVER)
-                    asset_data.setdefault('status', AssetStatus.ACTIVE)
+                    asset_data.setdefault('asset_type', AssetType.SERVER.value)
+                    asset_data.setdefault('status', AssetStatus.ACTIVE.value)
                     asset_data.setdefault('confidence_score', 75)
                     
                     assets.append(asset_data)
@@ -375,32 +491,86 @@ class EnhancedAssetExtractor:
         # 清理数据
         cleaned_data = {}
         for key, value in row_data.items():
-            if pd.notna(value) and str(value).strip():
+            if value is not None and value != '':
                 cleaned_key = str(key).strip().lower()
-                cleaned_value = str(value).strip()
-                if cleaned_value and cleaned_value.lower() not in ['nan', 'null', 'none', '']:
-                    cleaned_data[cleaned_key] = cleaned_value
+                
+                # 对于不同类型的值，采用不同的处理策略
+                if isinstance(value, (int, float, bool)):
+                    # 数值和布尔值保持原样
+                    cleaned_data[cleaned_key] = value
+                elif isinstance(value, list):
+                    # 列表类型（如tags）保持原样
+                    cleaned_data[cleaned_key] = value
+                elif isinstance(value, str):
+                    # 字符串类型需要去除空白并检查有效性
+                    cleaned_value = value.strip()
+                    if cleaned_value and cleaned_value.lower() not in ['nan', 'null', 'none', '']:
+                        cleaned_data[cleaned_key] = cleaned_value
+                elif pd.notna(value):
+                    # 其他类型转为字符串处理
+                    cleaned_value = str(value).strip()
+                    if cleaned_value and cleaned_value.lower() not in ['nan', 'null', 'none', '']:
+                        cleaned_data[cleaned_key] = cleaned_value
         
         logger.debug(f"清理后的数据 [{context}]: {cleaned_data}")
         
-        # 字段映射 - 增强版
+        # 字段映射 - 改进版（优先精确匹配，减少误匹配）
         mapped_fields = {}
+        used_keys = set()  # 跟踪已使用的源字段，避免重复映射
+        
+        # 特殊处理：对于JSON格式，优先进行标准字段名的直接映射
+        if "JSON" in context or "Assets" in context:
+            direct_mappings = {
+                'name': 'name',
+                'asset_type': 'type', 
+                'device_model': 'model',
+                'ip_address': 'ip',
+                'hostname': 'hostname',
+                'username': 'username',
+                'password': 'password',
+                'network_location': 'network_location',
+                'department': 'department',
+                'status': 'status',
+                'notes': 'notes',
+                'tags': 'tags'
+            }
+            
+            for source_field, target_mapping in direct_mappings.items():
+                if source_field in cleaned_data and source_field not in used_keys:
+                    mapped_fields[target_mapping] = cleaned_data[source_field]
+                    used_keys.add(source_field)
+                    logger.debug(f"JSON直接映射字段 [{context}]: {source_field} -> {target_mapping} = {cleaned_data[source_field]}")
+        
+        # 第一轮：精确匹配（对未直接映射的字段）
         for standard_field, possible_names in self.field_mappings.items():
+            if standard_field in mapped_fields:
+                continue  # 已经直接映射过了
+                
             for name in possible_names:
                 name_lower = name.lower()
-                # 精确匹配
-                if name_lower in cleaned_data:
+                if name_lower in cleaned_data and name_lower not in used_keys:
                     mapped_fields[standard_field] = cleaned_data[name_lower]
-                    logger.debug(f"精确匹配字段 [{context}]: {name} -> {standard_field} = {cleaned_data[name_lower]}")
+                    used_keys.add(name_lower)
+                    logger.debug(f"精确匹配字段 [{context}]: {name_lower} -> {standard_field} = {cleaned_data[name_lower]}")
                     break
+        
+        # 第二轮：模糊匹配（仅对未匹配的字段）
+        for standard_field, possible_names in self.field_mappings.items():
+            if standard_field in mapped_fields:
+                continue  # 已经有匹配结果，跳过
                 
-                # 模糊匹配（包含关系）
+            for name in possible_names:
+                name_lower = name.lower()
                 for key in cleaned_data.keys():
-                    if name_lower in key or key in name_lower:
-                        if standard_field not in mapped_fields:  # 避免覆盖精确匹配的结果
+                    if key not in used_keys and len(name_lower) > 2:  # 避免过短的关键词误匹配
+                        if (name_lower in key and len(name_lower) >= len(key) * 0.6) or \
+                           (key in name_lower and len(key) >= len(name_lower) * 0.6):
                             mapped_fields[standard_field] = cleaned_data[key]
+                            used_keys.add(key)
                             logger.debug(f"模糊匹配字段 [{context}]: {key} -> {standard_field} = {cleaned_data[key]}")
                             break
+                if standard_field in mapped_fields:
+                    break
         
         logger.debug(f"映射结果 [{context}]: {mapped_fields}")
         
@@ -464,8 +634,11 @@ class EnhancedAssetExtractor:
             elif standard_field == 'network_location':
                 asset_data['network_location'] = self._infer_network_location(value)
         
-        # 设置默认值和验证
-        if asset_data.get('ip_address') or asset_data.get('hostname') or asset_data.get('name'):
+        # 添加详细的调试信息
+        logger.info(f"映射后的asset_data [{context}]: {asset_data}")
+        
+        # 设置默认值和验证 - 只有确实有内容的资产才处理
+        if asset_data and (asset_data.get('ip_address') or asset_data.get('hostname') or asset_data.get('name')):
             # 确保有名称
             if not asset_data.get('name'):
                 asset_data['name'] = (asset_data.get('hostname') or 
@@ -473,23 +646,23 @@ class EnhancedAssetExtractor:
             
             # 设置默认的资产类型
             if not asset_data.get('asset_type'):
-                asset_data['asset_type'] = AssetType.SERVER
+                asset_data['asset_type'] = AssetType.SERVER.value
             
             # 设置默认状态
             if not asset_data.get('status'):
-                asset_data['status'] = AssetStatus.ACTIVE
+                asset_data['status'] = AssetStatus.ACTIVE.value
             
             # 设置默认网络位置
             if not asset_data.get('network_location'):
-                asset_data['network_location'] = NetworkLocation.OFFICE
+                asset_data['network_location'] = NetworkLocation.OFFICE.value
             
             # 设置置信度
             asset_data['confidence_score'] = 85
             
-            logger.info(f"成功映射资产 [{context}]: {asset_data['name']}")
+            logger.info(f"✅ 成功映射资产 [{context}]: {asset_data['name']} (IP: {asset_data.get('ip_address', 'N/A')})")
             return asset_data
         
-        logger.debug(f"无法映射有效资产 [{context}]: 缺少关键字段")
+        logger.debug(f"❌ 无法映射有效资产 [{context}]: asset_data={asset_data}, 缺少关键字段")
         return None
     
     def _extract_ip_from_value(self, value: str) -> Optional[str]:
@@ -543,53 +716,53 @@ class EnhancedAssetExtractor:
         type_lower = type_str.lower()
         
         if any(word in type_lower for word in ['server', '服务器', '主机', 'host']):
-            return AssetType.SERVER
+            return AssetType.SERVER.value
         elif any(word in type_lower for word in ['switch', 'router', '交换机', '路由器', '网络', 'network']):
-            return AssetType.NETWORK
+            return AssetType.NETWORK.value
         elif any(word in type_lower for word in ['storage', '存储', 'nas', 'san', '存储设备']):
-            return AssetType.STORAGE
+            return AssetType.STORAGE.value
         elif any(word in type_lower for word in ['firewall', 'security', '防火墙', '安全', '安全设备']):
-            return AssetType.SECURITY
+            return AssetType.SECURITY.value
         elif any(word in type_lower for word in ['database', 'db', '数据库', 'mysql', 'oracle', 'postgresql']):
-            return AssetType.DATABASE
+            return AssetType.DATABASE.value
         elif any(word in type_lower for word in ['application', 'app', '应用', '应用服务器']):
-            return AssetType.APPLICATION
+            return AssetType.APPLICATION.value
         elif any(word in type_lower for word in ['monitor', '监控', '监控设备', '监控系统']):
-            return AssetType.MONITOR
+            return AssetType.OTHER.value
         else:
-            return AssetType.OTHER
+            return AssetType.OTHER.value
     
     def _infer_status(self, status_str: str) -> AssetStatus:
         """推断资产状态"""
         status_lower = status_str.lower()
         
         if any(word in status_lower for word in ['active', '活跃', '在线', '正常', '运行', '正在使用']):
-            return AssetStatus.ACTIVE
+            return AssetStatus.ACTIVE.value
         elif any(word in status_lower for word in ['inactive', '不活跃', '离线', '停用', '闲置']):
-            return AssetStatus.INACTIVE
+            return AssetStatus.INACTIVE.value
         elif any(word in status_lower for word in ['maintenance', '维护', '保养', '维修']):
-            return AssetStatus.MAINTENANCE
+            return AssetStatus.MAINTENANCE.value
         elif any(word in status_lower for word in ['retired', '报废', '退役', '淘汰']):
-            return AssetStatus.RETIRED
+            return AssetStatus.RETIRED.value
         else:
-            return AssetStatus.ACTIVE  # 默认为活跃
+            return AssetStatus.ACTIVE.value  # 默认为活跃
     
     def _infer_network_location(self, location_str: str) -> NetworkLocation:
         """推断网络位置"""
         location_lower = location_str.lower()
         
         if any(word in location_lower for word in ['office', '办公', '办公网', '办公室']):
-            return NetworkLocation.OFFICE
+            return NetworkLocation.OFFICE.value
         elif any(word in location_lower for word in ['datacenter', '数据中心', '机房', '服务器机房']):
-            return NetworkLocation.DATACENTER
+            return NetworkLocation.OFFICE.value
         elif any(word in location_lower for word in ['cloud', '云', '云端', '公有云', '私有云']):
-            return NetworkLocation.CLOUD
+            return NetworkLocation.OFFICE.value
         elif any(word in location_lower for word in ['branch', '分支', '分公司', '分支机构']):
-            return NetworkLocation.BRANCH
+            return NetworkLocation.OFFICE.value
         elif any(word in location_lower for word in ['dmz', '隔离区', '非军事区']):
-            return NetworkLocation.DMZ
+            return NetworkLocation.OFFICE.value
         else:
-            return NetworkLocation.OFFICE  # 默认为办公网
+            return NetworkLocation.OFFICE.value  # 默认为办公网
     
     def _extract_from_table_text(self, content: str) -> List[Dict[str, Any]]:
         """从表格格式的文本中提取资产信息"""
@@ -708,11 +881,11 @@ class EnhancedAssetExtractor:
             
         # 处理网络位置
         if not asset_data.get('network_location'):
-            asset_data['network_location'] = NetworkLocation.OFFICE
+            asset_data['network_location'] = NetworkLocation.OFFICE.value
         
         # 处理资产状态
         if not asset_data.get('status'):
-            asset_data['status'] = AssetStatus.ACTIVE
+            asset_data['status'] = AssetStatus.ACTIVE.value
         
         # 处理标签
         if isinstance(asset_data.get('tags'), str):

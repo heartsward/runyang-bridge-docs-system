@@ -448,6 +448,184 @@ class SmartTextProcessor:
         
         return separator_count >= 2 and len(line) > 10
     
+    # 新增的增强功能方法
+    def _is_code_block_marker(self, line: str) -> bool:
+        """检测代码块标记"""
+        return line.strip().startswith('```') or line.strip() == '```'
+    
+    def _extract_code_language(self, line: str) -> str:
+        """提取代码语言类型"""
+        match = re.match(r'^```(\w+)', line.strip())
+        return match.group(1) if match else 'unknown'
+    
+    def _count_table_columns(self, line: str) -> int:
+        """计算表格列数"""
+        separators = ['|', '│', '\t']
+        max_cols = 0
+        for sep in separators:
+            cols = line.count(sep) + 1 if sep in line else 0
+            max_cols = max(max_cols, cols)
+        return max_cols
+    
+    def _generate_heading_id(self, heading: str) -> str:
+        """为标题生成ID"""
+        # 移除特殊字符，转换为小写，用破折号连接
+        clean_heading = re.sub(r'[^\w\u4e00-\u9fff\s]', '', heading)
+        return re.sub(r'\s+', '-', clean_heading.strip().lower())[:50]
+    
+    def _clean_list_item(self, line: str) -> str:
+        """清理列表项，移除标记符号"""
+        # 移除各种列表标记
+        patterns = [
+            r'^[•·▪▫◦‣⁃]\s*',
+            r'^\d+[\.、]\s*',
+            r'^[一二三四五六七八九十][、．]\s*',
+            r'^[\（\(][一二三四五六七八九十\d]+[\）\)]\s*',
+            r'^[A-Za-z][\.、]\s*'
+        ]
+        
+        cleaned = line
+        for pattern in patterns:
+            cleaned = re.sub(pattern, '', cleaned)
+            if cleaned != line:
+                break
+        
+        return cleaned.strip()
+    
+    def _calculate_indent_level(self, line: str) -> int:
+        """计算缩进级别"""
+        leading_spaces = len(line) - len(line.lstrip())
+        return leading_spaces // 4  # 假设每级缩进4个空格
+    
+    def _determine_list_type(self, line: str) -> str:
+        """确定列表类型"""
+        if re.match(r'^[•·▪▫◦‣⁃]\s', line):
+            return "bullet"
+        elif re.match(r'^\d+[\.、]\s', line):
+            return "numbered"
+        elif re.match(r'^[一二三四五六七八九十][、．]\s', line):
+            return "chinese_numbered"
+        elif re.match(r'^[\（\(][一二三四五六七八九十\d]+[\）\)]\s', line):
+            return "parentheses"
+        elif re.match(r'^[A-Za-z][\.、]\s', line):
+            return "lettered"
+        else:
+            return "unknown"
+    
+    def _infer_document_type(self, structure: Dict) -> str:
+        """推断文档类型"""
+        headings = structure.get('headings', [])
+        lists = structure.get('lists', [])
+        tables = structure.get('tables', [])
+        code_blocks = structure.get('code_blocks', [])
+        
+        # 技术文档特征
+        if code_blocks or any('api' in h['text'].lower() or 'config' in h['text'].lower() 
+                            for h in headings):
+            return "technical"
+        
+        # 法律文档特征
+        if any(re.match(r'^第[一二三四五六七八九十\d]+[条章节]', h['text']) for h in headings):
+            return "legal"
+        
+        # 报告类文档特征
+        if any(keyword in ''.join(h['text'] for h in headings).lower() 
+               for keyword in ['报告', '分析', '统计', '总结', '汇报']):
+            return "report"
+        
+        # 表格密集文档
+        if len(tables) > 3 and len(tables) > len(headings):
+            return "data"
+        
+        # 列表密集文档
+        if len(lists) > 10:
+            return "checklist"
+        
+        # 结构化文档
+        if len(headings) > 3 and structure['hierarchy_levels'] > 2:
+            return "structured"
+        
+        # 简单文档
+        if len(structure.get('paragraphs', [])) < 5:
+            return "simple"
+        
+        return "article"
+    
+    def _assess_document_quality(self, structure: Dict, text: str) -> str:
+        """评估文档质量"""
+        score = 0
+        
+        # 结构完整性
+        if structure.get('has_title'):
+            score += 20
+        
+        if len(structure.get('headings', [])) > 0:
+            score += 15
+        
+        if structure.get('hierarchy_levels', 0) > 1:
+            score += 15
+        
+        # 内容丰富度
+        if len(structure.get('paragraphs', [])) > 3:
+            score += 20
+        
+        if len(text) > 1000:
+            score += 10
+        
+        # 格式规范性
+        if structure.get('lists') and structure.get('tables'):
+            score += 10
+        
+        # 内容密度
+        if structure.get('content_density', 0) > 5:
+            score += 10
+        
+        if score >= 80:
+            return "excellent"
+        elif score >= 60:
+            return "good"
+        elif score >= 40:
+            return "fair"
+        else:
+            return "poor"
+    
+    def get_processing_statistics(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """获取处理统计信息"""
+        stats = {
+            'quality_score': result.get('quality_score', 0),
+            'corrections_applied': result.get('corrections_applied', 0),
+            'processing_steps': len(result.get('processing_steps', [])),
+            'warnings_count': len(result.get('warnings', [])),
+            'structure_complexity': 0,
+            'grade': 'unknown'
+        }
+        
+        # 计算结构复杂度
+        structure = result.get('structure', {})
+        complexity_factors = [
+            len(structure.get('headings', [])),
+            structure.get('hierarchy_levels', 0),
+            len(structure.get('lists', [])),
+            len(structure.get('tables', [])),
+            len(structure.get('code_blocks', []))
+        ]
+        stats['structure_complexity'] = sum(complexity_factors)
+        
+        # 评级
+        quality = stats['quality_score']
+        if quality >= 90:
+            stats['grade'] = 'A'
+        elif quality >= 80:
+            stats['grade'] = 'B'
+        elif quality >= 70:
+            stats['grade'] = 'C'
+        elif quality >= 60:
+            stats['grade'] = 'D'
+        else:
+            stats['grade'] = 'F'
+        
+        return stats
+    
     def _restore_document_structure(self, text: str, structure: Dict) -> str:
         """
         恢复文档结构

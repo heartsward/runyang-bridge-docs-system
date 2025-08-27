@@ -4,6 +4,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
 import enum
+from datetime import datetime, timezone, timedelta
 
 
 class AssetStatus(str, enum.Enum):
@@ -97,8 +98,8 @@ class Asset(Base):
     confidence_score = Column(Integer, default=100, comment="数据置信度(0-100)")
     
     # 时间戳
-    created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="创建者ID")
     
     # 关系 - 移除back_populates避免循环引用
@@ -131,8 +132,8 @@ class AssetExtractRule(Base):
     priority = Column(Integer, default=0, comment="优先级")
     
     # 时间戳
-    created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="创建者ID")
     
     # 关系
