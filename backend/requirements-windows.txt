@@ -12,7 +12,8 @@ alembic>=1.10.0
 # ============ 认证和安全 ============
 PyJWT>=2.6.0
 python-jose[cryptography]>=3.2.0
-passlib[bcrypt]>=1.7.0
+passlib>=1.7.0
+bcrypt==3.2.2
 python-multipart>=0.0.5
 
 # ============ 配置和环境 ============

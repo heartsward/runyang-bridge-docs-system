@@ -17,39 +17,16 @@ from app.models import user, document, asset
 # 设置时区环境变量
 os.environ['TZ'] = settings.TIMEZONE
 
-# stderr重定向上下文管理器，用于屏蔽特定错误输出
-class SuppressStderr:
-    def __init__(self):
-        self.null_file = None
-        self.saved_stderr = None
-    
-    def __enter__(self):
-        import sys
-        self.saved_stderr = sys.stderr
-        self.null_file = open(os.devnull, 'w')
-        sys.stderr = self.null_file
-        return self
-    
-    def __exit__(self, type, value, traceback):
-        import sys
-        sys.stderr = self.saved_stderr
-        if self.null_file:
-            self.null_file.close()
-
 # 验证bcrypt功能
 def verify_bcrypt_functionality():
     """验证bcrypt密码哈希功能是否正常工作"""
     try:
-        # 使用上下文管理器屏蔽bcrypt版本检测的stderr输出
-        with SuppressStderr():
-            from passlib.context import CryptContext
-            pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        from app.core.security import get_password_hash, verify_password
         
+        # 测试密码哈希和验证功能
         test_password = "test123"
-        
-        # 测试哈希和验证功能
-        hashed = pwd_context.hash(test_password)
-        is_valid = pwd_context.verify(test_password, hashed)
+        hashed = get_password_hash(test_password)
+        is_valid = verify_password(test_password, hashed)
         
         if is_valid:
             print("OK: bcrypt密码哈希功能正常")
@@ -59,20 +36,7 @@ def verify_bcrypt_functionality():
             return False
             
     except Exception as e:
-        # 如果passlib方式失败，尝试使用应用的安全函数
-        try:
-            with SuppressStderr():
-                from app.core.security import get_password_hash, verify_password
-                test_hash = get_password_hash("test123")
-                is_valid = verify_password("test123", test_hash)
-            
-            if is_valid:
-                print("OK: bcrypt密码哈希功能正常")
-                return True
-        except Exception:
-            pass
-        
-        print("ERROR: bcrypt功能不可用")
+        print(f"ERROR: bcrypt功能测试失败: {e}")
         return False
 
 # 创建数据库表
