@@ -30,10 +30,6 @@ async def search_documents(
     current_user: Optional[User] = Depends(get_optional_user)
 ):
     """搜索文档内容"""
-    print("=" * 50)
-    print("[DEBUG] SEARCH ENDPOINT HIT!")
-    print(f"[INFO] 搜索API调用: q={q}")
-    print("=" * 50)
     start_time = time.time()
     
     try:
@@ -48,7 +44,6 @@ async def search_documents(
         
         # 获取所有相关文档进行搜索
         documents = query.all()  # 搜索所有文档以确保完整性
-        print(f"[INFO] 找到 {len(documents)} 个文档进行搜索")
         
         # 搜索结果分类
         content_results = []     # 内容匹配的结果
@@ -56,22 +51,18 @@ async def search_documents(
         description_results = [] # 仅描述匹配的结果
         
         for i, doc in enumerate(documents):
-            print(f"[INFO] 处理第 {i+1}/{len(documents)} 个文档: {doc.title}")
             
             content_found = False
             
             # 优先搜索文档的预处理内容（不直接读取文件）
             if doc.content_extracted and doc.content:
-                print(f"[INFO] 搜索预处理内容: {doc.title} (内容长度: {len(doc.content)})")
                 
                 try:
                     # 只搜索数据库中已提取的内容
                     matches = search_service.search_in_text(doc.content, q)
-                    print(f"[INFO] 搜索结果: 找到 {len(matches) if matches else 0} 个匹配")
                     
                     if matches:
                         content_found = True
-                        print(f"[INFO] 内容匹配成功: {doc.title} - 匹配数量: {len(matches)}")
                         # 计算相关度分数 - 内容匹配给最高分
                         base_content_score = 0.8  # 内容匹配基础分最高
                         match_bonus = min(len(matches) / 20.0, 0.15)  # 根据匹配数量给予奖励分
@@ -98,13 +89,9 @@ async def search_documents(
                             "match_type": "content"  # 标记匹配类型
                         })
                     else:
-                        print(f"[INFO] 预处理内容无匹配: {doc.title}")
                         
                 except Exception as e:
-                    print(f"[ERROR] 搜索预处理内容 {doc.id} 失败: {str(e)}")
-                    print(f"[ERROR] 错误详情: {type(e).__name__}: {e}")
             else:
-                print(f"[INFO] 文档无预处理内容: {doc.title} - content_extracted={doc.content_extracted}")
             
             # 如果内容中没有找到，检查标题和描述
             if not content_found:
@@ -256,7 +243,6 @@ async def preview_document(
     current_user: Optional[User] = Depends(get_optional_user)
 ):
     """预览文档内容"""
-    print(f"[INFO] 预览API调用: document_id={document_id}, format_mode={format_mode}, max_length={max_length}, source={source}, view_mode={view_mode}")
     try:
         # 获取文档 - 所有用户都可以预览所有文档
         document = db.query(Document).filter(
@@ -272,7 +258,6 @@ async def preview_document(
         
         if (is_pdf_file or is_image_file) and view_mode == "original":
             file_type_name = "PDF" if is_pdf_file else "图片"
-            print(f"[INFO] {file_type_name}原文查看模式: {document.title}")
             if not document.file_path or not os.path.exists(document.file_path):
                 raise HTTPException(status_code=400, detail=f"{file_type_name}文件不存在")
             
@@ -309,7 +294,6 @@ async def preview_document(
             if document.content_extracted and document.content:
                 content = document.content
                 content_source = "extracted"
-                print(f"[INFO] 使用预处理内容预览: {document.title} (长度: {len(content)})")
             else:
                 # 如果没有预处理内容但请求预处理内容，返回错误信息
                 if source == "extracted":
@@ -325,7 +309,6 @@ async def preview_document(
             content = search_service.extract_file_content(document.file_path)
             content_source = "file"
             
-            print(f"[INFO] 使用文件直接预览: {document.title}")
             
             if not content:
                 raise HTTPException(status_code=400, detail="无法读取文档内容")
@@ -335,7 +318,6 @@ async def preview_document(
         
         # Excel文件优化：跳过额外格式化，LibreOffice已经提供了良好的格式
         if document.file_type and document.file_type.lower() in ['xls', 'xlsx']:
-            print(f"[INFO] Excel文件跳过额外格式化，使用LibreOffice原生格式")
             format_stats = {
                 "processing_time": 0.001,  # 几乎无延迟
                 "original_length": original_length,
@@ -388,8 +370,6 @@ async def preview_document(
             format_stats = format_result.get('statistics', {})
             document_structure = format_result.get('structure', {})
         
-        print(f"[INFO] 格式化统计: 原长度={original_length}, 格式化后长度={len(content)}")
-        print(f"[INFO] 文档结构: {len(document_structure.get('headings', []))}个标题, {len(document_structure.get('tables', []))}个表格")
         
         # 如果有高亮关键词，添加高亮标记
         if highlight:
@@ -411,14 +391,12 @@ async def preview_document(
                 
                 db.commit()
             except Exception as e:
-                print(f"记录文档查看统计失败: {e}")
                 db.rollback()
         
         # 移除内容长度限制，支持完整显示
         is_truncated = False
         # 添加安全检查：如果内容超过10MB，提供警告但仍显示完整内容
         if len(content) > 10 * 1024 * 1024:  # 10MB
-            print(f"警告：文档内容较大({len(content)/1024/1024:.1f}MB)，完整显示可能影响性能")
         
         return {
             "document_id": document_id,

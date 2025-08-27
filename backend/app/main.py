@@ -14,13 +14,22 @@ os.environ['TZ'] = settings.TIMEZONE
 # 验证bcrypt功能并处理版本警告
 def verify_bcrypt_functionality():
     """验证bcrypt密码哈希功能是否正常工作"""
+    import warnings
+    
+    # 抑制bcrypt版本警告
+    warnings.filterwarnings("ignore", message=".*bcrypt.*__about__.*", category=UserWarning)
+    warnings.filterwarnings("ignore", message=".*trapped.*error reading bcrypt version.*")
+    
     try:
-        from app.core.security import get_password_hash, verify_password
+        # 直接使用CryptContext避免版本检测问题
+        from passlib.context import CryptContext
         
-        # 测试密码哈希和验证功能
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         test_password = "test123"
-        hashed = get_password_hash(test_password)
-        is_valid = verify_password(test_password, hashed)
+        
+        # 测试哈希和验证功能
+        hashed = pwd_context.hash(test_password)
+        is_valid = pwd_context.verify(test_password, hashed)
         
         if is_valid:
             print("OK: bcrypt密码哈希功能正常")
@@ -30,23 +39,8 @@ def verify_bcrypt_functionality():
             return False
             
     except Exception as e:
-        # 检查是否是bcrypt版本警告
-        if "bcrypt" in str(e) and "__about__" in str(e):
-            print("WARNING: bcrypt版本警告: 新版本bcrypt移除了__about__属性，但功能正常")
-            # 尝试直接测试密码功能
-            try:
-                from passlib.context import CryptContext
-                pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-                test_hash = pwd_context.hash("test123")
-                if pwd_context.verify("test123", test_hash):
-                    print("OK: bcrypt核心功能验证成功（忽略版本警告）")
-                    return True
-            except Exception as inner_e:
-                print(f"ERROR: bcrypt功能测试失败: {inner_e}")
-                return False
-        else:
-            print(f"ERROR: bcrypt初始化失败: {e}")
-            return False
+        print(f"ERROR: bcrypt功能测试失败: {e}")
+        return False
 
 # 创建数据库表
 user.Base.metadata.create_all(bind=engine)
