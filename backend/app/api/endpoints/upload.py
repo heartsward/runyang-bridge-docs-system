@@ -94,7 +94,6 @@ def generate_safe_filename(title: str, file_extension: str, upload_dir: str) -> 
                 final_filename = f"{str(uuid.uuid4())}.{file_extension}"
             break
     
-    print(f"[DEBUG] 生成文件名: {title} -> {final_filename}")
     return final_filename
 
 
@@ -121,7 +120,7 @@ async def upload_file(
     """
     # 调试：打印接收到的数据
     try:
-        print(f"[DEBUG] 上传API接收到的数据:")
+        pass
         print(f"  文件名: {file.filename}")
         print(f"  标题: {repr(title)}")
         print(f"  描述: {repr(description)}")
@@ -177,7 +176,7 @@ async def upload_file(
             file_path = os.path.join(settings.UPLOAD_DIR, safe_filename)
             break
     
-    print(f"[DEBUG] 最终确定的文件名: {safe_filename}")
+    pass
     
     # 保存文件
     try:
@@ -193,7 +192,7 @@ async def upload_file(
         tag_list = [tag.strip() for tag in tags.split(',') if tag.strip()]
     
     # 创建文档记录
-    print(f"[DEBUG] 准备创建DocumentCreate对象，标签列表: {repr(tag_list)}")
+    pass
     
     try:
         document_data = DocumentCreate(
@@ -202,14 +201,14 @@ async def upload_file(
             category_id=category_id,
             tags=tag_list,
         )
-        print(f"[DEBUG] DocumentCreate对象创建成功")
+        pass
     except Exception as e:
         print(f"[ERROR] DocumentCreate对象创建失败: {e}")
         raise HTTPException(status_code=422, detail=f"数据验证失败: {str(e)}")
     
     try:
         document = crud_document.create(db=db, obj_in=document_data, owner_id=current_user.id)
-        print(f"[DEBUG] 数据库记录创建成功，文档ID: {document.id}")
+        pass
     except Exception as e:
         print(f"[ERROR] 数据库记录创建失败: {e}")
         raise HTTPException(status_code=422, detail=f"数据库创建失败: {str(e)}")

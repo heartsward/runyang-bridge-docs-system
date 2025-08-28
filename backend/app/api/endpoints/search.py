@@ -16,9 +16,36 @@ from app.models.user import User
 from app.models.document import Document, SearchLog
 from app.services.search_service import SearchService
 from app.services.document_formatter import DocumentFormatter, DocumentType, FormatMode
+from app.core.config import settings
 import time
 
 router = APIRouter()
+
+def get_actual_file_path(stored_path: str) -> Optional[str]:
+    """
+    获取文件的实际路径，支持路径自动修正
+    
+    Args:
+        stored_path: 数据库中存储的文件路径（可能是绝对路径）
+    
+    Returns:
+        实际可访问的文件路径，如果文件不存在则返回None
+    """
+    if not stored_path:
+        return None
+    
+    # 首先检查原路径是否存在
+    if os.path.exists(stored_path):
+        return stored_path
+    
+    # 如果原路径不存在，尝试使用文件名重新生成路径
+    filename = os.path.basename(stored_path)
+    corrected_path = os.path.join(settings.UPLOAD_DIR, filename)
+    
+    if os.path.exists(corrected_path):
+        return corrected_path
+    
+    return None
 
 @router.get("/documents", summary="搜索文档")
 async def search_documents(
@@ -261,7 +288,8 @@ async def preview_document(
         
         if (is_pdf_file or is_image_file) and view_mode == "original":
             file_type_name = "PDF" if is_pdf_file else "图片"
-            if not document.file_path or not os.path.exists(document.file_path):
+            actual_file_path = get_actual_file_path(document.file_path)
+            if not actual_file_path:
                 raise HTTPException(status_code=400, detail=f"{file_type_name}文件不存在")
             
             # 返回原始文件信息，前端将直接显示原始文件
@@ -270,8 +298,8 @@ async def preview_document(
                 "title": document.title,
                 "file_type": document.file_type,
                 "view_mode": view_mode,
-                "file_path": document.file_path,
-                "file_size": os.path.getsize(document.file_path),
+                "file_path": actual_file_path,
+                "file_size": os.path.getsize(actual_file_path),
                 "content": f"{file_type_name}原文查看模式 - 前端将直接渲染{file_type_name}文件",
                 "content_source": "original_pdf" if is_pdf_file else "original_image",
                 "content_extracted": document.content_extracted,
@@ -305,11 +333,12 @@ async def preview_document(
         
         # 如果还没有内容，尝试从文件读取
         if not content:
-            if not document.file_path or not os.path.exists(document.file_path):
+            actual_file_path = get_actual_file_path(document.file_path)
+            if not actual_file_path:
                 raise HTTPException(status_code=400, detail="文档文件不存在")
             
             search_service = SearchService()
-            content = search_service.extract_file_content(document.file_path)
+            content = search_service.extract_file_content(actual_file_path)
             content_source = "file"
             
             
@@ -420,7 +449,7 @@ async def preview_document(
             "document_type": doc_type.value,
             "format_statistics": format_stats,
             "document_structure": document_structure,
-            "file_size": os.path.getsize(document.file_path) if document.file_path and os.path.exists(document.file_path) else 0
+            "file_size": os.path.getsize(get_actual_file_path(document.file_path)) if get_actual_file_path(document.file_path) else 0
         }
         
     except HTTPException:
@@ -452,7 +481,8 @@ async def get_original_file(
             raise HTTPException(status_code=400, detail="仅支持PDF和图片文件的原文查看")
         
         # 检查文件是否存在
-        if not document.file_path or not os.path.exists(document.file_path):
+        actual_file_path = get_actual_file_path(document.file_path)
+        if not actual_file_path:
             file_type_name = "PDF" if is_pdf_file else "图片"
             raise HTTPException(status_code=404, detail=f"{file_type_name}文件不存在")
         
@@ -480,7 +510,7 @@ async def get_original_file(
         
         # 使用Response而不是FileResponse，确保在线预览而不是下载
         from fastapi.responses import Response
-        with open(document.file_path, 'rb') as f:
+        with open(actual_file_path, 'rb') as f:
             file_content = f.read()
         
         return Response(
