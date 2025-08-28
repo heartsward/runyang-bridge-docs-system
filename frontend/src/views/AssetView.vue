@@ -729,7 +729,8 @@ const assetStatusOptions = computed(() =>
 const networkLocationOptions = computed(() => [
   { label: '办公网', value: 'office' },
   { label: '监控网', value: 'monitoring' },
-  { label: '收费网', value: 'billing' }
+  { label: '收费网', value: 'billing' },
+  { label: '其它网络', value: 'other' }
 ])
 
 // 排序字段选项

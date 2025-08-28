@@ -20,7 +20,8 @@ export enum AssetType {
 export enum NetworkLocation {
   OFFICE = 'office',
   MONITORING = 'monitoring',
-  BILLING = 'billing'
+  BILLING = 'billing',
+  OTHER = 'other'
 }
 
 export interface Asset {

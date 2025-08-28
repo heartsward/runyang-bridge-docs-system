@@ -32,6 +32,7 @@ class NetworkLocation(str, enum.Enum):
     OFFICE = "office"          # 办公网
     MONITORING = "monitoring"  # 监控网
     BILLING = "billing"        # 收费网
+    OTHER = "other"            # 其它网络
 
 
 class Asset(Base):

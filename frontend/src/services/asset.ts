@@ -152,7 +152,8 @@ export class AssetService {
     const locationNames: Record<string, string> = {
       office: '办公网',
       monitoring: '监控网',
-      billing: '收费网'
+      billing: '收费网',
+      other: '其它网络'
     }
     return locationNames[location] || location
   }
@@ -160,9 +161,10 @@ export class AssetService {
   // 获取网络位置颜色
   getNetworkLocationColor(location: string): 'success' | 'warning' | 'error' | 'default' | 'primary' | 'info' {
     const locationColors: Record<string, 'success' | 'warning' | 'error' | 'default' | 'primary' | 'info'> = {
-      office: 'primary',
-      monitoring: 'success', 
-      billing: 'warning'
+      office: 'success',    // 办公网 - 绿色
+      monitoring: 'warning', // 监控网 - 橙色
+      billing: 'error',     // 收费网 - 红色
+      other: 'info'         // 其它网络 - 蓝色
     }
     return locationColors[location] || 'default'
   }
