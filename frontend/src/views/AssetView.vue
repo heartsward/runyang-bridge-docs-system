@@ -377,7 +377,7 @@
                   </n-tag>
                 </n-descriptions-item>
                 <n-descriptions-item label="备注信息" span="2">
-                  <div v-if="viewingAsset.notes && viewingAsset.notes.trim()">
+                  <div v-if="viewingAsset.notes && viewingAsset.notes.trim()" style="white-space: pre-wrap; word-break: break-word; max-width: 100%;">
                     {{ viewingAsset.notes }}
                   </div>
                   <n-text depth="3" v-else>未设置</n-text>
