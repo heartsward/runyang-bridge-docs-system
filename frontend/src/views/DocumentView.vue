@@ -1685,7 +1685,14 @@ const shouldShowViewToggle = (document: Document | null): boolean => {
 // 获取文件URL用于预览
 const getFileUrl = (document: Document | null): string => {
   if (!document) return ''
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8002`
+  
+  // 对于原文模式，使用search端点的original路径
+  if (previewMode.value === 'original') {
+    return `${baseUrl}/api/v1/search/original/${document.id}`
+  }
+  
+  // 对于内容提取模式，使用documents端点
   return `${baseUrl}/api/v1/documents/${document.id}/preview`
 }
 

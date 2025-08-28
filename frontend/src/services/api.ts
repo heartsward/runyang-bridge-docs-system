@@ -22,19 +22,16 @@ function getApiBaseUrl(): string {
     return `${currentProtocol}//${currentHost}:8002/api/v1`
   }
   
-  // 3. 默认localhost配置
-  return 'http://localhost:8002/api/v1'
+  // 3. 默认使用当前访问地址的8002端口
+  return `${currentProtocol}//${currentHost}:8002/api/v1`
 }
 
 function getUnifiedBaseUrl(): string {
   const currentHost = window.location.hostname
   const currentProtocol = window.location.protocol
   
-  if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
-    return `${currentProtocol}//${currentHost}:8002`
-  }
-  
-  return 'http://localhost:8002'
+  // 统一使用当前访问地址的8002端口
+  return `${currentProtocol}//${currentHost}:8002`
 }
 
 const API_BASE_URL = getApiBaseUrl()
