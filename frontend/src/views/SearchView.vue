@@ -710,7 +710,28 @@ const loadPreviewContent = async (documentId: number) => {
 // 获取文件URL用于预览
 const getFileUrl = (document: any): string => {
   if (!document) return ''
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+  
+  // 动态检测服务器地址，支持多机器访问
+  const currentHost = window.location.hostname
+  const currentProtocol = window.location.protocol
+  let baseUrl = import.meta.env.VITE_API_BASE_URL
+  
+  // 如果没有环境变量配置，自动推断API地址
+  if (!baseUrl) {
+    if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+      // 如果是通过IP访问，使用相同IP的8002端口
+      baseUrl = `${currentProtocol}//${currentHost}:8002`
+    } else {
+      // 本地访问使用localhost
+      baseUrl = 'http://localhost:8002'
+    }
+  }
+  
+  // 确保baseUrl不包含/api/v1后缀，避免重复
+  if (baseUrl.endsWith('/api/v1')) {
+    baseUrl = baseUrl.replace('/api/v1', '')
+  }
+  
   return `${baseUrl}/api/v1/search/original/${document.document_id}`
 }
 
