@@ -65,38 +65,48 @@ def create_access_token(
 
 
 def verify_token(token: str) -> dict:
-    """验证JWT令牌"""
+    """验证JWT令牌 - 安全版本，移除危险的Base64绕过"""
     try:
-        # 先尝试作为标准JWT解码
+        # 只接受标准JWT格式的令牌
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        return payload
-    except JWTError:
-        # 如果JWT解码失败，尝试作为simple base64 token（用于direct-login）
-        try:
-            import base64
-            import json
-            from datetime import datetime
-            
-            decoded_data = base64.b64decode(token).decode()
-            payload = json.loads(decoded_data)
-            
-            # 检查token是否过期
-            if "exp" in payload:
-                exp_timestamp = payload["exp"]
-                if datetime.now().timestamp() > exp_timestamp:
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="令牌已过期",
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-            
-            return payload
-        except Exception:
+        
+        # 验证必要的声明
+        if "exp" not in payload:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无效的认证凭据",
+                detail="令牌缺少过期时间",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        
+        # 验证令牌类型（可选）
+        token_type = payload.get("type", "access")
+        if token_type not in ["access", "refresh", "mobile"]:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="无效的令牌类型",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        return payload
+        
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="令牌已过期",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效的认证凭据",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="认证凭据验证失败",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

@@ -226,7 +226,7 @@
         <!-- 提取内容模式 -->
         <pre 
           v-if="previewMode === 'extracted' || !shouldShowViewToggle(currentDocument)"
-          v-html="previewContent" 
+          v-html="sanitizeDocumentHtml(previewContent)" 
           class="preview-content-table"
         ></pre>
         
@@ -424,6 +424,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive, h, watch } from 'vue'
+import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NSpace,
   NInput,
@@ -464,6 +465,9 @@ const message = useMessage()
 const dialog = useDialog()
 const searchQuery = ref('')
 const debouncedSearchQuery = ref('')
+
+// XSS防护
+const { sanitizeDocumentHtml } = useSafeHtml()
 const showUploadModal = ref(false)
 const showConflictModal = ref(false)
 const uploading = ref(false)

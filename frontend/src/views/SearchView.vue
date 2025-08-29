@@ -181,7 +181,7 @@
                         {{ snippet.label }}
                       </n-tag>
                     </n-space>
-                    <div v-html="snippet.text" class="highlight-text"></div>
+                    <div v-html="sanitizeHighlightHtml(snippet.text)" class="highlight-text"></div>
                   </div>
                 </div>
                 <!-- 兼容旧版本的highlights -->
@@ -193,7 +193,7 @@
                     <n-text depth="3" style="font-size: 11px;" v-else-if="result.match_type === 'title'">
                       匹配位置:
                     </n-text>
-                    <div v-html="highlight.text" class="highlight-text"></div>
+                    <div v-html="sanitizeHighlightHtml(highlight.text)" class="highlight-text"></div>
                   </div>
                 </div>
                 
@@ -299,7 +299,7 @@
           v-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
           style="max-height: 60vh;"
         >
-          <pre v-html="previewContent" class="preview-content"></pre>
+          <pre v-html="sanitizeDocumentHtml(previewContent)" class="preview-content"></pre>
         </n-scrollbar>
         
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
@@ -351,6 +351,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
+import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NLayout,
   NLayoutHeader,
@@ -453,6 +454,9 @@ const previewMode = ref<'extracted' | 'original'>('extracted')
 // 搜索结果
 const documentResults = ref<DocumentSearchResult[]>([])
 const inputSuggestions = ref<string[]>([])
+
+// XSS防护
+const { sanitizeHighlightHtml, sanitizeDocumentHtml } = useSafeHtml()
 
 const filters = ref({
   searchScope: 'all',

@@ -514,17 +514,28 @@ def preview_document(
     *,
     db: Session = Depends(get_db),
     document_id: int,
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_active_user),  # 要求用户登录
 ):
     """
-    预览文档文件（在线显示，不强制下载）
+    预览文档文件（在线显示，不强制下载）- 需要登录
     """
+    # 验证用户权限
+    if not current_user.is_active:
+        raise HTTPException(status_code=403, detail="用户账户未激活")
+    
     document = crud_document.get(db=db, id=document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
     
-    if not document.file_path or not os.path.exists(document.file_path):
-        raise HTTPException(status_code=404, detail="文档文件不存在")
+    # 验证文件路径安全性（防止路径遍历）
+    if not document.file_path or '..' in document.file_path or not os.path.exists(document.file_path):
+        raise HTTPException(status_code=404, detail="文档文件不存在或路径无效")
+    
+    # 确保文件在允许的上传目录内
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    file_path = os.path.abspath(document.file_path)
+    if not file_path.startswith(upload_dir):
+        raise HTTPException(status_code=403, detail="不允许访问此文件")
     
     # 获取文件扩展名并确定MIME类型
     file_extension = os.path.splitext(document.file_path)[1].lower()

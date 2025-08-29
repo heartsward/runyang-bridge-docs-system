@@ -54,7 +54,7 @@ async def search_documents(
     limit: int = Query(20, description="返回结果数量限制"),
     offset: int = Query(0, description="结果偏移量"),
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: User = Depends(get_current_active_user)  # 要求用户登录
 ):
     """搜索文档内容"""
     start_time = time.time()
@@ -270,7 +270,7 @@ async def preview_document(
     view_mode: Optional[str] = Query("content", description="查看模式: content(内容提取), original(原文查看) - 仅PDF文件支持"),
     max_length: Optional[int] = Query(None, description="内容长度限制(字符数)，不设置表示无限制"),
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: User = Depends(get_current_active_user)  # 要求用户登录
 ):
     """预览文档内容"""
     try:

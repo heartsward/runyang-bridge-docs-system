@@ -24,10 +24,147 @@ os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
 
 def allowed_file(filename: str) -> bool:
-    """检查文件扩展名是否允许"""
+    """检查文件扩展名是否允许 - 安全增强版本"""
+    if not filename or '.' not in filename:
+        return False
+    
+    # 防止路径遍历攻击
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return False
+    
     allowed_extensions = settings.ALLOWED_EXTENSIONS.split(',')
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in allowed_extensions
+    file_extension = filename.rsplit('.', 1)[1].lower()
+    
+    return file_extension in [ext.strip().lower() for ext in allowed_extensions]
+
+
+def validate_file_content(file: UploadFile) -> bool:
+    """验证文件内容（魔术字节检测） - 优化版本"""
+    # 文件魔术字节签名
+    MAGIC_SIGNATURES = {
+        'pdf': [b'%PDF'],
+        'doc': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+        'docx': [b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'],
+        'xlsx': [b'PK\x03\x04'],
+        'xls': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+        'jpg': [b'\xff\xd8\xff'],
+        'jpeg': [b'\xff\xd8\xff'],
+        'png': [b'\x89PNG\r\n\x1a\n'],
+    }
+    
+    # 读取文件前512字节用于检测
+    original_position = file.file.tell()
+    file.file.seek(0)
+    file_header = file.file.read(512)
+    file.file.seek(original_position)
+    
+    if not file_header:
+        return False
+    
+    # 获取文件扩展名
+    if not file.filename or '.' not in file.filename:
+        return False
+    
+    file_extension = file.filename.rsplit('.', 1)[1].lower()
+    
+    # 特殊处理文本文件（TXT, CSV）
+    if file_extension in ['txt', 'csv', 'md']:
+        return _validate_text_file(file_header)
+    
+    # 检查其他文件类型的魔术字节
+    if file_extension in MAGIC_SIGNATURES:
+        expected_signatures = MAGIC_SIGNATURES[file_extension]
+        
+        # 检查是否匹配任何一个预期的魔术字节
+        for signature in expected_signatures:
+            if file_header.startswith(signature):
+                return True
+        
+        return False
+    
+    # 对于不在列表中的扩展名，默认拒绝
+    return False
+
+
+def _validate_text_file(file_header: bytes) -> bool:
+    """验证文本文件内容"""
+    # 检查常见的BOM标记
+    bom_signatures = [
+        b'\xff\xfe',        # UTF-16 LE
+        b'\xfe\xff',        # UTF-16 BE  
+        b'\xef\xbb\xbf',    # UTF-8 BOM
+    ]
+    
+    # 如果有BOM标记，直接通过
+    for bom in bom_signatures:
+        if file_header.startswith(bom):
+            return True
+    
+    # 对于无BOM的文件，进行内容检测
+    try:
+        # 尝试多种编码方式解码
+        encodings = ['utf-8', 'ascii', 'gbk', 'utf-16']
+        
+        for encoding in encodings:
+            try:
+                decoded_content = file_header.decode(encoding)
+                
+                # 检查内容是否主要是可打印字符
+                if _is_likely_text_content(decoded_content):
+                    return True
+                    
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        
+        # 如果所有编码都失败，进行二进制内容检查
+        return _is_safe_binary_content(file_header)
+        
+    except Exception:
+        return False
+
+
+def _is_likely_text_content(content: str) -> bool:
+    """检查内容是否像文本文件"""
+    if not content:
+        return True  # 空文件认为是合法文本文件
+    
+    # 计算可打印字符的比例（更宽松的标准）
+    printable_chars = sum(1 for char in content if char.isprintable() or char in '\r\n\t\x0b\x0c')
+    printable_ratio = printable_chars / len(content)
+    
+    # 降低门槛：如果80%以上是可打印字符，认为是文本文件
+    return printable_ratio >= 0.8
+
+
+def _is_safe_binary_content(file_header: bytes) -> bool:
+    """检查二进制内容是否安全（用于无法解码的文件）"""
+    # 检查是否包含危险的可执行文件标记
+    dangerous_signatures = [
+        b'MZ',              # DOS/Windows executable
+        b'\x7fELF',         # ELF executable  
+        b'\xca\xfe\xba\xbe', # Mach-O executable
+        b'<?php',           # PHP script
+        b'<script',         # JavaScript
+        b'#!/bin/',         # Shell script
+        b'#!/usr/bin/',     # Shell script
+    ]
+    
+    # 如果包含危险签名，拒绝
+    for signature in dangerous_signatures:
+        if signature in file_header.lower():
+            return False
+    
+    # 检查二进制内容的可打印字符比例
+    try:
+        printable_bytes = sum(1 for byte in file_header if 32 <= byte <= 126 or byte in [9, 10, 13, 11, 12])
+        if len(file_header) > 0:
+            printable_ratio = printable_bytes / len(file_header)
+            # 降低门槛：如果60%以上是可打印ASCII，可能是文本文件
+            return printable_ratio >= 0.6
+    except Exception:
+        pass
+    
+    return False
 
 
 def generate_safe_filename(title: str, file_extension: str, upload_dir: str) -> str:
@@ -134,11 +271,28 @@ async def upload_file(
     if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="只有管理员可以上传文档")
     
-    # 检查文件类型
+    # 检查文件类型和安全性
     if not allowed_file(file.filename):
         raise HTTPException(
             status_code=400,
             detail=f"不支持的文件类型。允许的类型: {settings.ALLOWED_EXTENSIONS}"
+        )
+    
+    # 验证文件内容（魔术字节检测）
+    if not validate_file_content(file):
+        # 为调试提供更详细的错误信息
+        file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else 'unknown'
+        print(f"[DEBUG] 文件验证失败: {file.filename}, 扩展名: {file_extension}")
+        
+        # 读取文件头部用于调试
+        file.file.seek(0)
+        file_header = file.file.read(100)
+        file.file.seek(0)
+        print(f"[DEBUG] 文件头部 (前100字节): {file_header[:50]!r}...")
+        
+        raise HTTPException(
+            status_code=400,
+            detail="文件内容与扩展名不匹配或包含恶意内容"
         )
     
     # 检查文件大小
@@ -263,17 +417,28 @@ async def upload_file(
 def download_file(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_optional_user),
+    current_user: User = Depends(get_current_active_user),  # 要求用户登录
 ):
     """
-    下载文档文件
+    下载文档文件 - 需要登录
     """
+    # 验证用户权限
+    if not current_user.is_active:
+        raise HTTPException(status_code=403, detail="用户账户未激活")
+    
     document = crud_document.get(db=db, id=document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
     
-    if not document.file_path or not os.path.exists(document.file_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
+    # 验证文件路径安全性（防止路径遍历）
+    if not document.file_path or '..' in document.file_path or not os.path.exists(document.file_path):
+        raise HTTPException(status_code=404, detail="文件不存在或路径无效")
+    
+    # 确保文件在允许的上传目录内
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    file_path = os.path.abspath(document.file_path)
+    if not file_path.startswith(upload_dir):
+        raise HTTPException(status_code=403, detail="不允许访问此文件")
     
     # 增加下载次数
     user_id = current_user.id if current_user else None
@@ -323,6 +488,10 @@ async def upload_multiple_files(
             # 检查文件类型和大小
             if not allowed_file(file.filename):
                 continue  # 跳过不支持的文件类型
+            
+            # 验证文件内容
+            if not validate_file_content(file):
+                continue  # 跳过恶意文件
             
             file_size = get_file_size(file)
             if file_size > settings.MAX_FILE_SIZE:

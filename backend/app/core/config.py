@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "运维文档管理系统"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-    DEBUG: bool = True
+    DEBUG: bool = False
     
     # 服务器网络配置
     SERVER_HOST: str = "0.0.0.0"
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     TEST_DATABASE_URL: Optional[str] = None
     
     # 安全配置
-    SECRET_KEY: str = "your-secret-key-here-change-in-production"
+    SECRET_KEY: str = "REQUIRED_SET_IN_ENV_FILE"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     

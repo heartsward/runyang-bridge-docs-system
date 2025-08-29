@@ -120,7 +120,7 @@
                 <template #header>
                   <div class="result-header">
                     <n-button text @click="openItem(item)">
-                      <span class="result-title" v-html="item.title"></span>
+                      <span class="result-title" v-html="sanitizeHighlightHtml(item.title)"></span>
                     </n-button>
                     <n-tag :type="getItemTypeTagType(item.type)" size="small">
                       {{ getItemTypeText(item.type) }}
@@ -130,7 +130,7 @@
                 
                 <template #description>
                   <div class="result-description">
-                    <div v-if="item.description" class="result-excerpt" v-html="item.description"></div>
+                    <div v-if="item.description" class="result-excerpt" v-html="sanitizeHighlightHtml(item.description)"></div>
                     <div class="result-meta">
                       <span v-if="item.created_at">{{ formatDate(item.created_at) }}</span>
                       <span v-if="item.file_type" class="file-type">{{ item.file_type.toUpperCase() }}</span>
@@ -266,6 +266,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NCard,
   NInput,
@@ -312,6 +313,9 @@ const message = useMessage()
 // 响应式数据
 const searchQuery = ref('')
 const searching = ref(false)
+
+// XSS防护
+const { sanitizeHighlightHtml } = useSafeHtml()
 const showAdvancedSearch = ref(false)
 const searchType = ref('all')
 const searchMode = ref('quick')
