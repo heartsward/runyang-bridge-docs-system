@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # 安全配置
     SECRET_KEY: str = "REQUIRED_SET_IN_ENV_FILE"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     
     # 文件上传配置
     UPLOAD_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'uploads'))
