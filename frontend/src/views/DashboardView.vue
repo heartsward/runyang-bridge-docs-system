@@ -339,7 +339,7 @@ const loadDashboardData = async () => {
   try {
     // 加载基础统计数据（不依赖analytics端点）
     const documents = await apiService.get('/documents?limit=100')
-    const assets = await apiService.getUnified('/unified-assets?limit=100')
+    const assets = await apiService.get('/assets?limit=100')
     
     stats.value = {
       ...stats.value,

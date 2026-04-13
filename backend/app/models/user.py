@@ -25,3 +25,4 @@ class User(Base):
     documents = relationship("Document", back_populates="owner", lazy="dynamic")
     categories = relationship("Category", back_populates="creator", lazy="dynamic")
     search_logs = relationship("SearchLog", back_populates="user", lazy="dynamic")
+    ai_configs = relationship("AIUserConfig", back_populates="user", lazy="dynamic")

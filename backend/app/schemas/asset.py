@@ -8,7 +8,7 @@ from app.models.asset import AssetStatus, AssetType, NetworkLocation
 class AssetBase(BaseModel):
     """资产基础模型"""
     name: str = Field(..., description="设备名称")
-    asset_type: AssetType = Field(..., description="资产类型")
+    asset_type: str = Field(..., description="资产类型")
     device_model: Optional[str] = Field(None, description="设备型号")
     manufacturer: Optional[str] = Field(None, description="制造商")
     serial_number: Optional[str] = Field(None, description="序列号")
@@ -18,7 +18,7 @@ class AssetBase(BaseModel):
     mac_address: Optional[str] = Field(None, description="MAC地址")
     hostname: Optional[str] = Field(None, description="主机名")
     port: Optional[int] = Field(None, description="端口号")
-    network_location: NetworkLocation = Field(NetworkLocation.OFFICE, description="所处网络")
+    network_location: str = Field(NetworkLocation.OFFICE, description="所处网络")
     
     # 认证信息
     username: Optional[str] = Field(None, description="用户名")
@@ -37,7 +37,7 @@ class AssetBase(BaseModel):
     storage: Optional[str] = Field(None, description="存储信息")
     
     # 状态和管理信息
-    status: AssetStatus = Field(AssetStatus.ACTIVE, description="资产状态")
+    status: str = Field("active", description="资产状态")
     department: Optional[str] = Field(None, description="所属部门")
     
     # 业务信息
@@ -77,7 +77,7 @@ class AssetCreate(AssetBase):
 class AssetUpdate(BaseModel):
     """更新资产模型"""
     name: Optional[str] = None
-    asset_type: Optional[AssetType] = None
+    asset_type: Optional[str] = None
     device_model: Optional[str] = None
     manufacturer: Optional[str] = None
     serial_number: Optional[str] = None
@@ -85,7 +85,7 @@ class AssetUpdate(BaseModel):
     mac_address: Optional[str] = None
     hostname: Optional[str] = None
     port: Optional[int] = None
-    network_location: Optional[NetworkLocation] = None
+    network_location: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
     ssh_key: Optional[str] = None
@@ -96,7 +96,7 @@ class AssetUpdate(BaseModel):
     cpu: Optional[str] = None
     memory: Optional[str] = None
     storage: Optional[str] = None
-    status: Optional[AssetStatus] = None
+    status: Optional[str] = None
     department: Optional[str] = None
     service_name: Optional[str] = None
     application: Optional[str] = None
@@ -162,11 +162,11 @@ class Asset(AssetBase):
 class AssetSearchQuery(BaseModel):
     """资产搜索查询模型"""
     query: Optional[str] = Field(None, description="搜索关键词")
-    asset_type: Optional[AssetType] = Field(None, description="资产类型")
-    status: Optional[AssetStatus] = Field(None, description="资产状态")
+    asset_type: Optional[str] = Field(None, description="资产类型")
+    status: Optional[str] = Field(None, description="资产状态")
     ip_address: Optional[str] = Field(None, description="IP地址")
     department: Optional[str] = Field(None, description="部门")
-    network_location: Optional[NetworkLocation] = Field(None, description="所处网络")
+    network_location: Optional[str] = Field(None, description="所处网络")
     tags: Optional[List[str]] = Field(None, description="标签")
     page: int = Field(1, ge=1, description="页码")
     per_page: int = Field(20, ge=1, le=100, description="每页数量")
@@ -209,6 +209,13 @@ class AssetList(BaseModel):
     page: int
     per_page: int
     pages: int
+
+
+class AssetSingleConfirmRequest(BaseModel):
+    """单个资产确认请求模型"""
+    asset_data: Dict[str, Any] = Field(..., description="资产数据")
+    is_duplicate: bool = Field(False, description="是否为重复资产")
+    existing_id: Optional[int] = Field(None, description="现有资产ID（用于更新）")
 
 
 class AssetStatistics(BaseModel):

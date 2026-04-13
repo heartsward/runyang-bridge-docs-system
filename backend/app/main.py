@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="passlib.*")
 from app.api.api_v1 import api_router
 from app.core.config import settings
 from app.db.database import engine
-from app.models import user, document, asset
+from app.models import user, document, asset, ai_config, system_config
 
 # 设置时区环境变量
 os.environ['TZ'] = settings.TIMEZONE
@@ -43,6 +43,8 @@ def verify_bcrypt_functionality():
 user.Base.metadata.create_all(bind=engine)
 document.Base.metadata.create_all(bind=engine)
 asset.Base.metadata.create_all(bind=engine)
+ai_config.Base.metadata.create_all(bind=engine)
+system_config.Base.metadata.create_all(bind=engine)
 
 # 初始化默认用户
 def init_default_users():
@@ -139,9 +141,12 @@ app = FastAPI(
 )
 
 # 设置CORS
+cors_origins = settings.BACKEND_CORS_ORIGINS
+print(f"[CORS] 配置的允许源: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

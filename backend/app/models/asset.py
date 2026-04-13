@@ -43,7 +43,7 @@ class Asset(Base):
     
     # 基本信息
     name = Column(String(255), nullable=False, index=True, comment="设备名称")
-    asset_type = Column(Enum(AssetType), nullable=False, comment="资产类型")
+    asset_type = Column(String(50), nullable=False, comment="资产类型")
     device_model = Column(String(255), comment="设备型号")
     manufacturer = Column(String(255), comment="制造商")
     serial_number = Column(String(255), unique=True, index=True, comment="序列号")
@@ -53,7 +53,7 @@ class Asset(Base):
     mac_address = Column(String(17), comment="MAC地址")
     hostname = Column(String(255), comment="主机名")
     port = Column(Integer, comment="端口号")
-    network_location = Column(Enum(NetworkLocation, values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=NetworkLocation.OFFICE, comment="所处网络")
+    network_location = Column(String(50), nullable=False, default="office", comment="所处网络")
     
     # 认证信息
     username = Column(String(255), comment="用户名")
@@ -72,7 +72,7 @@ class Asset(Base):
     storage = Column(String(255), comment="存储信息")
     
     # 状态和管理信息
-    status = Column(Enum(AssetStatus), default=AssetStatus.ACTIVE, comment="资产状态")
+    status = Column(String(20), default="active", comment="资产状态")
     department = Column(String(255), comment="所属部门")
     
     # 业务信息

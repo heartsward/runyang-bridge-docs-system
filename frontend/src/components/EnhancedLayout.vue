@@ -7,7 +7,7 @@
           <n-icon :size="32" color="#1890ff">
             <DatabaseOutlined />
           </n-icon>
-          <h2 class="logo-text">润扬大桥运维文档管理系统</h2>
+          <h2 class="logo-text">润扬大桥运维资产管理系统</h2>
         </div>
         
         <div class="header-actions">
@@ -168,7 +168,7 @@ const pageTitle = computed(() => {
     settings: '系统设置',
     search: '搜索结果'
   }
-  return routeMap[route.name as string] || '润扬大桥运维文档管理系统'
+  return routeMap[route.name as string] || '润扬大桥运维资产管理系统'
 })
 
 const breadcrumbs = computed(() => {

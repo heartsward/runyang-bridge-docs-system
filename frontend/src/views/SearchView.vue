@@ -294,6 +294,24 @@
           </n-radio-group>
         </n-space>
         
+        <!-- 搜索高亮导航（仅在提取内容模式下显示） -->
+        <n-space align="center" style="margin-bottom: 16px;" v-if="previewMode === 'extracted' && searchQuery && highlightedCount > 0">
+          <n-tag type="warning" size="small">
+            🔍 "{{ searchQuery }}" 共 {{ highlightedCount }} 处
+          </n-tag>
+          <n-button-group size="tiny">
+            <n-button @click="scrollToHighlightInPreview(-1)" :disabled="currentHighlightIndex <= 0">
+              ↑
+            </n-button>
+            <n-button @click="scrollToHighlightInPreview(1)" :disabled="currentHighlightIndex >= highlightedCount - 1">
+              ↓  
+            </n-button>
+          </n-button-group>
+          <n-text depth="3" style="font-size: 11px;">
+            {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
+          </n-text>
+        </n-space>
+        
         <!-- 提取内容模式 -->
         <n-scrollbar 
           v-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
@@ -450,6 +468,10 @@ const previewLoading = ref(false)
 const previewContent = ref('')
 const previewDocumentData = ref<PreviewData | null>(null)
 const previewMode = ref<'extracted' | 'original'>('extracted')
+
+// 搜索高亮导航相关
+const highlightedCount = ref(0)
+const currentHighlightIndex = ref(0)
 
 // 搜索结果
 const documentResults = ref<DocumentSearchResult[]>([])
@@ -695,6 +717,9 @@ const loadPreviewContent = async (documentId: number) => {
     previewDocumentData.value = response
     previewContent.value = response.content
     
+    // 处理高亮：统计高亮数量并添加索引
+    updatePreviewHighlightCount()
+    
     // 调试：检查PDF切换功能相关数据
     console.log('文档预览数据:', {
       file_type: response.file_type,
@@ -709,6 +734,72 @@ const loadPreviewContent = async (documentId: number) => {
   } finally {
     previewLoading.value = false
   }
+}
+
+// 统计预览内容中的高亮数量
+const updatePreviewHighlightCount = () => {
+  if (!previewContent.value) {
+    highlightedCount.value = 0
+    currentHighlightIndex.value = 0
+    return
+  }
+  
+  // 统计<mark>标签数量
+  const markMatches = previewContent.value.match(/<mark[^>]*>/g)
+  highlightedCount.value = markMatches ? markMatches.length : 0
+  currentHighlightIndex.value = 0
+  
+  // 为现有的mark标签添加索引（如果还没有的话）
+  if (highlightedCount.value > 0 && !previewContent.value.includes('data-highlight-index')) {
+    addPreviewHighlightIndexes()
+  }
+  
+  // 自动跳转到第一个高亮位置
+  if (highlightedCount.value > 0) {
+    setTimeout(() => scrollToHighlightInPreview(0), 100)
+  }
+}
+
+// 为预览中的高亮添加索引
+const addPreviewHighlightIndexes = () => {
+  let highlightIndex = 0
+  const contentWithIndexes = previewContent.value.replace(/<mark>/g, () => {
+    return `<mark data-highlight-index="${highlightIndex++}">`
+  })
+  
+  previewContent.value = contentWithIndexes
+}
+
+// 在预览中滚动到指定高亮位置
+const scrollToHighlightInPreview = (direction: number) => {
+  if (highlightedCount.value === 0) return
+  
+  // 计算新的索引
+  let newIndex = currentHighlightIndex.value + direction
+  if (newIndex < 0) newIndex = 0
+  if (newIndex >= highlightedCount.value) newIndex = highlightedCount.value - 1
+  
+  currentHighlightIndex.value = newIndex
+  
+  // 查找对应的高亮元素并滚动到视图
+  setTimeout(() => {
+    const targetMark = document.querySelector(`.preview-content mark[data-highlight-index="${newIndex}"]`)
+    if (targetMark) {
+      // 移除之前的活跃高亮样式
+      document.querySelectorAll('.preview-content mark.active-highlight').forEach(el => {
+        el.classList.remove('active-highlight')
+      })
+      
+      // 添加当前高亮样式
+      targetMark.classList.add('active-highlight')
+      
+      // 滚动到视图
+      targetMark.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      })
+    }
+  }, 100)
 }
 
 // 获取文件URL用于预览
@@ -819,6 +910,9 @@ watch(previewMode, async (newMode) => {
       })
       previewDocumentData.value = response
       previewContent.value = response.content
+      
+      // 重新处理高亮
+      updatePreviewHighlightCount()
     }
   } catch (error) {
     console.error('切换预览模式失败:', error)
@@ -895,6 +989,11 @@ onMounted(async () => {
   padding: 2px 4px;
   border-radius: 2px;
   font-weight: 500;
+}
+
+.preview-content :deep(mark.active-highlight) {
+  background-color: #ffeb3b;
+  box-shadow: 0 0 0 2px #f57f17;
 }
 
 /* 搜索结果高亮样式 */

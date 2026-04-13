@@ -1,6 +1,5 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.deps import get_db, get_current_user
@@ -14,13 +13,14 @@ router = APIRouter()
 @router.post("/login", response_model=Token, summary="用户登录")
 def login(
     db: Session = Depends(get_db),
-    form_data: OAuth2PasswordRequestForm = Depends()
+    username: str = Form(...),
+    password: str = Form(...)
 ):
     """
     用户登录接口
     """
     user = crud_user.authenticate(
-        db, username=form_data.username, password=form_data.password
+        db, username=username, password=password
     )
     if not user:
         raise HTTPException(

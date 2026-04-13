@@ -44,6 +44,17 @@ interface UserUpdate {
   password?: string  // 添加密码字段支持
 }
 
+// AI配置相关接口
+interface AIConfigData {
+  default_provider: string
+  enabled: boolean
+  fallback_enabled: boolean
+  cost_limit_enabled: boolean
+  daily_cost_limit: number
+  cache_enabled: boolean
+  cache_ttl: number
+}
+
 export class SettingsService {
   /**
    * 获取用户设置
@@ -166,10 +177,44 @@ export class SettingsService {
       return await response.json()
     }
   }
+
+  /**
+   * 获取AI配置
+   */
+  async getAIConfig(): Promise<AIConfigData> {
+    try {
+      const response = await apiService.get('/settings/ai-config')
+      return response as AIConfigData
+    } catch (error) {
+      console.error('获取AI配置失败:', error)
+      // 返回默认配置
+      return {
+        default_provider: 'openai',
+        enabled: true,
+        fallback_enabled: true,
+        cost_limit_enabled: false,
+        daily_cost_limit: 10.0,
+        cache_enabled: true,
+        cache_ttl: 3600
+      }
+    }
+  }
+
+  /**
+   * 保存AI配置
+   */
+  async saveAIConfig(config: Partial<AIConfigData>): Promise<void> {
+    try {
+      await apiService.post('/settings/ai-config', config)
+    } catch (error) {
+      console.error('保存AI配置失败:', error)
+      throw error
+    }
+  }
 }
 
 export const settingsService = new SettingsService()
 export default settingsService
 
 // Export interfaces for use in components
-export type { UserSettings, UserSettingsUpdate, User, UserCreate, UserUpdate }
+export type { UserSettings, UserSettingsUpdate, User, UserCreate, UserUpdate, AIConfigData }

@@ -4,7 +4,7 @@
     <div class="hero-section">
       <n-space vertical align="center" style="text-align: center; padding: 80px 20px;">
         <n-icon :component="ServerOutline" size="120" color="#667eea" />
-        <n-h1 style="font-size: 3rem; margin: 20px 0;">润扬大桥运维文档管理系统</n-h1>
+        <n-h1 style="font-size: 3rem; margin: 20px 0;">润扬大桥运维资产管理系统</n-h1>
         <n-text style="font-size: 1.2rem; color: #666; margin-bottom: 40px;">
           高效管理运维文档，智能搜索分类，提升运维效率
         </n-text>

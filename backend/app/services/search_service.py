@@ -237,6 +237,81 @@ class SearchService:
             print(f"[ERROR] Office文档处理异常: {str(e)}")
             return f"Office文档处理异常: {str(e)}"
     
+    def _convert_to_txt_with_libreoffice(self, libreoffice_path: str, input_file: str, temp_dir: str) -> Optional[str]:
+        """
+        使用LibreOffice将文件转换为TXT格式
+        尝试多种编码以正确处理中文
+        """
+        try:
+            # 尝试转换为TXT格式 (使用Text过滤器，避免encoded导致的问题)
+            cmd = [
+                libreoffice_path,
+                '--headless',
+                '--invisible',
+                '--nologo',
+                '--nofirststartwizard',
+                '--norestore',
+                '--nolockcheck',
+                '--nodefault',
+                '--convert-to', 'txt:Text',
+                '--outdir', temp_dir,
+                input_file
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0:
+                txt_files = [f for f in os.listdir(temp_dir) if f.endswith('.txt') and f != os.path.basename(input_file)]
+                
+                if txt_files:
+                    txt_file = os.path.join(temp_dir, txt_files[0])
+                    return self._read_text_file_with_encoding(txt_file)
+            
+            return None
+        except Exception as e:
+            print(f"[ERROR] LibreOffice TXT转换异常: {str(e)}")
+            return None
+    
+    def _read_text_file_with_encoding(self, file_path: str) -> Optional[str]:
+        """
+        使用多种编码尝试读取文本文件
+        优先尝试GBK（中文Windows常用），然后是其他编码
+        """
+        # 中文Windows系统常用的编码优先级
+        encodings_to_try = ['gbk', 'gb2312', 'gb18030', 'utf-8', 'big5', 'windows-1252']
+        
+        best_content = None
+        best_encoding = None
+        max_valid_chars = 0
+        
+        for encoding in encodings_to_try:
+            try:
+                with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                    content = f.read()
+                
+                # 计算有效字符数量（排除替换字符）
+                valid_chars = len(content.replace('\ufffd', '').replace('?', ''))
+                
+                # 计算中文字符数量
+                chinese_count = sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
+                
+                print(f"[DEBUG] 尝试编码 {encoding}: {len(content)} 字符, {chinese_count} 中文")
+                
+                if chinese_count > max_valid_chars:
+                    max_valid_chars = chinese_count
+                    best_content = content
+                    best_encoding = encoding
+                    
+            except Exception as e:
+                print(f"[DEBUG] 编码 {encoding} 读取失败: {str(e)}")
+                continue
+        
+        if best_content:
+            print(f"[INFO] 最佳编码: {best_encoding}, 有效中文字符: {max_valid_chars}")
+            return best_content.strip()
+        
+        return None
+    
     def _convert_with_libreoffice_simple(self, file_path: str) -> Optional[str]:
         """
         使用LibreOffice转换文件的简化版本
@@ -263,6 +338,12 @@ class SearchService:
                 import shutil
                 shutil.copy2(file_path, temp_input_file)
                 print(f"[DEBUG] 创建临时文件: {safe_name}{file_ext}")
+                
+                # 首先尝试转换为TXT格式（通常能更好地处理编码）
+                txt_content = self._convert_to_txt_with_libreoffice(libreoffice_path, temp_input_file, temp_dir)
+                if txt_content and len(txt_content.strip()) > 50:
+                    print(f"[SUCCESS] LibreOffice TXT转换成功，内容长度: {len(txt_content)}")
+                    return txt_content
                 
                 # Excel文件优先使用CSV转换获得更好的表格格式
                 if file_ext in {'.xls', '.xlsx'}:
@@ -387,130 +468,6 @@ class SearchService:
                             print(f"[ERROR] HTML转换错误信息: {result.stderr}")
                 
                 return None
-                shutil.copy2(file_path, temp_input_file)
-                print(f"[DEBUG] 创建临时文件: {safe_name}{file_ext}")
-                
-                # Excel文件优先使用CSV转换获得更好的表格格式
-                if file_ext in {'.xls', '.xlsx'}:
-                    cmd = [
-                        libreoffice_path,
-                        '--headless',
-                        '--invisible', 
-                        '--nologo',
-                        '--nofirststartwizard',
-                        '--norestore',
-                        '--nolockcheck',
-                        '--nodefault',
-                        '--convert-to', 'csv',
-                        '--outdir', temp_dir,
-                        temp_input_file
-                    ]
-                else:
-                    # 非Excel文件使用HTML格式转换（PDF更兼容），然后清理HTML标签
-                    cmd = [
-                        libreoffice_path,
-                        '--headless',
-                        '--invisible', 
-                        '--nologo',
-                        '--nofirststartwizard',
-                        '--norestore',
-                        '--nolockcheck',
-                        '--nodefault',
-                        '--convert-to', 'html',
-                        '--outdir', temp_dir,
-                        temp_input_file
-                    ]
-                
-                print(f"[DEBUG] 执行LibreOffice转换")
-                
-                # 执行转换，设置60秒超时
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                
-                if result.returncode == 0:
-                    # Excel文件优先处理CSV转换结果
-                    if file_ext in {'.xls', '.xlsx'}:
-                        csv_file = os.path.join(temp_dir, f"{safe_name}.csv")
-                        
-                        # 如果精确文件名不存在，搜索临时目录中的csv文件
-                        if not os.path.exists(csv_file):
-                            csv_files = [f for f in os.listdir(temp_dir) if f.endswith('.csv')]
-                            if csv_files:
-                                csv_file = os.path.join(temp_dir, csv_files[0])
-                                print(f"[INFO] 使用LibreOffice生成的CSV文件: {csv_files[0]}")
-                        
-                        if os.path.exists(csv_file):
-                            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                                csv_content = f.read().strip()
-                            
-                            if csv_content:
-                                print(f"[SUCCESS] LibreOffice CSV转换成功，内容长度: {len(csv_content)}")
-                                # 转换CSV为可读文本格式
-                                formatted_content = self._convert_csv_to_readable_text(csv_content)
-                                print(f"[INFO] CSV格式化为文本，优化后长度: {len(formatted_content)}")
-                                return formatted_content
-                            else:
-                                print(f"[WARNING] LibreOffice CSV转换文件为空")
-                        else:
-                            print(f"[WARNING] 未找到CSV转换输出文件: {csv_file}")
-                    else:
-                        # 非Excel文件处理HTML转换结果
-                        html_file = os.path.join(temp_dir, f"{safe_name}.html")
-                        
-                        # 如果精确文件名不存在，搜索临时目录中的html文件
-                        if not os.path.exists(html_file):
-                            html_files = [f for f in os.listdir(temp_dir) if f.endswith('.html')]
-                            if html_files:
-                                html_file = os.path.join(temp_dir, html_files[0])
-                                print(f"[INFO] 使用LibreOffice生成的文件: {html_files[0]}")
-                        
-                        if os.path.exists(html_file):
-                            # 读取HTML文件并清理标签
-                            content, error = EncodingDetector.read_file_with_encoding(html_file)
-                            if content is None:
-                                # 如果检测失败，尝试常见编码
-                                encodings_to_try = ['utf-8', 'gbk', 'gb2312', 'windows-1252', 'iso-8859-1']
-                                for encoding in encodings_to_try:
-                                    try:
-                                        with open(html_file, 'r', encoding=encoding, errors='ignore') as f:
-                                            content = f.read().strip()
-                                        if content:
-                                            print(f"[INFO] 使用编码 {encoding} 成功读取文件")
-                                            break
-                                    except Exception:
-                                        continue
-                            else:
-                                content = content.strip() if content else ''
-                            
-                            if content:
-                                # 针对LibreOffice生成的过度分割HTML内容进行智能处理
-                                import re
-                                
-                                # 首先清理CSS样式块（<style>...</style>）
-                                content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
-                                
-                                # 清理其他不必要的标签内容
-                                content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
-                                content = re.sub(r'<head[^>]*>.*?</head>', '', content, flags=re.DOTALL | re.IGNORECASE)
-                                
-                                # 然后清理所有HTML标签，获得原始文本
-                                text_content = re.sub(r'<[^>]+>', '', content)
-                                
-                                # 清理多余的空白字符
-                                text_content = re.sub(r'[ \t]+', ' ', text_content)
-                                text_content = re.sub(r'\n[ \t]*\n', '\n', text_content)
-                                
-                                text_content = text_content.strip()
-                                
-                                print(f"[SUCCESS] LibreOffice HTML转换成功，内容长度: {len(text_content)}")
-                                return text_content
-                            else:
-                                print(f"[WARNING] LibreOffice HTML转换文件为空")
-                        else:
-                            print(f"[WARNING] 未找到HTML转换输出文件: {html_file}")
-                else:
-                    print(f"[INFO] LibreOffice HTML转换失败，返回码: {result.returncode}")
-                    if result.stderr:
-                        print(f"[DEBUG] HTML转换错误信息: {result.stderr}")
                 
         except subprocess.TimeoutExpired:
             print(f"[ERROR] LibreOffice转换超时")

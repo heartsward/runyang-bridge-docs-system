@@ -587,3 +587,171 @@ def preview_document(
 
 # Analytics endpoint removed
 
+
+# ==================== AI文档分析端点 ====================
+
+@router.post("/{document_id}/analyze")
+async def analyze_document(
+    document_id: int,
+    analysis_type: str = Query("full", description="分析类型: full, summary, keywords, classification"),
+    use_ai: bool = Form(True),
+    ai_provider: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """AI分析文档内容"""
+    try:
+        # 获取文档
+        document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        
+        # 获取文档内容
+        content = document.content or ""
+        
+        if not content:
+            # 如果没有内容，尝试提取
+            from app.services.content_extractor import ContentExtractor
+            extractor = ContentExtractor()
+            content, error = extractor.extract_content(document.file_path)
+            
+            if error or not content:
+                return {
+                    "success": False,
+                    "message": f"无法提取文档内容: {error or '未知错误'}",
+                    "analysis": None
+                }
+        
+        if use_ai and ai_provider:
+            # 使用AI分析
+            from app.services.ai.extractors.document_analyzer import DocumentAnalyzer
+            analyzer = DocumentAnalyzer()
+            
+            result = await analyzer.analyze_document(
+                title=document.title,
+                content=content,
+                analysis_type=analysis_type,
+                provider=ai_provider
+            )
+            
+            analysis_type_names = {
+                'full': '完整分析',
+                'summary': '摘要提取',
+                'keywords': '关键词提取',
+                'classification': '文档分类'
+            }
+            analysis_name = analysis_type_names.get(analysis_type, '分析')
+            message = f"使用AI（{ai_provider or '默认'}）完成{analysis_name}"
+        else:
+            # 降级到传统方法
+            from app.services.ai.extractors.document_analyzer import DocumentAnalyzer
+            analyzer = DocumentAnalyzer()
+            result = analyzer._default_analysis(document.title, content)
+            message = "使用传统分析方法"
+        
+        return {
+            "success": True,
+            "message": message,
+            "analysis": result,
+            "document_id": document_id
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "文档分析失败"
+        }
+
+@router.get("/ai/providers")
+async def get_ai_providers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取可用的AI提供商列表"""
+    try:
+        from app.services.ai.ai_config import AIProvider
+        
+        providers_info = []
+        for provider in AIProvider:
+            provider_info = {
+                "name": provider,
+                "display_name": {
+                    AIProvider.OPENAI: "OpenAI",
+                    AIProvider.ANTHROPIC: "Anthropic",
+                    AIProvider.ALIBABA: "阿里云通义",
+                    AIProvider.ZHIPU: "智谱AI",
+                    AIProvider.MINIMAX: "MiniMax"
+                }.get(provider, provider),
+                "is_available": False
+            }
+            
+            # 检查是否有配置
+            if provider == AIProvider.OPENAI:
+                from app.services.ai.ai_service import ai_service
+                if provider in ai_service.providers:
+                    provider_info["is_available"] = True
+            
+            if provider == AIProvider.ANTHROPIC:
+                from app.services.ai.ai_service import ai_service
+                if provider in ai_service.providers:
+                    provider_info["is_available"] = True
+            
+            if provider == AIProvider.ALIBABA:
+                from app.services.ai.ai_service import ai_service
+                if provider in ai_service.providers:
+                    provider_info["is_available"] = True
+
+            if provider == AIProvider.ZHIPU:
+                from app.services.ai.ai_service import ai_service
+                if provider in ai_service.providers:
+                    provider_info["is_available"] = True
+
+            if provider == AIProvider.MINIMAX:
+                from app.services.ai.ai_service import ai_service
+                if provider in ai_service.providers:
+                    provider_info["is_available"] = True
+
+            providers_info.append(provider_info)
+
+        # 添加自定义提供商选项
+        providers_info.append({
+            "name": "custom",
+            "display_name": "自定义",
+            "is_available": True,
+            "description": "自定义AI服务提供商"
+        })
+
+        return {
+            "success": True,
+            "providers": providers_info,
+            "default_provider": "openai"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@router.get("/ai/stats")
+async def get_ai_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取AI使用统计"""
+    try:
+        from app.services.ai.ai_service import ai_service
+        
+        stats = ai_service.get_cost_stats()
+        
+        return {
+            "success": True,
+            "stats": stats
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }

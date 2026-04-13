@@ -86,7 +86,7 @@ export function sanitizeToText(html: string): string {
 export function sanitizeHighlightHtml(html: string): string {
   return sanitizeHtml(html, {
     ALLOWED_TAGS: ['span', 'mark', 'strong', 'b', 'em', 'i', 'br'],
-    ALLOWED_ATTR: ['class'],
+    ALLOWED_ATTR: ['class', 'data-highlight-index'],
     FORBID_TAGS: [],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'style']
   })

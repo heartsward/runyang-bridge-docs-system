@@ -15,7 +15,7 @@
           <img src="/runyang-logo.svg" alt="润扬大桥匠心工作室" class="logo-image" />
           <div class="system-name">
             <div class="main-title">润扬大桥</div>
-            <div class="sub-title">运维文档管理系统</div>
+            <div class="sub-title">运维资产管理系统</div>
           </div>
         </div>
         <div v-else class="logo-collapsed">

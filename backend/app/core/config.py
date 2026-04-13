@@ -45,6 +45,86 @@ class Settings(BaseSettings):
     # 时区配置
     TIMEZONE: str = "Asia/Shanghai"  # 默认时区为北京时间
     
+    # AI功能开关
+    ENABLE_CONTENT_EXTRACTION: bool = True
+    ENABLE_AI_ANALYSIS: bool = False
+    ENABLE_SEARCH: bool = True
+    ENABLE_USER_ANALYTICS: bool = True
+    
+    # AI服务配置
+    AI_DEFAULT_PROVIDER: str = "openai"
+    
+    # OpenAI配置
+    AI_OPENAI_API_KEY: str = ""
+    AI_OPENAI_API_URL: str = "https://api.openai.com/v1/chat/completions"
+    AI_OPENAI_MODEL: str = "gpt-4o-mini"
+    AI_OPENAI_MAX_TOKENS: int = 2000
+    AI_OPENAI_TEMPERATURE: float = 0.3
+    
+    # Anthropic配置
+    AI_ANTHROPIC_API_KEY: str = ""
+    AI_ANTHROPIC_API_URL: str = "https://api.anthropic.com/v1/messages"
+    AI_ANTHROPIC_MODEL: str = "claude-3-haiku-20240307"
+    
+    # 阿里云通义配置
+    AI_ALIBABA_API_KEY: str = ""
+    AI_ALIBABA_ENDPOINT: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    AI_ALIBABA_MODEL: str = "qwen-plus"
+    
+    # 智谱AI配置
+    AI_ZHIPU_API_KEY: str = ""
+    AI_ZHIPU_API_URL: str = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    AI_ZHIPU_MODEL: str = "glm-4-flash"
+    
+    # MiniMax配置
+    AI_MINIMAX_API_KEY: str = ""
+    AI_MINIMAX_API_URL: str = "https://api.minimaxi.com/anthropic"
+    AI_MINIMAX_MODEL: str = "MiniMax-M2.7"
+    AI_MINIMAX_GROUP_ID: str = ""
+    
+    # AI通用配置
+    AI_MAX_RETRIES: int = 3
+    AI_TIMEOUT: int = 30
+    
+    # AI限流配置
+    AI_RATE_LIMIT_ENABLED: bool = True
+    AI_RATE_LIMIT_REQUESTS: int = 10
+    AI_RATE_LIMIT_PER_USER: int = 5
+    
+    # AI缓存配置
+    AI_CACHE_STRATEGY: str = "memory"
+    AI_CACHE_TTL: int = 3600
+    
+    # AI成本控制
+    AI_COST_LIMIT_ENABLED: bool = False
+    AI_COST_LIMIT_DAILY: float = 10.0
+    
+    # AI降级配置
+    AI_FALLBACK_ENABLED: bool = True
+    AI_FALLBACK_TO_TRADITIONAL: bool = True
+    
+    # 日志配置
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "./logs/app.log"
+    LOG_TO_CONSOLE: bool = True
+    
+    # 性能配置
+    WORKERS: int = 0
+    RELOAD: bool = False
+    REQUEST_TIMEOUT: int = 30
+    
+    # 部署环境标识
+    DEPLOY_ENV: str = "production"
+    DEPLOY_SERVER: str = "auto-detect"
+    
+    # 监控配置
+    ENABLE_MONITORING: bool = False
+    MONITORING_DATA_PATH: str = "./monitoring"
+    
+    # 自定义配置
+    ADMIN_EMAIL: str = "admin@runyang.com"
+    ENABLE_NOTIFICATIONS: bool = False
+    
     # CORS配置 - 新的灵活配置系统
     CORS_ORIGINS: str = ""  # 手动指定的CORS源（逗号分隔）
     CORS_CUSTOM_ORIGINS: str = ""  # 新增：自定义CORS源（为了兼容）
@@ -53,7 +133,7 @@ class Settings(BaseSettings):
     CORS_INCLUDE_LOCALHOST: bool = True  # 是否包含localhost
     CORS_INCLUDE_HTTPS: bool = True  # 是否包含HTTPS变体
     CORS_FRONTEND_PORT: str = "5173"  # 前端端口（开发和生产统一）
-    CORS_EXTRA_PORTS: str = ""  # 额外端口（已统一到5173）
+    CORS_EXTRA_PORTS: str = "3000,8080,9000,5174,5175"  # 额外端口（添加了5174和5175）
     
     @property
     def BACKEND_CORS_ORIGINS(self) -> List[str]:

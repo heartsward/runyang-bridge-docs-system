@@ -6,6 +6,7 @@ function getApiBaseUrl(): string {
   // 1. 优先使用环境变量配置
   const envApiUrl = import.meta.env.VITE_API_BASE_URL
   if (envApiUrl) {
+    console.log('[API] 使用环境变量配置:', envApiUrl)
     // 检查是否已经包含 /api/v1 路径，避免重复
     if (envApiUrl.endsWith('/api/v1')) {
       return envApiUrl
@@ -17,13 +18,19 @@ function getApiBaseUrl(): string {
   const currentHost = window.location.hostname
   const currentProtocol = window.location.protocol
   
+  console.log('[API] 动态检测API地址:', { currentHost, currentProtocol })
+  
   // 如果是通过IP访问，使用相同IP的8002端口
   if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
-    return `${currentProtocol}//${currentHost}:8002/api/v1`
+    const apiUrl = `${currentProtocol}//${currentHost}:8002/api/v1`
+    console.log('[API] 使用IP访问模式:', apiUrl)
+    return apiUrl
   }
   
-  // 3. 默认使用当前访问地址的8002端口
-  return `${currentProtocol}//${currentHost}:8002/api/v1`
+  // 3. 默认使用localhost的8002端口
+  const apiUrl = `${currentProtocol}//${currentHost}:8002/api/v1`
+  console.log('[API] 使用localhost模式:', apiUrl)
+  return apiUrl
 }
 
 function getUnifiedBaseUrl(): string {
@@ -37,7 +44,13 @@ function getUnifiedBaseUrl(): string {
 const API_BASE_URL = getApiBaseUrl()
 const UNIFIED_BASE_URL = getUnifiedBaseUrl() // 统一API端点
 
-console.log('API配置:', { API_BASE_URL, UNIFIED_BASE_URL })
+console.log('[API] 最终API配置:', { 
+  API_BASE_URL, 
+  UNIFIED_BASE_URL,
+  currentUrl: window.location.href,
+  hostname: window.location.hostname,
+  protocol: window.location.protocol
+})
 
 
 class ApiService {
@@ -75,6 +88,8 @@ class ApiService {
         return response
       },
       (error) => {
+        console.error('[API] 请求错误:', error)
+        
         if (error.response?.status === 401) {
           // Token过期或无效，清除本地存储
           this.clearAuth()

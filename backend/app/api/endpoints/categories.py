@@ -8,16 +8,26 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, get_current_active_user
 from app.models.user import User
-from app.crud import category as crud_category
+from app.crud.category import (
+    get_categories as get_categories_crud,
+    get_category_tree,
+    get_category_statistics,
+    get_category as get_category_crud,
+    create_category,
+    update_category,
+    move_category,
+    delete_category
+)
+from app.models.document import Category
 from app.schemas.category import (
-    Category, CategoryCreate, CategoryUpdate, CategoryMove,
+    Category as CategorySchema, CategoryCreate, CategoryUpdate, CategoryMove,
     CategoryTree, CategoryStatistics, CategoryOption
 )
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[Category], summary="获取分类列表")
+@router.get("/", response_model=List[CategorySchema], summary="获取分类列表")
 async def get_categories(
     skip: int = Query(0, ge=0, description="跳过数量"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量"),
@@ -27,8 +37,8 @@ async def get_categories(
     current_user: User = Depends(get_current_active_user)
 ):
     """获取分类列表"""
-    categories = crud_category.get_categories(
-        db=db, 
+    categories = get_categories_crud(
+        db=db,
         user_id=current_user.id,
         skip=skip,
         limit=limit,
@@ -53,7 +63,7 @@ async def get_category_tree(
     current_user: User = Depends(get_current_active_user)
 ):
     """获取完整的分类树结构"""
-    return crud_category.get_category_tree(db=db, user_id=current_user.id)
+    return get_category_tree(db=db, user_id=current_user.id)
 
 
 @router.get("/options", response_model=List[CategoryOption], summary="获取分类选项")
@@ -62,7 +72,7 @@ async def get_category_options(
     current_user: User = Depends(get_current_active_user)
 ):
     """获取用于下拉选择的分类选项列表"""
-    categories = crud_category.get_category_tree(db=db, user_id=current_user.id)
+    categories = get_category_tree(db=db, user_id=current_user.id)
     
     def flatten_tree(categories_list: List, level: int = 0) -> List[CategoryOption]:
         options = []
@@ -91,17 +101,17 @@ async def get_category_statistics(
     current_user: User = Depends(get_current_active_user)
 ):
     """获取分类统计信息"""
-    return crud_category.get_category_statistics(db=db, user_id=current_user.id)
+    return get_category_statistics(db=db, user_id=current_user.id)
 
 
-@router.get("/{category_id}", response_model=Category, summary="获取分类详情")
+@router.get("/{category_id}", response_model=CategorySchema, summary="获取分类详情")
 async def get_category(
     category_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """获取指定分类的详细信息"""
-    category = crud_category.get_category(db=db, category_id=category_id, user_id=current_user.id)
+    category = get_category_crud(db=db, category_id=category_id, user_id=current_user.id)
     if not category:
         raise HTTPException(status_code=404, detail="分类不存在")
     
@@ -115,7 +125,7 @@ async def get_category(
     return category
 
 
-@router.post("/", response_model=Category, summary="创建分类")
+@router.post("/", response_model=CategorySchema, summary="创建分类")
 async def create_category(
     category: CategoryCreate,
     db: Session = Depends(get_db),
@@ -124,25 +134,25 @@ async def create_category(
     """创建新分类"""
     # 检查父分类是否存在
     if category.parent_id:
-        parent = crud_category.get_category(db=db, category_id=category.parent_id, user_id=current_user.id)
+        parent = get_category_crud(db=db, category_id=category.parent_id, user_id=current_user.id)
         if not parent:
             raise HTTPException(status_code=400, detail="父分类不存在")
     
     # 检查同级分类名称是否重复
-    existing = db.query(crud_category.Category).filter(
-        crud_category.Category.name == category.name,
-        crud_category.Category.parent_id == category.parent_id,
-        crud_category.Category.creator_id == current_user.id,
-        crud_category.Category.is_active == True
+    existing = db.query(Category).filter(
+        Category.name == category.name,
+        Category.parent_id == category.parent_id,
+        Category.creator_id == current_user.id,
+        Category.is_active == True
     ).first()
     
     if existing:
         raise HTTPException(status_code=400, detail="同级分类中已存在相同名称的分类")
     
-    return crud_category.create_category(db=db, category=category, user_id=current_user.id)
+    return create_category(db=db, category=category, user_id=current_user.id)
 
 
-@router.put("/{category_id}", response_model=Category, summary="更新分类")
+@router.put("/{category_id}", response_model=CategorySchema, summary="更新分类")
 async def update_category(
     category_id: int,
     category_update: CategoryUpdate,
@@ -165,21 +175,21 @@ async def update_category(
     
     # 如果更新了名称，检查同级是否重复
     if category_update.name and category_update.name != existing_category.name:
-        duplicate = db.query(crud_category.Category).filter(
-            crud_category.Category.name == category_update.name,
-            crud_category.Category.parent_id == existing_category.parent_id,
-            crud_category.Category.creator_id == current_user.id,
-            crud_category.Category.id != category_id,
-            crud_category.Category.is_active == True
+        duplicate = db.query(Category).filter(
+            Category.name == category_update.name,
+            Category.parent_id == existing_category.parent_id,
+            Category.creator_id == current_user.id,
+            Category.id != category_id,
+            Category.is_active == True
         ).first()
         
         if duplicate:
             raise HTTPException(status_code=400, detail="同级分类中已存在相同名称的分类")
     
-    updated_category = crud_category.update_category(
-        db=db, 
-        category_id=category_id, 
-        category_update=category_update, 
+    updated_category = update_category(
+        db=db,
+        category_id=category_id,
+        category_update=category_update,
         user_id=current_user.id
     )
     
@@ -189,7 +199,7 @@ async def update_category(
     return updated_category
 
 
-@router.post("/{category_id}/move", response_model=Category, summary="移动分类")
+@router.post("/{category_id}/move", response_model=CategorySchema, summary="移动分类")
 async def move_category(
     category_id: int,
     move_data: CategoryMove,
@@ -197,7 +207,7 @@ async def move_category(
     current_user: User = Depends(get_current_active_user)
 ):
     """移动分类到新的父分类下"""
-    moved_category = crud_category.move_category(
+    moved_category = move_category(
         db=db,
         category_id=category_id,
         new_parent_id=move_data.new_parent_id,
@@ -217,7 +227,7 @@ async def delete_category(
     current_user: User = Depends(get_current_active_user)
 ):
     """删除分类（软删除）"""
-    success = crud_category.delete_category(db=db, category_id=category_id, user_id=current_user.id)
+    success = delete_category(db=db, category_id=category_id, user_id=current_user.id)
     
     if not success:
         raise HTTPException(status_code=400, detail="删除失败，可能是权限不足或分类下有子分类")
@@ -293,14 +303,14 @@ async def init_default_categories(
     created_count = 0
     for cat_data in default_categories:
         # 检查是否已存在
-        existing = db.query(crud_category.Category).filter(
-            crud_category.Category.name == cat_data["name"],
-            crud_category.Category.creator_id == current_user.id
+        existing = db.query(Category).filter(
+            Category.name == cat_data["name"],
+            Category.creator_id == current_user.id
         ).first()
-        
+
         if not existing:
             category_create = CategoryCreate(**cat_data)
-            crud_category.create_category(db=db, category=category_create, user_id=current_user.id)
+            create_category(db=db, category=category_create, user_id=current_user.id)
             created_count += 1
     
     return {"message": f"成功创建 {created_count} 个默认分类"}

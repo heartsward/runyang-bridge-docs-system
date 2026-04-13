@@ -1,5 +1,5 @@
 <template>
-  <PageLayout title="润扬大桥运维文档管理系统">
+  <PageLayout title="润扬大桥运维资产管理系统">
     <template #header-actions>
       <n-input
         v-model:value="searchQuery"
@@ -1074,6 +1074,11 @@ const applyClientHighlight = (keyword: string) => {
     highlightedCount.value = highlightIndex
     currentHighlightIndex.value = 0
     
+    // 自动跳转到第一个高亮位置
+    if (highlightIndex > 0) {
+      setTimeout(() => scrollToHighlight(0), 100)
+    }
+    
     console.log(`Applied client-side highlighting: ${highlightIndex} matches for "${keyword}"`)
   } catch (error) {
     console.error('前端高亮处理失败:', error)
@@ -1096,6 +1101,11 @@ const updateHighlightCount = () => {
   // 为现有的mark标签添加索引（如果还没有的话）
   if (highlightedCount.value > 0 && !previewContent.value.includes('data-highlight-index')) {
     addHighlightIndexes()
+  }
+  
+  // 自动跳转到第一个高亮位置
+  if (highlightedCount.value > 0) {
+    setTimeout(() => scrollToHighlight(0), 100)
   }
 }
 

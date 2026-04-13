@@ -28,13 +28,22 @@
         <template #icon>
           <n-icon :component="TrashOutline" />
         </template>
-        批量删除 ({{ selectedAssets.length }})
+        批量删除 ({{ selectedAssetIds.size }})
       </n-button>
-      <n-button v-if="currentUser?.is_superuser" type="success" @click="showExportModal = true" :disabled="selectedAssets.length === 0">
+      <n-button v-if="currentUser?.is_superuser" type="success" @click="showExportModal = true" :disabled="selectedAssetIds.size === 0">
         <template #icon>
           <n-icon :component="DownloadOutline" />
         </template>
-        导出资产 ({{ selectedAssets.length }})
+        导出资产 ({{ selectedAssetIds.size }})
+      </n-button>
+      <n-button @click="clearAllSelection" :disabled="selectedAssetIds.size === 0" quaternary>
+        清空选择
+      </n-button>
+      <n-button @click="showOptionsModal = true">
+        <template #icon>
+          <n-icon :component="SettingsOutline" />
+        </template>
+        管理选项
       </n-button>
     </template>
 
@@ -102,7 +111,7 @@
           <n-select
             v-model:value="filters.department"
             placeholder="部门"
-            :options="departmentOptions"
+            :options="departmentOptionsForSelect"
             clearable
             style="width: 120px"
             @update:value="handleDepartmentFilter"
@@ -173,7 +182,7 @@
         :pagination="pagination"
         :loading="loading"
         :row-key="(row: Asset) => row.id"
-        :checked-row-keys="selectedAssets.map(asset => asset.id)"
+        :checked-row-keys="Array.from(selectedAssetIds)"
         @update:checked-row-keys="handleSelectionChange"
         @update:page="handlePageChange"
         @update:page-size="handlePageSizeChange"
@@ -192,7 +201,11 @@
           </n-grid-item>
           <n-grid-item>
             <n-form-item label="设备类型" path="asset_type">
-              <n-select v-model:value="assetForm.asset_type" :options="assetTypeOptions" placeholder="请选择设备类型" />
+              <n-select
+                v-model:value="assetForm.asset_type"
+                :options="assetTypeOptions"
+                placeholder="请选择设备类型"
+              />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
@@ -229,10 +242,8 @@
             <n-form-item label="部门" path="department">
               <n-select
                 v-model:value="assetForm.department"
-                :options="departmentOptions"
-                placeholder="请选择部门或输入新部门"
-                filterable
-                tag
+                :options="departmentOptionsForSelect"
+                placeholder="请选择部门"
                 clearable
               />
             </n-form-item>
@@ -258,7 +269,7 @@
     </n-modal>
 
     <!-- 从文件提取设备模态框 -->
-    <n-modal v-model:show="showExtractModal" preset="card" style="width: 600px" title="从文件提取设备">
+    <n-modal v-model:show="showExtractModal" preset="card" style="width: 650px" title="从文件提取设备">
       <n-form ref="extractFormRef" :model="extractForm">
         <n-form-item label="选择文件">
           <n-upload
@@ -292,6 +303,19 @@
           <n-slider v-model:value="extractForm.merge_threshold" :min="60" :max="100" :step="5" />
           <n-text depth="3">{{ extractForm.merge_threshold }}%</n-text>
         </n-form-item>
+        <n-form-item label="使用AI提取">
+          <n-switch v-model:value="extractForm.use_ai" />
+          <n-text depth="3" style="margin-left: 8px;">启用AI智能提取（需配置AI服务）</n-text>
+        </n-form-item>
+        <n-form-item label="AI提供商" v-if="extractForm.use_ai">
+          <n-select
+            v-model:value="extractForm.ai_provider"
+            :options="aiProviderOptions"
+            placeholder="选择AI提供商（默认使用第一个可用）"
+            clearable
+            style="width: 300px"
+          />
+        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -303,35 +327,215 @@
       </template>
     </n-modal>
 
-    <!-- 提取结果模态框 -->
-    <n-modal v-model:show="showExtractResult" preset="card" style="width: 800px" title="提取结果确认">
+    <!-- 提取结果模态框 - 逐条确认 -->
+    <n-modal v-model:show="showExtractResult" preset="card" style="width: 900px" title="AI提取结果确认" :mask-closable="false">
       <div v-if="extractResult">
         <n-alert type="info" style="margin-bottom: 16px;">
           <template #header>文件提取完成</template>
-          请确认是否要将以下提取的设备信息保存到数据库中
+          请逐条确认设备信息，如有冲突可选择更新现有设备或创建新设备
         </n-alert>
         
-        <n-alert v-if="extractResult.errors && extractResult.errors.length > 0" type="warning" style="margin-bottom: 16px;">
-          <template #header>提取过程中遇到问题</template>
-          <ul>
-            <li v-for="error in extractResult.errors" :key="error">{{ error }}</li>
-          </ul>
-        </n-alert>
-        
-        <n-descriptions bordered :column="2" style="margin-bottom: 16px;">
-          <n-descriptions-item label="提取数量">{{ extractResult.extracted_count || extractResult.assets.length }}</n-descriptions-item>
-          <n-descriptions-item label="待确认创建">{{ extractResult.assets.length }}</n-descriptions-item>
-          <n-descriptions-item label="冲突数量">{{ extractResult.assets.filter(asset => asset.conflicts && asset.conflicts.length > 0).length }}</n-descriptions-item>
+        <n-descriptions bordered :column="3" style="margin-bottom: 16px;">
+          <n-descriptions-item label="提取数量">{{ extractResult.extracted_count || (extractResult.assets?.length || 0) }}</n-descriptions-item>
+          <n-descriptions-item label="待确认">
+            {{ (extractResult.assets?.filter(a => !a.is_duplicate) || []).length }} 个新设备
+          </n-descriptions-item>
+          <n-descriptions-item label="重复设备">
+            {{ (extractResult.assets?.filter(a => a.is_duplicate) || []).length }} 个
+          </n-descriptions-item>
         </n-descriptions>
 
-        <n-h4>待创建的设备列表</n-h4>
-        <n-data-table :columns="extractConfirmColumns" :data="extractResult.assets" max-height="400" />
+        <n-scrollbar style="max-height: 500px;">
+          <n-space vertical size="large" style="width: 100%;">
+            <div v-for="(asset, index) in extractResult.assets" :key="index" class="extract-asset-card">
+              <n-card size="small" :bordered="true" hoverable>
+                <n-space vertical size="medium">
+                  <!-- 设备基本信息 -->
+                  <n-space justify="space-between" align="center">
+                    <n-space vertical>
+                      <n-h4 style="margin: 0;">{{ asset.name }}</n-h4>
+                      <n-text depth="3">{{ asset.ip_address || '无IP地址' }} | {{ getAssetTypeLabel(asset.asset_type) }}</n-text>
+                    </n-space>
+                    <n-space>
+                      <!-- 重复设备标记 -->
+                      <n-tag v-if="asset.is_duplicate" type="warning">名称重复</n-tag>
+                      <!-- 置信度 -->
+                      <n-tag v-if="asset.confidence_score" type="info">置信度: {{ asset.confidence_score }}%</n-tag>
+                    </n-space>
+                  </n-space>
+                  
+                  <!-- 冲突信息 -->
+                  <n-alert v-if="asset.conflicts && asset.conflicts.length > 0" type="warning">
+                    <template #header>冲突信息</template>
+                    <ul style="margin: 4px 0 0 0; padding-left: 20px;">
+                      <li v-for="(conflict, ci) in asset.conflicts" :key="ci">{{ conflict }}</li>
+                    </ul>
+                  </n-alert>
+
+                  <!-- 重复设备：显示现有设备信息和操作选项 -->
+                  <div v-if="asset.is_duplicate && asset.existing_asset">
+                    <n-divider>现有设备信息</n-divider>
+                    <n-descriptions :column="2" size="small">
+                      <n-descriptions-item label="设备名称">{{ asset.existing_asset.name }}</n-descriptions-item>
+                      <n-descriptions-item label="IP地址">{{ asset.existing_asset.ip_address || '未设置' }}</n-descriptions-item>
+                      <n-descriptions-item label="设备类型">{{ getAssetTypeLabel(asset.existing_asset.asset_type) }}</n-descriptions-item>
+                      <n-descriptions-item label="状态">{{ getAssetStatusLabel(asset.existing_asset.status) }}</n-descriptions-item>
+                      <n-descriptions-item label="部门">{{ asset.existing_asset.department || '未设置' }}</n-descriptions-item>
+                      <n-descriptions-item label="创建时间">{{ asset.existing_asset.created_at ? formatDateTime(asset.existing_asset.created_at) : '未知' }}</n-descriptions-item>
+                    </n-descriptions>
+                    
+                    <n-space style="margin-top: 12px;">
+                      <n-radio-group v-model:value="asset.confirmAction" :disabled="asset.processing">
+                        <n-space>
+                          <n-radio value="update">更新现有设备</n-radio>
+                          <n-radio value="create_new">创建为新设备</n-radio>
+                          <n-radio value="skip">跳过</n-radio>
+                        </n-space>
+                      </n-radio-group>
+                    </n-space>
+                    
+                    <!-- 更新模式：显示需要更新的字段差异 -->
+                    <div v-if="asset.confirmAction === 'update'" style="margin-top: 12px;">
+                      <n-alert type="info" style="margin-bottom: 8px;">
+                        <template #header>字段更新预览</template>
+                        以下字段将被更新：红色为新值，绿色为现有值
+                      </n-alert>
+                      <n-descriptions :column="1" size="small">
+                        <n-descriptions-item v-for="field in getDiffFields(asset, asset.existing_asset)" :key="field.key" :label="field.label">
+                          <n-text type="error">{{ field.newValue || '(空)' }}</n-text>
+                          <n-text depth="3" style="margin: 0 8px;">→</n-text>
+                          <n-text type="success">{{ field.oldValue || '(空)' }}</n-text>
+                        </n-descriptions-item>
+                      </n-descriptions>
+                    </div>
+                  </div>
+
+                  <!-- 操作按钮 -->
+                  <n-space justify="end">
+                    <n-button 
+                      v-if="!asset.is_duplicate" 
+                      size="small" 
+                      @click="editSingleAsset(asset, index)"
+                      :disabled="asset.processing || asset.confirmed"
+                    >
+                      编辑
+                    </n-button>
+                    <n-button 
+                      v-if="!asset.is_duplicate" 
+                      type="primary" 
+                      size="small" 
+                      @click="confirmSingleAsset(asset, index, 'create')"
+                      :loading="asset.processing"
+                      :disabled="asset.confirmed"
+                    >
+                      {{ asset.confirmed ? '已确认' : '确认创建' }}
+                    </n-button>
+                    <n-button 
+                      v-if="asset.is_duplicate" 
+                      type="warning" 
+                      size="small" 
+                      @click="executeDuplicateAction(asset, index)"
+                      :loading="asset.processing"
+                      :disabled="!asset.confirmAction || asset.processed"
+                    >
+                      {{ asset.processed ? '已处理' : '执行' }}
+                    </n-button>
+                  </n-space>
+                </n-space>
+              </n-card>
+            </div>
+          </n-space>
+        </n-scrollbar>
+
+        <!-- 底部统计和操作 -->
+        <n-divider />
+        <n-space justify="space-between" align="center">
+          <n-text depth="3">
+            已确认: {{ confirmedCount }} / {{ extractResult.assets?.length || 0 }}
+          </n-text>
+          <n-space>
+            <n-button @click="closeExtractResult">关闭</n-button>
+            <n-button type="primary" @click="confirmAllNewAssets" :loading="confirming" :disabled="allConfirmed">
+              确认全部新建 ({{ unconfirmedNewCount }})
+            </n-button>
+          </n-space>
+        </n-space>
       </div>
+    </n-modal>
+
+    <!-- 单个资产编辑模态框 -->
+    <n-modal v-model:show="showEditSingleAsset" preset="card" style="width: 700px" :title="editingSingleAsset ? '编辑设备: ' + editingSingleAsset.name : '编辑设备'">
+      <n-form v-if="editingSingleAsset" ref="editSingleFormRef" :model="editSingleAssetForm" :rules="rules" label-placement="left" label-width="100px">
+        <n-grid cols="1 s:2" responsive="screen" :x-gap="16">
+          <n-grid-item>
+            <n-form-item label="设备名称" path="name">
+              <n-input v-model:value="editSingleAssetForm.name" placeholder="请输入设备名称" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="设备类型" path="asset_type">
+              <n-select
+                v-model:value="editSingleAssetForm.asset_type"
+                :options="assetTypeOptions"
+                placeholder="请选择设备类型"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="IP地址" path="ip_address">
+              <n-input v-model:value="editSingleAssetForm.ip_address" placeholder="请输入IP地址" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="主机名" path="hostname">
+              <n-input v-model:value="editSingleAssetForm.hostname" placeholder="请输入主机名" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="用户名" path="username">
+              <n-input v-model:value="editSingleAssetForm.username" placeholder="请输入用户名" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="密码" path="password">
+              <n-input v-model:value="editSingleAssetForm.password" type="password" placeholder="请输入密码" show-password-on="click" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="设备型号" path="device_model">
+              <n-input v-model:value="editSingleAssetForm.device_model" placeholder="请输入设备型号" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="所处网络" path="network_location">
+              <n-select v-model:value="editSingleAssetForm.network_location" :options="networkLocationOptions" placeholder="请选择所处网络" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="部门" path="department">
+              <n-select
+                v-model:value="editSingleAssetForm.department"
+                :options="departmentOptionsForSelect"
+                placeholder="请选择部门"
+                clearable
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="状态" path="status">
+              <n-select v-model:value="editSingleAssetForm.status" :options="assetStatusOptions" placeholder="请选择状态" />
+            </n-form-item>
+          </n-grid-item>
+        </n-grid>
+        <n-form-item label="备注" path="notes">
+          <n-input v-model:value="editSingleAssetForm.notes" type="textarea" placeholder="请输入备注" :rows="3" />
+        </n-form-item>
+      </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showExtractResult = false">取消</n-button>
-          <n-button type="primary" @click="confirmExtractedAssets" :loading="confirming">
-            确认创建 {{ extractResult?.assets.length || 0 }} 个设备
+          <n-button @click="showEditSingleAsset = false">取消</n-button>
+          <n-button type="primary" @click="submitEditedSingleAsset" :loading="submittingSingleEdit">
+            保存并确认
           </n-button>
         </n-space>
       </template>
@@ -436,7 +640,7 @@
     <n-modal v-model:show="showExportModal" preset="card" style="width: 600px" title="导出资产数据">
       <div>
         <n-alert type="info" style="margin-bottom: 16px;">
-          已选择 {{ selectedAssets.length }} 个资产进行导出
+          已选择 {{ selectedAssetIds.size }} 个资产进行导出
         </n-alert>
         
         <n-form label-placement="left" label-width="120px">
@@ -503,7 +707,7 @@
         
         <div style="margin-top: 16px;">
           <n-text depth="3">
-            将导出 {{ selectedAssets.length }} 个资产的数据，包含选中的字段信息。
+            将导出 {{ selectedAssetIds.size }} 个资产的数据，包含选中的字段信息。
           </n-text>
         </div>
       </div>
@@ -519,6 +723,83 @@
           </n-button>
         </n-space>
       </template>
+    </n-modal>
+
+    <!-- 管理选项弹窗（设备类型、部门、所处网络） -->
+    <n-modal v-model:show="showOptionsModal" preset="card" title="管理选项" style="max-width: 600px;">
+      <n-tabs type="line">
+        <!-- 设备类型管理 -->
+        <n-tab-pane name="assetTypes" tab="设备类型">
+          <n-space vertical>
+            <n-space>
+              <n-input v-model:value="newAssetType" placeholder="输入新设备类型名称" style="width: 200px;" />
+              <n-button type="primary" @click="handleAddAssetType" :disabled="!newAssetType">
+                添加
+              </n-button>
+            </n-space>
+            <n-list>
+              <n-list-item v-for="type in editableAssetTypeOptions" :key="type.value">
+                <n-space justify="space-between" style="width: 100%;">
+                  <n-space>
+                    <n-tag>{{ type.value }}</n-tag>
+                    <span>{{ type.label }}</span>
+                  </n-space>
+                  <n-button size="tiny" type="error" ghost @click="handleDeleteAssetType(type.value)">
+                    删除
+                  </n-button>
+                </n-space>
+              </n-list-item>
+            </n-list>
+          </n-space>
+        </n-tab-pane>
+
+        <!-- 部门管理 -->
+        <n-tab-pane name="departments" tab="部门">
+          <n-space vertical>
+            <n-space>
+              <n-input v-model:value="newDepartment" placeholder="输入新部门名称" style="width: 250px;" />
+              <n-button type="primary" @click="handleAddDepartment" :disabled="!newDepartment">
+                添加
+              </n-button>
+            </n-space>
+            <n-list>
+              <n-list-item v-for="dept in editableDepartmentOptions" :key="dept">
+                <n-space justify="space-between" style="width: 100%;">
+                  <span>{{ dept }}</span>
+                  <n-button size="tiny" type="error" ghost @click="handleDeleteDepartment(dept)">
+                    删除
+                  </n-button>
+                </n-space>
+              </n-list-item>
+            </n-list>
+          </n-space>
+        </n-tab-pane>
+
+        <!-- 所处网络管理 -->
+        <n-tab-pane name="networkLocations" tab="所处网络">
+          <n-space vertical>
+            <n-space>
+              <n-input v-model:value="newNetworkLocation" placeholder="输入新网络名称" style="width: 200px;" />
+              <n-button type="primary" @click="handleAddNetworkLocation" :disabled="!newNetworkLocation">
+                添加
+              </n-button>
+            </n-space>
+            <n-list>
+              <n-list-item v-for="loc in editableNetworkLocationOptions" :key="loc.value">
+                <n-space justify="space-between" style="width: 100%;">
+                  <n-space>
+                    <n-tag>{{ loc.value }}</n-tag>
+                    <span>{{ loc.label }}</span>
+                  </n-space>
+                  <n-button size="tiny" type="error" ghost @click="handleDeleteNetworkLocation(loc.value)">
+                    删除
+                  </n-button>
+                </n-space>
+              </n-list-item>
+            </n-list>
+          </n-space>
+        </n-tab-pane>
+      </n-tabs>
     </n-modal>
 </template>
 
@@ -559,6 +840,13 @@ import {
   NUpload,
   NUploadDragger,
   NP,
+  NTabs,
+  NTabPane,
+  NList,
+  NListItem,
+  NThing,
+  NDivider,
+  NScrollbar,
   useMessage,
   useDialog,
   type DataTableColumns,
@@ -577,10 +865,14 @@ import {
   TrashOutline,
   EyeOutline,
   DownloadOutline,
-  CopyOutline
+  CopyOutline,
+  SettingsOutline
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { assetService, documentService, authService } from '@/services'
+import { getAssetTypes, updateAssetTypes, getDepartments, updateDepartments } from '@/services/system-config'
+import { getAIProviders } from '@/services/ai'
+import type { AIProvider } from '@/services/ai'
 import apiService from '@/services/api'
 import type { Asset, AssetCreate, AssetExtractRequest, AssetExtractResult, AssetStatistics } from '@/types/asset'
 import { AssetType, AssetStatus } from '@/types/asset'
@@ -598,6 +890,7 @@ const submitting = ref(false)
 const extracting = ref(false)
 const confirming = ref(false)
 const assets = ref<Asset[]>([])
+const aiProviders = ref<AIProvider[]>([])
 const currentUser = ref<User | null>(null)
 const statistics = ref<AssetStatistics>({
   total_count: 0,
@@ -656,15 +949,37 @@ const showExtractModal = ref(false)
 const showExtractResult = ref(false)
 const showViewModal = ref(false)
 const showExportModal = ref(false)
+const showOptionsModal = ref(false)
 const editingAsset = ref<Asset | null>(null)
 const viewingAsset = ref<Asset | null>(null)
 const extractResult = ref<AssetExtractResult | null>(null)
 const selectedAssets = ref<Asset[]>([])
+const selectedAssetIds = ref<Set<number>>(new Set())
 const exporting = ref(false)
 const exportFormat = ref('excel')
 const exportFields = ref(['name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'network_location', 'department', 'status'])
 const fileList = ref<UploadFileInfo[]>([])
 const uploadRef = ref(null)
+
+// 单个资产编辑相关
+const showEditSingleAsset = ref(false)
+const editingSingleAsset = ref<any | null>(null)
+const editingSingleAssetIndex = ref<number | null>(null)
+const submittingSingleEdit = ref(false)
+const editSingleFormRef = ref<FormInst | null>(null)
+const editSingleAssetForm = reactive({
+  name: '',
+  asset_type: 'server',
+  device_model: '',
+  ip_address: '',
+  hostname: '',
+  username: '',
+  password: '',
+  network_location: 'office',
+  department: '',
+  status: 'active',
+  notes: ''
+})
 
 // 筛选器
 const filters = reactive({
@@ -697,7 +1012,9 @@ const assetForm = reactive<AssetCreate>({
 
 const extractForm = reactive({
   auto_merge: true,
-  merge_threshold: 80
+  merge_threshold: 80,
+  use_ai: false,
+  ai_provider: null as string | null
 })
 
 // 分页
@@ -711,13 +1028,262 @@ const pagination = reactive({
   prefix: (info: any) => `共 ${info.itemCount || 0} 条`
 })
 
-// 选项数据
-const assetTypeOptions = computed(() => 
-  Object.values(AssetType).map(type => ({
-    label: assetService.getAssetTypeName(type),
-    value: type
-  }))
-)
+// 选项数据 - 设备类型（从后端加载）
+const editableAssetTypeOptions = ref<Array<{label: string, value: string}>>([])
+const assetTypeOptions = computed(() => editableAssetTypeOptions.value)
+
+// AI提供商选项
+const aiProviderOptions = computed(() => {
+  return aiProviders.value
+    .filter(p => p.is_available)
+    .map(p => ({
+      label: p.display_name,
+      value: p.name
+    }))
+})
+
+// 加载设备类型
+const loadAssetTypes = async () => {
+  try {
+    const types = await getAssetTypes()
+    editableAssetTypeOptions.value = types
+  } catch (error) {
+    console.error('加载设备类型失败:', error)
+    // 如果加载失败，使用默认值
+    editableAssetTypeOptions.value = Object.values(AssetType).map(type => ({
+      label: assetService.getAssetTypeName(type),
+      value: type
+    }))
+  }
+}
+
+// 加载AI提供商列表
+const loadAIProviders = async () => {
+  try {
+    const providers = await getAIProviders()
+    aiProviders.value = providers
+  } catch (error) {
+    console.error('加载AI提供商列表失败:', error)
+    aiProviders.value = []
+  }
+}
+
+// 新设备类型输入
+const newAssetType = ref('')
+
+// 添加设备类型
+const handleAddAssetType = async () => {
+  if (!newAssetType.value) return
+  
+  // 自动生成value（使用名称的拼音首字母或直接用英文）
+  const generateValue = (label: string): string => {
+    // 简单转换：取中文拼音首字母或直接用英文
+    const pinyinMap: Record<string, string> = {
+      '服务器': 'server', '网络设备': 'network', '存储设备': 'storage',
+      '安全设备': 'security', '数据库': 'database', '应用程序': 'application', '其他': 'other'
+    }
+    if (pinyinMap[label]) return pinyinMap[label]
+    // 如果不在映射中，使用英文翻译或随机ID
+    return label.toLowerCase().replace(/\s+/g, '_')
+  }
+  
+  const newValue = generateValue(newAssetType.value)
+  
+  // 检查是否已存在
+  if (editableAssetTypeOptions.value.find(opt => opt.value === newValue || opt.label === newAssetType.value)) {
+    message.warning('该类型已存在')
+    return
+  }
+  
+  const newType = {
+    label: newAssetType.value,
+    value: newValue
+  }
+  
+  try {
+    const updated = await updateAssetTypes([...editableAssetTypeOptions.value, newType])
+    editableAssetTypeOptions.value = updated
+    newAssetType.value = ''
+    message.success('添加成功')
+  } catch (error) {
+    console.error('添加设备类型失败:', error)
+    message.error('添加失败')
+  }
+}
+
+// 删除设备类型
+const handleDeleteAssetType = async (value: string) => {
+  // 不能删除内置类型
+  const builtInTypes = Object.values(AssetType)
+  if (builtInTypes.includes(value as any)) {
+    message.warning('内置类型不能删除')
+    return
+  }
+  
+  try {
+    const updated = editableAssetTypeOptions.value.filter(opt => opt.value !== value)
+    const result = await updateAssetTypes(updated)
+    editableAssetTypeOptions.value = result
+    message.success('删除成功')
+  } catch (error) {
+    console.error('删除设备类型失败:', error)
+    message.error('删除失败')
+  }
+}
+
+// 判断是否能删除设备类型
+const canDeleteAssetType = (value: string) => {
+  const builtInTypes = Object.values(AssetType)
+  return !builtInTypes.includes(value as any)
+}
+
+// 所处网络选项（可编辑）
+const defaultNetworkLocations = [
+  { label: '办公网', value: 'office' },
+  { label: '监控网', value: 'monitoring' },
+  { label: '收费网', value: 'billing' },
+  { label: '其它网络', value: 'other' }
+]
+const editableNetworkLocationOptions = ref<Array<{label: string, value: string}>>([...defaultNetworkLocations])
+const networkLocationOptions = computed(() => editableNetworkLocationOptions.value)
+
+// 新所处网络输入
+const newNetworkLocation = ref('')
+
+// 加载所处网络选项
+const loadNetworkLocations = async () => {
+  try {
+    const response = await apiService.get<Array<{label: string, value: string}>>('/system-config/network-locations')
+    if (response && response.length > 0) {
+      editableNetworkLocationOptions.value = response
+    } else {
+      editableNetworkLocationOptions.value = [...defaultNetworkLocations]
+    }
+  } catch (error) {
+    console.error('加载所处网络失败:', error)
+    editableNetworkLocationOptions.value = [...defaultNetworkLocations]
+  }
+}
+
+// 添加所处网络
+const handleAddNetworkLocation = async () => {
+  if (!newNetworkLocation.value) return
+  
+  // 检查是否已存在
+  if (editableNetworkLocationOptions.value.find(opt => opt.label === newNetworkLocation.value)) {
+    message.warning('该网络已存在')
+    return
+  }
+  
+  // 自动生成值
+  const generateValue = (label: string): string => {
+    const pinyinMap: Record<string, string> = {
+      '办公网': 'office', '监控网': 'monitoring', '收费网': 'billing', '其它网络': 'other'
+    }
+    if (pinyinMap[label]) return pinyinMap[label]
+    return label.toLowerCase().replace(/\s+/g, '_')
+  }
+  
+  const newLoc = {
+    label: newNetworkLocation.value,
+    value: generateValue(newNetworkLocation.value)
+  }
+  
+  try {
+    const updated = [...editableNetworkLocationOptions.value, newLoc]
+    const response = await apiService.put('/system-config/network-locations', updated)
+    editableNetworkLocationOptions.value = response as any
+    newNetworkLocation.value = ''
+    message.success('添加成功')
+  } catch (error) {
+    console.error('添加所处网络失败:', error)
+    message.error('添加失败')
+  }
+}
+
+// 删除所处网络
+const handleDeleteNetworkLocation = async (value: string) => {
+  // 不能删除内置类型
+  if (defaultNetworkLocations.find(loc => loc.value === value)) {
+    message.warning('内置网络不能删除')
+    return
+  }
+  
+  try {
+    const updated = editableNetworkLocationOptions.value.filter(opt => opt.value !== value)
+    const response = await apiService.put('/system-config/network-locations', updated)
+    editableNetworkLocationOptions.value = response as any
+    message.success('删除成功')
+  } catch (error) {
+    console.error('删除所处网络失败:', error)
+    message.error('删除失败')
+  }
+}
+
+// 判断是否能删除所处网络
+const canDeleteNetworkLocation = (value: string) => {
+  return !defaultNetworkLocations.find(loc => loc.value === value)
+}
+
+// 部门选项（可编辑）
+const editableDepartmentOptions = ref<string[]>([])
+const departmentOptions = computed(() => editableDepartmentOptions.value)
+
+// 加载部门
+const loadDepartments = async () => {
+  try {
+    const depts = await getDepartments()
+    editableDepartmentOptions.value = depts
+  } catch (error) {
+    console.error('加载部门失败:', error)
+    // 加载失败时从现有资产中提取
+    const depts = new Set<string>()
+    assets.value.forEach(asset => {
+      if (asset.department && asset.department.trim()) {
+        depts.add(asset.department.trim())
+      }
+    })
+    editableDepartmentOptions.value = Array.from(depts).sort()
+  }
+}
+
+// 新部门输入
+const newDepartment = ref('')
+
+// 添加部门
+const handleAddDepartment = async () => {
+  if (!newDepartment.value) return
+  
+  // 检查是否已存在
+  if (editableDepartmentOptions.value.includes(newDepartment.value)) {
+    message.warning('该部门已存在')
+    return
+  }
+  
+  try {
+    const updated = [...editableDepartmentOptions.value, newDepartment.value]
+    await updateDepartments(updated)
+    editableDepartmentOptions.value = updated
+    newDepartment.value = ''
+    message.success('添加成功')
+  } catch (error) {
+    console.error('添加部门失败:', error)
+    message.error('添加失败')
+  }
+}
+
+// 删除部门
+const handleDeleteDepartment = async (dept: string) => {
+  try {
+    const updated = editableDepartmentOptions.value.filter(d => d !== dept)
+    const result = await updateDepartments(updated)
+    editableDepartmentOptions.value = result
+    message.success('删除成功')
+  } catch (error) {
+    console.error('删除部门失败:', error)
+    message.error('删除失败')
+  }
+}
 
 const assetStatusOptions = computed(() =>
   Object.values(AssetStatus).map(status => ({
@@ -725,13 +1291,6 @@ const assetStatusOptions = computed(() =>
     value: status
   }))
 )
-
-const networkLocationOptions = computed(() => [
-  { label: '办公网', value: 'office' },
-  { label: '监控网', value: 'monitoring' },
-  { label: '收费网', value: 'billing' },
-  { label: '其它网络', value: 'other' }
-])
 
 // 排序字段选项
 const sortByOptions = computed(() => [
@@ -751,19 +1310,54 @@ const sortOrderOptions = computed(() => [
   { label: '升序', value: 'asc' }
 ])
 
-// 从现有资产中获取部门选项
-const departmentOptions = computed(() => {
-  const departments = new Set<string>()
-  assets.value.forEach(asset => {
-    if (asset.department && asset.department.trim()) {
-      departments.add(asset.department.trim())
-    }
-  })
-  return Array.from(departments).sort().map(dept => ({
+// 从现有资产中获取部门选项（兼容格式）
+const departmentOptionsForSelect = computed(() => {
+  return editableDepartmentOptions.value.map(dept => ({
     label: dept,
     value: dept
   }))
 })
+
+// 提取结果确认相关计算属性
+const confirmedCount = computed(() => {
+  if (!extractResult.value) return 0
+  return extractResult.value.assets.filter(a => a.confirmed || a.processed).length
+})
+
+const unconfirmedNewCount = computed(() => {
+  if (!extractResult.value) return 0
+  return extractResult.value.assets.filter(a => !a.is_duplicate && !a.confirmed).length
+})
+
+const allConfirmed = computed(() => {
+  if (!extractResult.value) return false
+  return extractResult.value.assets.every(a => a.confirmed || a.processed || a.is_duplicate)
+})
+
+// 获取需要更新的字段差异
+const getDiffFields = (newAsset: any, existingAsset: any) => {
+  const fields = [
+    { key: 'ip_address', label: 'IP地址' },
+    { key: 'hostname', label: '主机名' },
+    { key: 'device_model', label: '设备型号' },
+    { key: 'username', label: '用户名' },
+    { key: 'password', label: '密码' },
+    { key: 'network_location', label: '所处网络' },
+    { key: 'department', label: '部门' },
+    { key: 'status', label: '状态' },
+    { key: 'notes', label: '备注' }
+  ]
+  
+  return fields.filter(field => {
+    const newVal = newAsset[field.key] || ''
+    const oldVal = existingAsset[field.key] || ''
+    return newVal !== oldVal
+  }).map(field => ({
+    ...field,
+    newValue: newAsset[field.key],
+    oldValue: existingAsset[field.key]
+  }))
+}
 
 // 表格列定义
 const columns: DataTableColumns<Asset> = [
@@ -1096,6 +1690,10 @@ const debouncedSearch = debounce(async (resetPage = true) => {
     assets.value = searchResults
     pagination.itemCount = searchResults.length
     
+    // 更新 selectedAssets：保留之前选中的资产（可能存在于新的筛选结果中）
+    const selectedIds = selectedAssetIds.value
+    selectedAssets.value = searchResults.filter(asset => selectedIds.has(asset.id))
+    
     // 只有在指定重置页码时才重置，否则保持当前页码
     if (resetPage) {
       pagination.page = 1
@@ -1299,6 +1897,10 @@ const handleExtract = async () => {
     formData.append('file', fileList.value[0].file)
     formData.append('auto_merge', extractForm.auto_merge.toString())
     formData.append('merge_threshold', extractForm.merge_threshold.toString())
+    formData.append('use_ai', extractForm.use_ai.toString())
+    if (extractForm.use_ai && extractForm.ai_provider) {
+      formData.append('ai_provider', extractForm.ai_provider)
+    }
     
     // 调试信息
     console.log('=== 文件提取调试信息 ===')
@@ -1307,6 +1909,8 @@ const handleExtract = async () => {
     console.log('文件类型:', fileList.value[0].file.type)
     console.log('auto_merge:', extractForm.auto_merge.toString())
     console.log('merge_threshold:', extractForm.merge_threshold.toString())
+    console.log('use_ai:', extractForm.use_ai.toString())
+    console.log('ai_provider:', extractForm.ai_provider)
     
     // 使用原来的fetch方法，因为这个是工作的
     const currentHost = window.location.hostname
@@ -1348,7 +1952,7 @@ const handleExtract = async () => {
     // 清空文件列表
     fileList.value = []
     
-    if (extractResult.value.assets.length > 0) {
+    if (extractResult.value.assets && extractResult.value.assets.length > 0) {
       message.success(`成功提取 ${extractResult.value.assets.length} 个设备`)
     } else {
       message.warning('未能提取到有效的设备信息')
@@ -1442,6 +2046,282 @@ const confirmExtractedAssets = async () => {
   }
 }
 
+// 关闭提取结果弹窗
+const closeExtractResult = () => {
+  showExtractResult.value = false
+  extractResult.value = null
+}
+
+// 确认全部新资产（跳过重复的）
+const confirmAllNewAssets = async () => {
+  if (!extractResult.value) return
+  
+  const newAssets = extractResult.value.assets.filter(a => !a.is_duplicate && !a.confirmed)
+  if (newAssets.length === 0) {
+    message.warning('没有待确认的新资产')
+    return
+  }
+  
+  confirming.value = true
+  try {
+    const currentHost = window.location.hostname
+    const currentProtocol = window.location.protocol
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+    
+    if (!apiBaseUrl) {
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+      } else {
+        apiBaseUrl = 'http://localhost:8002'
+      }
+    }
+    
+    const token = authService.getToken()
+    if (!token) {
+      message.error('请先登录')
+      confirming.value = false
+      return
+    }
+    
+    let successCount = 0
+    let failCount = 0
+    
+    for (let i = 0; i < extractResult.value.assets.length; i++) {
+      const asset = extractResult.value.assets[i]
+      if (asset.is_duplicate || asset.confirmed) continue
+      
+      asset.processing = true
+      
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract/single-confirm`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            asset_data: asset,
+            is_duplicate: false,
+            existing_id: null
+          })
+        })
+        
+        if (response.ok) {
+          const result = await response.json()
+          if (result.success) {
+            asset.confirmed = true
+            successCount++
+          } else {
+            failCount++
+          }
+        } else {
+          failCount++
+        }
+      } catch (error) {
+        console.error('确认资产失败:', error)
+        failCount++
+      } finally {
+        asset.processing = false
+      }
+    }
+    
+    if (successCount > 0) {
+      message.success(`成功创建 ${successCount} 个设备${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+    } else if (failCount > 0) {
+      message.error(`创建失败`)
+    }
+    
+    // 刷新资产列表
+    await handleSearch(false)
+    await loadStatistics()
+    
+  } finally {
+    confirming.value = false
+  }
+}
+
+// 编辑单个提取的资产
+const editSingleAsset = (asset: any, index: number) => {
+  editingSingleAsset.value = asset
+  editingSingleAssetIndex.value = index
+  
+  // 填充表单
+  Object.assign(editSingleAssetForm, {
+    name: asset.name || '',
+    asset_type: asset.asset_type || 'server',
+    device_model: asset.device_model || '',
+    ip_address: asset.ip_address || '',
+    hostname: asset.hostname || '',
+    username: asset.username || '',
+    password: asset.password || '',
+    network_location: asset.network_location || 'office',
+    department: asset.department || '',
+    status: asset.status || 'active',
+    notes: asset.notes || ''
+  })
+  
+  showEditSingleAsset.value = true
+}
+
+// 提交编辑后的单个资产
+const submitEditedSingleAsset = async () => {
+  if (!editingSingleAsset.value || editingSingleAssetIndex.value === null) return
+  
+  submittingSingleEdit.value = true
+  try {
+    // 更新资产数据
+    const asset = editingSingleAsset.value
+    Object.assign(asset, editSingleAssetForm)
+    
+    // 关闭编辑弹窗
+    showEditSingleAsset.value = false
+    
+    // 自动确认创建
+    await confirmSingleAsset(asset, editingSingleAssetIndex.value, 'create')
+    
+  } finally {
+    submittingSingleEdit.value = false
+  }
+}
+
+// 确认单个资产
+const confirmSingleAsset = async (asset: any, index: number, action: string) => {
+  asset.processing = true
+  
+  try {
+    const currentHost = window.location.hostname
+    const currentProtocol = window.location.protocol
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+    
+    if (!apiBaseUrl) {
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+      } else {
+        apiBaseUrl = 'http://localhost:8002'
+      }
+    }
+    
+    const token = authService.getToken()
+    if (!token) {
+      message.error('请先登录')
+      return
+    }
+    
+    const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract/single-confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        asset_data: asset,
+        is_duplicate: false,
+        existing_id: null
+      })
+    })
+    
+    if (response.ok) {
+      const result = await response.json()
+      if (result.success) {
+        asset.confirmed = true
+        message.success(`设备 "${asset.name}" 创建成功`)
+        
+        // 检查是否全部确认完成
+        if (allConfirmed.value) {
+          await handleSearch(false)
+          await loadStatistics()
+        }
+      } else {
+        message.error(result.detail || '创建失败')
+      }
+    } else {
+      const errorData = await response.json()
+      message.error(errorData.detail || '创建失败')
+    }
+    
+  } catch (error: any) {
+    console.error('确认资产失败:', error)
+    message.error(error.message || '确认失败')
+  } finally {
+    asset.processing = false
+  }
+}
+
+// 执行重复资产的操作（更新或创建新）
+const executeDuplicateAction = async (asset: any, index: number) => {
+  if (!asset.confirmAction) {
+    message.warning('请选择操作方式')
+    return
+  }
+  
+  asset.processing = true
+  
+  try {
+    const currentHost = window.location.hostname
+    const currentProtocol = window.location.protocol
+    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+    
+    if (!apiBaseUrl) {
+      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
+      } else {
+        apiBaseUrl = 'http://localhost:8002'
+      }
+    }
+    
+    const token = authService.getToken()
+    if (!token) {
+      message.error('请先登录')
+      return
+    }
+    
+    if (asset.confirmAction === 'skip') {
+      asset.processed = true
+      message.info(`已跳过设备 "${asset.name}"`)
+      return
+    }
+    
+    const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract/single-confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        asset_data: asset,
+        is_duplicate: asset.confirmAction === 'update',
+        existing_id: asset.confirmAction === 'update' ? asset.existing_id : null
+      })
+    })
+    
+    if (response.ok) {
+      const result = await response.json()
+      if (result.success) {
+        asset.processed = true
+        const actionText = asset.confirmAction === 'update' ? '更新' : '创建'
+        message.success(`设备 "${asset.name}" ${actionText}成功`)
+        
+        // 检查是否全部处理完成
+        if (allConfirmed.value) {
+          await handleSearch(false)
+          await loadStatistics()
+        }
+      } else {
+        message.error(result.detail || '操作失败')
+      }
+    } else {
+      const errorData = await response.json()
+      message.error(errorData.detail || '操作失败')
+    }
+    
+  } catch (error: any) {
+    console.error('执行重复资产操作失败:', error)
+    message.error(error.message || '操作失败')
+  } finally {
+    asset.processing = false
+  }
+}
+
 // 复制资产 - 打开添加表单并预填充数据
 const copyAsset = async (assetId: number) => {
   try {
@@ -1491,7 +2371,7 @@ const handleBulkDelete = () => {
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
-        const assetIds = selectedAssets.value.map(asset => asset.id)
+        const assetIds = Array.from(selectedAssetIds.value)
         
         // 使用原来的fetch方法
         const currentHost = window.location.hostname
@@ -1525,6 +2405,7 @@ const handleBulkDelete = () => {
         
         // 清空选择
         selectedAssets.value = []
+        selectedAssetIds.value = new Set()
         
         // 批量删除后保持当前筛选状态和页码重新搜索
         await handleSearch(false)  // 不重置页码
@@ -1547,12 +2428,25 @@ const editCurrentAsset = () => {
 
 // 处理资产选择变化
 const handleSelectionChange = (keys: Array<string | number>) => {
-  selectedAssets.value = assets.value.filter(asset => keys.includes(asset.id))
+  // Naive UI 的 @update:checked-row-keys 每次返回所有选中的 ID（跨页）
+  // keys 已经包含了完整的选中状态，不需要合并
+  const selectedIds = new Set(keys.map(k => Number(k)))
+  selectedAssetIds.value = selectedIds
+  
+  // selectedAssets 只需要包含当前页的选中资产（用于显示在导出/删除中）
+  // 导出/删除时使用 selectedAssetIds 来获取完整 ID 列表
+  selectedAssets.value = assets.value.filter(asset => selectedIds.has(asset.id))
+}
+
+// 清除所有勾选
+const clearAllSelection = () => {
+  selectedAssetIds.value = new Set()
+  selectedAssets.value = []
 }
 
 // 处理资产导出
 const handleExport = async () => {
-  if (!selectedAssets.value.length) {
+  if (selectedAssetIds.size === 0) {
     message.error('请选择要导出的资产')
     return
   }
@@ -1564,7 +2458,7 @@ const handleExport = async () => {
   
   exporting.value = true
   try {
-    const assetIds = selectedAssets.value.map(asset => asset.id)
+    const assetIds = Array.from(selectedAssetIds.value)
     
     // 检查是否已登录
     if (!authService.isAuthenticated()) {
@@ -1626,11 +2520,8 @@ const handleExport = async () => {
       // 清理URL对象
       window.URL.revokeObjectURL(url)
       
-      message.success(`成功导出 ${selectedAssets.value.length} 个资产`)
+      message.success(`成功导出 ${selectedAssetIds.size} 个资产`)
       showExportModal.value = false
-      
-      // 清空选择
-      selectedAssets.value = []
     } else {
       const errorData = await response.json()
       throw new Error(errorData.detail || '导出失败')
@@ -1743,11 +2634,18 @@ onMounted(async () => {
   await Promise.all([
     loadAssets(),
     loadStatistics(),
-    loadCurrentUser()
+    loadCurrentUser(),
+    loadAssetTypes(),
+    loadDepartments(),
+    loadNetworkLocations(),
+    loadAIProviders()
   ])
 })
 </script>
 
 <style scoped>
 /* AssetView specific styles can be added here if needed */
+.extract-asset-card {
+  margin-bottom: 12px;
+}
 </style>

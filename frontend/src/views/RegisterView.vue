@@ -6,7 +6,7 @@
         <n-grid-item style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center;">
           <n-space vertical align="center" style="text-align: center; color: white;">
             <n-icon :component="ServerOutline" size="120" />
-            <n-h1 style="color: white; margin: 0;">润扬大桥运维文档管理系统</n-h1>
+            <n-h1 style="color: white; margin: 0;">润扬大桥运维资产管理系统</n-h1>
             <n-text style="color: rgba(255,255,255,0.8); font-size: 18px;">
               加入我们，开始高效的文档管理之旅
             </n-text>

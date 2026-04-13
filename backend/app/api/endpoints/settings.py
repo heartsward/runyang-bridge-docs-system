@@ -215,3 +215,241 @@ async def delete_user(
     db.commit()
     
     return {"message": "用户删除成功"}
+
+# AI配置相关模型
+class AIProviderConfig(BaseModel):
+    api_key: str = ""
+    api_url: str = ""
+    model: str = ""
+    group_id: str = ""  # MiniMax专用
+
+class AIProvidersConfig(BaseModel):
+    openai: AIProviderConfig = AIProviderConfig(
+        api_key="",
+        api_url="https://api.openai.com/v1/chat/completions",
+        model="gpt-4o-mini"
+    )
+    anthropic: AIProviderConfig = AIProviderConfig(
+        api_key="",
+        api_url="https://api.anthropic.com/v1/messages",
+        model="claude-3-haiku-20240307"
+    )
+    alibaba: AIProviderConfig = AIProviderConfig(
+        api_key="",
+        api_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model="qwen-plus"
+    )
+    zhipu: AIProviderConfig = AIProviderConfig(
+        api_key="",
+        api_url="https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        model="glm-4-flash"
+    )
+    minimax: AIProviderConfig = AIProviderConfig(
+        api_key="",
+        api_url="https://api.minimaxi.com/v1/chat/completions",
+        model="MiniMax-M2.7",
+        group_id=""
+    )
+    custom: AIProviderConfig = AIProviderConfig(
+        api_key="",
+        api_url="",
+        model=""
+    )
+
+class AIConfigData(BaseModel):
+    default_provider: str = "openai"
+    enabled: bool = True
+    fallback_enabled: bool = True
+    cost_limit_enabled: bool = False
+    daily_cost_limit: float = 10.0
+    cache_enabled: bool = True
+    cache_ttl: int = 3600
+    providers: AIProvidersConfig = AIProvidersConfig()
+    
+    class Config:
+        extra = "allow"  # 允许额外的字段
+
+# AI配置相关端点
+@router.get("/ai-config", summary="获取AI配置")
+async def get_ai_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取AI配置"""
+    from app.services.ai.ai_config_service import AIConfigService
+    from app.core.config import settings
+    
+    providers_config = AIProvidersConfig()
+    
+    # 优先从数据库读取用户配置
+    user_config = AIConfigService.get_user_ai_config(db, current_user.id)
+    
+    if user_config:
+        # 使用数据库中的用户配置
+        providers_dict = user_config.get("providers", {})
+        
+        if "openai" in providers_dict:
+            providers_config.openai = AIProviderConfig(
+                api_key=providers_dict["openai"].get("api_key", ""),
+                api_url=providers_dict["openai"].get("api_url", "https://api.openai.com/v1/chat/completions"),
+                model=providers_dict["openai"].get("model", "gpt-4o-mini")
+            )
+        if "anthropic" in providers_dict:
+            providers_config.anthropic = AIProviderConfig(
+                api_key=providers_dict["anthropic"].get("api_key", ""),
+                api_url=providers_dict["anthropic"].get("api_url", "https://api.anthropic.com/v1/messages"),
+                model=providers_dict["anthropic"].get("model", "claude-3-haiku-20240307")
+            )
+        if "alibaba" in providers_dict:
+            providers_config.alibaba = AIProviderConfig(
+                api_key=providers_dict["alibaba"].get("api_key", ""),
+                api_url=providers_dict["alibaba"].get("api_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                model=providers_dict["alibaba"].get("model", "qwen-plus")
+            )
+        if "zhipu" in providers_dict:
+            providers_config.zhipu = AIProviderConfig(
+                api_key=providers_dict["zhipu"].get("api_key", ""),
+                api_url=providers_dict["zhipu"].get("api_url", "https://open.bigmodel.cn/api/paas/v4/chat/completions"),
+                model=providers_dict["zhipu"].get("model", "glm-4-flash")
+            )
+        if "minimax" in providers_dict:
+            providers_config.minimax = AIProviderConfig(
+                api_key=providers_dict["minimax"].get("api_key", ""),
+                api_url=providers_dict["minimax"].get("api_url", "https://api.minimaxi.com/v1/chat/completions"),
+                model=providers_dict["minimax"].get("model", "MiniMax-M2.7"),
+                group_id=providers_dict["minimax"].get("group_id", "")
+            )
+        if "custom" in providers_dict:
+            providers_config.custom = AIProviderConfig(
+                api_key=providers_dict["custom"].get("api_key", ""),
+                api_url=providers_dict["custom"].get("api_url", ""),
+                model=providers_dict["custom"].get("model", "")
+            )
+        
+        config_data = AIConfigData(
+            default_provider=user_config.get("default_provider", "openai"),
+            enabled=user_config.get("enabled", True),
+            fallback_enabled=user_config.get("fallback_enabled", True),
+            cost_limit_enabled=user_config.get("cost_limit_enabled", False),
+            daily_cost_limit=user_config.get("daily_cost_limit", 10.0),
+            cache_enabled=user_config.get("cache_enabled", True),
+            cache_ttl=user_config.get("cache_ttl", 3600),
+            providers=providers_config
+        )
+    else:
+        # 使用settings中的默认配置
+        if hasattr(settings, 'AI_OPENAI_API_KEY'):
+            providers_config.openai.api_key = settings.AI_OPENAI_API_KEY or ""
+        if hasattr(settings, 'AI_OPENAI_API_URL'):
+            providers_config.openai.api_url = settings.AI_OPENAI_API_URL or "https://api.openai.com/v1/chat/completions"
+        if hasattr(settings, 'AI_OPENAI_MODEL'):
+            providers_config.openai.model = settings.AI_OPENAI_MODEL or "gpt-4o-mini"
+        
+        if hasattr(settings, 'AI_ANTHROPIC_API_KEY'):
+            providers_config.anthropic.api_key = settings.AI_ANTHROPIC_API_KEY or ""
+        if hasattr(settings, 'AI_ANTHROPIC_API_URL'):
+            providers_config.anthropic.api_url = settings.AI_ANTHROPIC_API_URL or "https://api.anthropic.com/v1/messages"
+        if hasattr(settings, 'AI_ANTHROPIC_MODEL'):
+            providers_config.anthropic.model = settings.AI_ANTHROPIC_MODEL or "claude-3-haiku-20240307"
+        
+        if hasattr(settings, 'AI_ALIBABA_API_KEY'):
+            providers_config.alibaba.api_key = settings.AI_ALIBABA_API_KEY or ""
+        if hasattr(settings, 'AI_ALIBABA_ENDPOINT'):
+            providers_config.alibaba.api_url = settings.AI_ALIBABA_ENDPOINT or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        if hasattr(settings, 'AI_ALIBABA_MODEL'):
+            providers_config.alibaba.model = settings.AI_ALIBABA_MODEL or "qwen-plus"
+        
+        if hasattr(settings, 'AI_ZHIPU_API_KEY'):
+            providers_config.zhipu.api_key = settings.AI_ZHIPU_API_KEY or ""
+        if hasattr(settings, 'AI_ZHIPU_API_URL'):
+            providers_config.zhipu.api_url = settings.AI_ZHIPU_API_URL or "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        if hasattr(settings, 'AI_ZHIPU_MODEL'):
+            providers_config.zhipu.model = settings.AI_ZHIPU_MODEL or "glm-4-flash"
+        
+        if hasattr(settings, 'AI_MINIMAX_API_KEY'):
+            providers_config.minimax.api_key = settings.AI_MINIMAX_API_KEY or ""
+        if hasattr(settings, 'AI_MINIMAX_API_URL'):
+            providers_config.minimax.api_url = settings.AI_MINIMAX_API_URL or "https://api.minimaxi.com/v1/chat/completions"
+        if hasattr(settings, 'AI_MINIMAX_MODEL'):
+            providers_config.minimax.model = settings.AI_MINIMAX_MODEL or "MiniMax-M2.7"
+        if hasattr(settings, 'AI_MINIMAX_GROUP_ID'):
+            providers_config.minimax.group_id = settings.AI_MINIMAX_GROUP_ID or ""
+        
+        config_data = AIConfigData(
+            default_provider=getattr(settings, 'AI_DEFAULT_PROVIDER', 'openai'),
+            enabled=getattr(settings, 'ENABLE_AI_ANALYSIS', True),
+            fallback_enabled=getattr(settings, 'AI_FALLBACK_ENABLED', True),
+            cost_limit_enabled=getattr(settings, 'AI_COST_LIMIT_ENABLED', False),
+            daily_cost_limit=getattr(settings, 'AI_COST_LIMIT_DAILY', 10.0),
+            cache_enabled=getattr(settings, 'AI_CACHE_STRATEGY', 'memory') != 'none',
+            cache_ttl=getattr(settings, 'AI_CACHE_TTL', 3600),
+            providers=providers_config
+        )
+    
+    return {
+        "success": True,
+        "config": config_data
+    }
+
+@router.post("/ai-config", summary="保存AI配置")
+async def save_ai_config(
+    config: AIConfigData,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """保存AI配置到数据库"""
+    check_admin_permission(current_user)
+    
+    try:
+        from app.services.ai.ai_config_service import AIConfigService
+        
+        # 准备要保存的配置数据
+        config_data = {
+            "default_provider": config.default_provider,
+            "enabled": config.enabled,
+            "fallback_enabled": config.fallback_enabled,
+            "cost_limit_enabled": config.cost_limit_enabled,
+            "daily_cost_limit": config.daily_cost_limit,
+            "cache_enabled": config.cache_enabled,
+            "cache_ttl": config.cache_ttl,
+            "providers": {
+                "openai": {
+                    "api_key": config.providers.openai.api_key,
+                    "api_url": config.providers.openai.api_url,
+                    "model": config.providers.openai.model
+                },
+                "anthropic": {
+                    "api_key": config.providers.anthropic.api_key,
+                    "api_url": config.providers.anthropic.api_url,
+                    "model": config.providers.anthropic.model
+                },
+                "alibaba": {
+                    "api_key": config.providers.alibaba.api_key,
+                    "api_url": config.providers.alibaba.api_url,
+                    "model": config.providers.alibaba.model
+                },
+                "zhipu": {
+                    "api_key": config.providers.zhipu.api_key,
+                    "api_url": config.providers.zhipu.api_url,
+                    "model": config.providers.zhipu.model
+                },
+                "minimax": {
+                    "api_key": config.providers.minimax.api_key,
+                    "api_url": config.providers.minimax.api_url,
+                    "model": config.providers.minimax.model,
+                    "group_id": config.providers.minimax.group_id
+                },
+                "custom": {
+                    "api_key": config.providers.custom.api_key,
+                    "api_url": config.providers.custom.api_url,
+                    "model": config.providers.custom.model
+                }
+            }
+        }
+        
+        # 保存到数据库
+        AIConfigService.save_user_ai_config(db, current_user.id, config_data)
+        
+        return {"message": "AI配置保存成功", "success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存AI配置失败: {str(e)}")
