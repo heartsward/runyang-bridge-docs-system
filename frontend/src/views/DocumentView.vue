@@ -534,8 +534,29 @@ const renderedPreviewContent = computed(() => {
   return renderDocumentMarkdownHtml(previewContent.value)
 })
 
+const showUploadModal = ref(false)
+const showConflictModal = ref(false)
+const uploading = ref(false)
+const loading = ref(false)
+const selectedTags = ref<string[]>([])
+const conflictFiles = ref<any[]>([])
+
+// 当前用户状态
+const currentUser = ref<User | null>(null)
+
+// 预览和详情相关
+const showPreviewModal = ref(false)
+const showDetailModal = ref(false)
+const showEditModal = ref(false)
+const previewContent = ref('')
+const previewLoading = ref(false)
+const previewMode = ref<'extracted' | 'original'>('extracted')
+const currentDocument = ref<Document | null>(null)
+const editLoading = ref(false)
+
 // 阶段十八·18.8：图片水合（带 token 拉 wiki 图片 → blob URL）
 // 预览 MD 里嵌有 src="images/{docId}/{file}" 时异步替换；无图则保持同步渲染
+// 注意：watch 源 previewContent 必须在其声明之后（TDZ）
 const previewHydratedHtml = ref('')
 let _revokePreviewImages: (() => void) | null = null
 const displayPreviewHtml = computed(() =>
@@ -563,25 +584,6 @@ watch(previewContent, async (newContent) => {
     console.warn('图片水合失败:', e)
   }
 })
-const showUploadModal = ref(false)
-const showConflictModal = ref(false)
-const uploading = ref(false)
-const loading = ref(false)
-const selectedTags = ref<string[]>([])
-const conflictFiles = ref<any[]>([])
-
-// 当前用户状态
-const currentUser = ref<User | null>(null)
-
-// 预览和详情相关
-const showPreviewModal = ref(false)
-const showDetailModal = ref(false)
-const showEditModal = ref(false)
-const previewContent = ref('')
-const previewLoading = ref(false)
-const previewMode = ref<'extracted' | 'original'>('extracted')
-const currentDocument = ref<Document | null>(null)
-const editLoading = ref(false)
 
 // W4：预览编辑模式
 const previewEditMode = ref(false)
