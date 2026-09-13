@@ -790,3 +790,14 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - `_check_file` 返回 **str** 不是 Path——`path.name` 会炸 `'str' object has no attribute 'name'`（新 extractor 里踩过，router 异常兜底把 traceback 全打出来了，定位很快）
   - anydoc 空内容判定阈值（<20 字）是"扫描件→多模态 AI"的关键开关：PDF 文本层提取不出东西 = 扫描件信号
   - 上传重名文件会被加后缀（`xxx.xls`→`阶段十九验收-xxx.xls`），E2E 验 `.json` 副产物要用**新文件名**找，不能用源文件名
+
+### 2026-09-13（18:20 - 19:00）— 修复图片预览裂图（VLM 占位图 + 局域网 CORS）
+- **用户报告**：图片文档（doc 78 QQ浏览器截图）提取完预览裂图（两张裂图）
+- **根因 1（VLM 占位图，代码 bug）**：`ai_client.py:38` DOC_PARSE_PROMPT 第 6 条让 VLM"插入 `![描述](占位)`"→ 生成 `<img src="占位">` 必然 404。且真实原图已由阶段十八 `register_image_doc` 单独附加文末，prompt 再插占位图重复且无效
+  - **修复**：prompt 第 6 条改为"不要插入任何图片语法，用一段文字简要描述图片内容即可（图片文件由系统文末单独附加真实引用）"
+- **根因 2（CORS 拦截，环境 bug）**：用户从局域网 IP（192.168.66.99:5173）访问前端，而 CORS 白名单只有 localhost（`CORS_AUTO_DETECT` 默认 false）→ 图片水合的跨域 fetch 被浏览器拦截（实测 OPTIONS 返回 `Disallowed CORS origin` 400）→ `<img>` 留着相对路径 `images/78/img1.png` → 前端端口 404 裂图
+  - **修复**：`.env` 加 `CORS_AUTO_DETECT=true`（自动检测本机 IP 加入白名单，比写死 IP 稳）；实测局域网 origin 预检 200 + `access-control-allow-origin` 正确回显 + 带 token GET 2980 字节
+- **验证**：doc 75/78 重新提取（retry-extraction）→ content 无"占位"、文末含真实图片引用；图片文件/下载端点/CORS 全链路 200；后端重启 task pB9eUp
+- **教训**：
+  - VLM prompt 里"插入图片"的指令对"图片本身就是文档"的场景是反模式——模型只能生成占位符链接，真实图必须系统侧落盘后追加；prompt 应明确禁止模型生成图片语法
+  - 前端预览裂图排查顺序：① 图片文件在盘？② 下载端点带 token 200？③ **浏览器 origin 是否在 CORS 白名单**（局域网访问最容易漏，本机 curl 测不出，要用 `Origin: http://<局域网IP>:5173` 测 OPTIONS 预检）
