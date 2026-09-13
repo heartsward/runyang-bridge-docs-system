@@ -801,3 +801,17 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **教训**：
   - VLM prompt 里"插入图片"的指令对"图片本身就是文档"的场景是反模式——模型只能生成占位符链接，真实图必须系统侧落盘后追加；prompt 应明确禁止模型生成图片语法
   - 前端预览裂图排查顺序：① 图片文件在盘？② 下载端点带 token 200？③ **浏览器 origin 是否在 CORS 白名单**（局域网访问最容易漏，本机 curl 测不出，要用 `Origin: http://<局域网IP>:5173` 测 OPTIONS 预检）
+
+### 2026-09-13（20:00 - 20:18）— 图片裂图真正根因：DOMPurify 正则误剥相对路径 src（决定性修复）
+- **背景**：18:20 那条修了 VLM 占位图 + CORS 后，用户刷新预览**仍裂图**。继续深挖，用 headless 浏览器（playwright-core + 已下载的 Chrome 153，通过 `192.168.66.99:5173` 真实访问）走完整流程，抓到铁证：预览容器里 `<img alt="图片">` **完全没有 src 属性**，且浏览器对图片端点**零请求**——水合正则匹配的是 `src="images/..."`，src 已被剥掉，水合根本不触发。
+- **真正根因（代码 bug，单点）**：`frontend/src/utils/xss-protection.ts:37` 的 `ALLOWED_URI_REGEXP` 手写正则：`[a-z+.-]+(?:[^a-z+.-:]|$)`，其中否定字符类 `[^a-z+.-:]` 里的 **`-` 未转义**，与相邻字符组成**意外范围 `.-:`**（ASCII `.`~`:`，含 `/`）。DOMPurify 据此把**任何含 `/` 的相对路径 `images/78/img1.png` 判为非法 URI，剥离 src**，只留 alt → 裂图。
+  - 为何之前没暴露：markdown-it 渲染的 `<img src="images/78/img1.png">` 本身正确；是 sanitize 这一步把 src 删了。CORS 那层其实是 18:20 已修好的（本次实测预检 + 实际 GET 响应都带正确 `access-control-allow-origin`，带 token 返回 200 image/png 2980 字节）。
+- **修复**：把该正则改成 **DOMPurify 官方默认**（转义 `-` 为 `\-` 避免组成范围 + 补 `matrix` scheme）：`/^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i`。已通过 12 项用例（相对/绝对/http/blob 放行，`javascript:`/`data:`/`vbscript:` 拦截）。
+- **决定性验证（headless 浏览器，非 curl）**：
+  - 修复前：`renderDocumentMarkdownHtml` 输出 `<img alt="图片">`（src 被剥）；修复后输出 `<img src="images/78/img1.png" alt="图片">`（src 保留）
+  - E2E 预览 doc 78：`GET :8002/api/v1/wiki/images/78/img1.png → 200 + ACAO`，最终 DOM `<img src="blob:http://192.168.66.99:5173/uuid" alt="图片">`，`naturalWidth=61 / naturalHeight=58 / complete=true`（真实解码渲染，红色"值"圆形图标正常显示）
+  - `vue-tsc --noEmit` exit 0 / 0 error（xss-protection.ts 零报错）
+- **教训（重要方法论）**：
+  - **前端渲染链 bug 必须用真实浏览器（headless）验证，curl 测不出来**。这次服务端 curl 全链路 200 都正常，但浏览器里 src 被剥——只有 headless 抓最终 DOM + 网络请求才暴露。排查顺序里"②下载端点 200"通过不代表前端就能渲染，还要验"④浏览器最终 DOM 的 img 是否真有 src、图片是否解码（naturalWidth>0）"。
+  - **jsdom 跑 DOMPurify 的结果可能与真实浏览器不一致**（本次 jsdom 显示 src 保留，真实浏览器却剥离）——涉及 DOM/URL 解析的行为，ground truth 必须用真实 Chromium。
+  - 手写 `ALLOWED_URI_REGEXP` 极易因字符类未转义而出错；**能复用 DOMPurify 官方默认就别自己改**，确需加 scheme 时只增不删、`-` 必须转义。

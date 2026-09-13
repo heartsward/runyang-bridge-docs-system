@@ -34,7 +34,8 @@ export function sanitizeHtml(
       'class', 'style',
       'target', 'rel'
     ],
-    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+    // 与 DOMPurify 官方默认一致（转义 - 避免组成 .-: 意外范围，否则相对路径 images/78/xxx.png 会被误判剥离 src）
+    ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
     // 移除危险的属性和标签
     FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'textarea', 'button'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
