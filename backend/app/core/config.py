@@ -144,9 +144,9 @@ class Settings(BaseSettings):
     AI_SERVICE_API_KEY: str = ""  # 本地 llama.cpp 留空；在线服务填 key
     AI_SERVICE_TIMEOUT: int = 120
     AI_FALLBACK_TO_LOCAL: bool = True
-    # 阶段十三：是否让"所有格式"文档（docx/xlsx/txt 等）都走统一 AI 提取 md
-    # False（默认）：仅 PDF + 图片 调用 AI；True：全部格式先试 AI，失败降级本地引擎
-    AI_ALL_FORMATS_AI: bool = False
+    # 注：AI_ALL_FORMATS_AI 开关已于阶段十九移除——anydoc 已是所有文档格式的首选引擎
+    # （输出高质量 GFM），"全格式 AI 规整"不再需要；.env 中的存量 key 由
+    # extraction_config.py 的清理逻辑在下次保存时自动清掉
     # 阶段十：AI 元数据生成（title/tags）开关
     AI_METADATA_ENABLED: bool = True
     # 阶段五遗留（高速 CPU 兜底，可选）

@@ -229,17 +229,15 @@ class DocumentFormatter:
         return '\n'.join(formatted_lines)
     
     def _format_excel_content(self, content: str, options: Dict[str, Any]) -> str:
-        """Excel文档专用格式化 - 保持原有表格格式，避免破坏LibreOffice的格式化"""
-        # 对于Excel文档，我们的LibreOffice处理器已经生成了高质量的格式化内容
-        # 包括Unicode表格边框、完整的分析报告结构等
-        # 为了保持这些精心设计的格式，我们避免进一步的格式化处理
-        
-        # 检查是否包含我们的高质量格式标识
+        """Excel文档专用格式化 - 保持原有表格格式，避免破坏提取引擎（anydoc/本地）的表格结构"""
+        # 对于Excel文档，提取引擎（anydoc 首选 / openpyxl 本地）已生成结构化表格内容
+        # 为了保持表格结构完整，避免进一步的格式化处理
+
+        # 检查是否包含高质量格式标识
         quality_indicators = [
-            'Excel文件完整分析报告' in content,  # 我们的报告标题
+            'Excel文件完整分析报告' in content,  # 报告标题
             '┌' in content and '│' in content,      # Unicode表格边框
-            'LibreOffice处理' in content,           # LibreOffice处理标识
-            '工作表导航目录' in content              # 导航结构
+            '工作表' in content and '|' in content,  # 工作表导航 / Markdown 表格
         ]
         
         # 如果包含高质量格式标识，直接返回，避免任何破坏

@@ -348,7 +348,7 @@ async def preview_document(
         # 智能文档格式化 - 对Excel文件进行优化处理
         original_length = len(content)
         
-        # Excel文件优化：跳过额外格式化，LibreOffice已经提供了良好的格式
+        # Excel文件优化：跳过额外格式化，提取引擎（anydoc/本地）已提供结构化表格
         if document.file_type and document.file_type.lower() in ['xls', 'xlsx']:
             format_stats = {
                 "processing_time": 0.001,  # 几乎无延迟

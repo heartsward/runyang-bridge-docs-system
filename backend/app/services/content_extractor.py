@@ -239,8 +239,12 @@ class ContentExtractor:
         Returns:
             dict: 提取方法状态
         """
+        try:
+            from app.services.extraction.anydoc_extractor import ANYDOC_AVAILABLE
+        except ImportError:
+            ANYDOC_AVAILABLE = False
         return {
-            "libreoffice": True,  # LibreOffice通过搜索服务提供
+            "anydoc": ANYDOC_AVAILABLE,  # 阶段十九：anydoc 首选文档转换引擎
             "ocr": self.ocr_extractor.tesseract_available,
             "search_service": True  # 搜索服务总是可用
         }

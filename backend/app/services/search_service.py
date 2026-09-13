@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 搜索服务 - 简化版
-只使用LibreOffice处理Office文档和PDF，Excel直接转换为TXT，只有图片和图片PDF使用OCR
+
+文件内容提取统一委托 ExtractionRouter（阶段十九：anydoc 首选引擎
++ 本地引擎安全网 + 多模态 AI 兜底）；只有图片/扫描件走 OCR/多模态 AI。
 """
 import os
 import re

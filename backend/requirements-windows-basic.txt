@@ -34,6 +34,7 @@ python-docx>=0.8.11
 openpyxl>=3.0.0
 markdown>=3.4.0
 pdfplumber>=0.7.0
+firecrawl-anydoc>=0.2.4            # 文档→GFM Markdown（阶段十九：anydoc 首选转换引擎）
 
 # ============ 中文文本处理 ============
 jieba>=0.42.1

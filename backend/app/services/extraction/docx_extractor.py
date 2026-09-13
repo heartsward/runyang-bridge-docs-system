@@ -46,23 +46,18 @@ class DocxExtractor(BaseExtractor):
             return ExtractionResult(error=f"DOCX 解析失败: {e}")
 
     def _extract_doc_legacy(self, file_path: str) -> ExtractionResult:
-        """旧 .doc 格式需要 LibreOffice 转 docx 或 antiword；这里 fallback"""
-        try:
-            import subprocess, tempfile
-            from pathlib import Path
-            with tempfile.TemporaryDirectory() as tmpdir:
-                # 用 LibreOffice 转 .doc → .docx
-                subprocess.run([
-                    "soffice", "--headless", "--convert-to", "docx",
-                    "--outdir", tmpdir, file_path
-                ], check=True, capture_output=True, timeout=60)
-                converted = list(Path(tmpdir).glob("*.docx"))
-                if converted:
-                    doc = docx.Document(str(converted[0]))
-                    return self._process_document(doc)
-                return ExtractionResult(error=".doc 转 .docx 失败")
-        except Exception as e:
-            return ExtractionResult(error=f".doc 解析失败: {e}")
+        """旧 .doc 格式（阶段十九：本地安全网路径）
+
+        正常流程中 .doc 由 anydoc 首选引擎处理（原生读 OLE 格式，无需转换）。
+        本函数仅在 anydoc 不可用/失败时作为本地兜底被 router 调用。
+        python-docx 不支持旧 .doc（OLE 格式）→ 返回明确错误。
+        """
+        return ExtractionResult(
+            error=(
+                ".doc（旧版二进制格式）本地引擎不支持，且 anydoc 未成功。"
+                "请将文件另存为 .docx 后重新上传。"
+            )
+        )
 
     def _process_document(self, doc) -> ExtractionResult:
         """处理 python-docx Document 对象"""

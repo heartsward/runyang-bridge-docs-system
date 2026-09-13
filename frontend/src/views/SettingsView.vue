@@ -57,18 +57,8 @@
         <n-switch v-model:value="extractionConfig.ai_service_enabled" />
         <template #feedback>
           <n-text depth="3" style="font-size: 12px;">
-            关闭时所有文档走本地引擎（pymupdf/tesseract/python-docx/openpyxl）
-          </n-text>
-        </template>
-      </n-form-item>
-
-      <!-- 阶段十三：全格式 AI 提取开关 -->
-      <n-form-item label="所有格式文档都使用 AI 提取 Markdown">
-        <n-switch v-model:value="extractionConfig.ai_all_formats_ai" :disabled="!extractionConfig.ai_service_enabled" />
-        <template #feedback>
-          <n-text depth="3" style="font-size: 12px;">
-            关闭（默认）：仅 PDF + 图片 调用 AI；开启：Word/Excel/文本等所有格式也先用 AI 规整为 Markdown。
-            AI 失败时自动降级到本地引擎。
+            文档转换由 anydoc 引擎负责（毫秒级，全格式）；
+            关闭时扫描件/图片不再调用多模态 AI 识别，仅做本地文本层提取
           </n-text>
         </template>
       </n-form-item>
@@ -569,7 +559,6 @@ const extractionConfig = ref<ExtractionConfig>({
   ai_service_api_key: '',
   ai_service_timeout: 120,
   ai_fallback_to_local: true,
-  ai_all_formats_ai: false,
   ai_ocr_enabled: false,
   ai_ocr_service_url: 'http://localhost:8001',
 })

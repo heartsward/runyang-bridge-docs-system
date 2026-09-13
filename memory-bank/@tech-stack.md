@@ -207,24 +207,39 @@ stop-services.bat
 
 ---
 
-## 十、文档内容提取引擎（阶段四：2026-09-11）
+## 十、文档内容提取引擎（阶段十九更新：2026-09-13）
 
-后端文档提取由 `backend/app/services/extraction/` 模块统一处理：
+后端文档提取由 `backend/app/services/extraction/` 模块统一处理。
+**阶段十九起 anydoc 为所有文档格式的首选引擎**（纯 Rust，毫秒级，LibreOffice 链路彻底退役）：
 
-| 格式 | Extractor | 实现方式 |
-|------|-----------|---------|
-| .xlsx | XlsxExtractor | openpyxl 直读 → GFM 表格（无合并）/ HTML 表格（含合并） |
-| .xls | XlsxExtractor | LibreOffice 临时转 xlsx → openpyxl 处理 |
-| .docx | DocxExtractor | python-docx 直读 → 标题/段落/表格 |
-| .pdf | PdfExtractor | pymupdf 主路径 + PaddleOCR 兜底（扫描件） |
-| .png/.jpg/.jpeg | ImageExtractor | PaddleOCR (默认) / pytesseract (兜底) |
-| .txt/.md/.csv 等 | TextExtractor | UTF-8/GBK 容错读取 |
+```
+所有文档 → AnyDocExtractor（anydoc 首选，21 格式）
+  ├─ 成功且内容 ≥20 字 → 直接用（engine=anydoc）
+  └─ 失败/空 → 降级本地引擎（安全网）：
+       .pdf  → PdfExtractor（多模态 AI 优先 + pymupdf 兜底）
+       .xlsx/.xls → XlsxExtractor（openpyxl；.xls 本地不支持，报错提示另存）
+       .docx/.doc → DocxExtractor（python-docx；.doc 本地不支持，报错提示另存）
+       .txt 等 → TextExtractor
+       图片  → ImageExtractor（多模态 AI 优先 + OCR 兜底，router 直接分发不经 anydoc）
+```
+
+| 格式 | 首选引擎 | 本地安全网 |
+|------|---------|-----------|
+| .xls/.xlsx/.xlsm/.xlsb | **anydoc** | openpyxl（仅 .xlsx；.xls 不支持） |
+| .doc/.docx/.docm | **anydoc** | python-docx（仅 .docx；.doc 不支持） |
+| .ppt 系/.odt/.ods/.odp/.rtf/.epub/.csv | **anydoc** | —（无本地引擎，失败即报错） |
+| .pdf | **anydoc**（文本层，<5ms） | 多模态 AI（扫描件）→ pymupdf |
+| .png/.jpg/.jpeg 等图片 | ImageExtractor（多模态 AI 优先） | tesseract OCR |
+| .txt/.md/.json 等纯文本 | TextExtractor（anydoc 不覆盖） | — |
+
+**anydoc 依赖**：`firecrawl-anydoc>=0.2.4`（纯 Rust 单 wheel ~3.6MB，`pip install` 即得，无系统依赖、无需装 LibreOffice）。
+来源：https://github.com/firecrawl/anydoc（MIT）。支持 14 格式族 21 扩展名；PDF 仅文本层提取（扫描件走我们的多模态 AI，不用其付费 hosted OCR）。
 
 **引擎切换**（`backend/app/core/config.py`）：
-- `PDF_ENGINE`: `pymupdf` (默认) | `mineru` (需 GPU + MinerU 安装)
-- `OCR_ENGINE`: `tesseract` (默认) | `paddleocr` (中文 OCR 精度更高)
-- `MINERU_ENABLED`: `False` (默认，待用户配置后启用)
-- `PADDLEOCR_LANG`: `ch` (中文模型)
+- `AI_SERVICE_ENABLED`: 控制扫描件/图片是否走多模态 AI（anydoc 本身不需要 AI）
+- `AI_FALLBACK_TO_LOCAL`: AI 失败时是否降级本地
+- `PDF_ENGINE` / `OCR_ENGINE` / `MINERU_ENABLED` / `PADDLEOCR_LANG`: 本地引擎内部切换（保留）
+- ~~`AI_ALL_FORMATS_AI`~~：**阶段十九已移除**（anydoc 已是全格式首选引擎，"全格式 AI 规整"开关无意义）
 
 **MinerU 集成（阶段四规划）**：
 - MinerU 是 2026 年中文文档提取 SOTA（Apache-2.0 + 商业附加条款）

@@ -767,3 +767,26 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - thinking 模型（Qwen3 系列）调 `describe_image` 等短输出场景，`max_tokens` 必须给足（≥2048）——否则 reasoning 吃光 token、content 恒空，症状是"HTTP 200 但返回空"，极隐蔽
   - 图片 MIME 不能 `f"image{suffix}"` 拼，要用扩展名→MIME 映射表（.png→image/png，不是 image.png）
   - 独立图片文档的 VLM 提取比 PDF 晚（后台任务时序），E2E 断言"图片数>0"要分别等两个 doc 各自完成，不能只等 PDF
+
+### 2026-09-13（15:05 - 16:30）— 阶段十九：集成 anydoc 替换 LibreOffice
+- **用户诉求**：调研 firecrawl/anydoc，若优于 LibreOffice 则集成替换，所有文件优先 anydoc 转换、失败/需 OCR 走多模态 AI，并去除"所有格式 AI 提取"开关
+- **研究结论（浅克隆 + 实测）**：anydoc 纯 Rust（`pip install firecrawl-anydoc` 单 wheel 3.6MB），14 格式族 21 扩展名，中位 <5ms，官方 LLM judge 盲评 482 对全格式第一。实测：`交换机统计0723.xls`（当年 LibreOffice 错位反复修的文件）→ **0.8ms** 6 列表格完整；docx 1.0ms；xlsx 13.2ms。短板：PDF 仅文本层（扫描件需其付费 hosted OCR，不采用→走我们多模态 AI）
+- **代码变更**：
+  - 新建 `extraction/anydoc_extractor.py`：`AnyDocExtractor`（21 格式，空/极短 <20 字判失败便于降级，不抛异常）
+  - `extraction/router.py` 重写：图片→ImageExtractor；anydoc 格式→AnyDoc 优先→失败降级本地（PDF 本地引擎=多模态 AI 优先+pymupdf）；删除 `AI_ALL_FORMATS_AI` 全格式 AI 规整分支
+  - `xlsx_extractor._extract_xls_legacy` / `docx_extractor._extract_doc_legacy`：删 soffice subprocess，改报"请另存为 xlsx/docx"（anydoc 已兜住 .xls/.doc）
+  - `search_service.py` / `document_formatter.py` / `search.py` / `content_extractor.py`：LibreOffice 注释/死逻辑清理（soffice 代码全仓清零）
+  - `config.py` 删 `AI_ALL_FORMATS_AI`；`extraction_config.py` 去 schema/写入（.env 清理列表保留→自动清存量）；`.env` 删行；前端 `extraction-config.ts` + `SettingsView.vue` 删开关 UI/初始值/TS 字段
+  - `requirements-windows.txt` 加 `firecrawl-anydoc>=0.2.4`
+- **验证**：
+  - 直测 router：.xls→anydoc 1ms / .docx→1ms / .xlsx→12ms，engine=anydoc
+  - 损坏 xlsx：anydoc 失败→openpyxl 失败→清晰报错（降级语义正确）
+  - E2E（后端 task LbB4LA）：上传 .xls→doc76 提取 10s 完成，`.json` 副产物 `{"engine":"anydoc","char_count":956,"elapsed_ms":0.5}`，`documents.content` 956 字符
+  - `GET /settings/extraction-config` 200 且无 `ai_all_formats_ai` 字段
+  - `py_compile` 全过 / `import app.main` OK / `vue-tsc --noEmit` 0 error
+  - 验收文档（doc76 + 损坏 bad.xls）已清理（DB+index.db+文件）
+- **未提交**：阶段十九改动 + 上一轮 DocumentView TDZ 修复（`watch(previewContent)` 引用先于声明）均未 commit
+- **教训**：
+  - `_check_file` 返回 **str** 不是 Path——`path.name` 会炸 `'str' object has no attribute 'name'`（新 extractor 里踩过，router 异常兜底把 traceback 全打出来了，定位很快）
+  - anydoc 空内容判定阈值（<20 字）是"扫描件→多模态 AI"的关键开关：PDF 文本层提取不出东西 = 扫描件信号
+  - 上传重名文件会被加后缀（`xxx.xls`→`阶段十九验收-xxx.xls`），E2E 验 `.json` 副产物要用**新文件名**找，不能用源文件名

@@ -30,7 +30,6 @@ class ExtractionConfig(BaseModel):
     ai_service_api_key: str = ""  # 仅在线服务需要
     ai_service_timeout: int = 120
     ai_fallback_to_local: bool = True
-    ai_all_formats_ai: bool = False  # 阶段十三：True=所有格式(docx/xlsx/txt)也走 AI 提取；False=仅 PDF+图片
 
     # 兼容旧字段（阶段五 OCR 配置，可选）
     ai_ocr_enabled: bool = False
@@ -46,7 +45,6 @@ def _load_from_settings() -> ExtractionConfig:
         ai_service_api_key=getattr(settings, "AI_SERVICE_API_KEY", ""),
         ai_service_timeout=getattr(settings, "AI_SERVICE_TIMEOUT", 120),
         ai_fallback_to_local=getattr(settings, "AI_FALLBACK_TO_LOCAL", True),
-        ai_all_formats_ai=getattr(settings, "AI_ALL_FORMATS_AI", False),
         ai_ocr_enabled=getattr(settings, "AI_OCR_ENABLED", False),
         ai_ocr_service_url=getattr(settings, "AI_OCR_SERVICE_URL", "http://localhost:8001"),
     )
@@ -137,7 +135,8 @@ async def update_extraction_config(
     env_lines.append(f"AI_SERVICE_API_KEY={cfg.ai_service_api_key}")
     env_lines.append(f"AI_SERVICE_TIMEOUT={cfg.ai_service_timeout}")
     env_lines.append(f"AI_FALLBACK_TO_LOCAL={'true' if cfg.ai_fallback_to_local else 'false'}")
-    env_lines.append(f"AI_ALL_FORMATS_AI={'true' if cfg.ai_all_formats_ai else 'false'}")
+    # 注：AI_ALL_FORMATS_AI 阶段十九已移除（anydoc 成为全格式首选引擎，无需全格式 AI 规整开关）；
+    # 上方清理列表会把 .env 中的存量 AI_ALL_FORMATS_AI= 行删掉，此处不再写回
     env_lines.append(f"AI_OCR_ENABLED={'true' if cfg.ai_ocr_enabled else 'false'}")
     env_lines.append(f"AI_OCR_SERVICE_URL={cfg.ai_ocr_service_url}")
 

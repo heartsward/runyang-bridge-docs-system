@@ -89,81 +89,19 @@ class XlsxExtractor(BaseExtractor):
         )
 
     def _extract_xls_legacy(self, file_path: str) -> ExtractionResult:
-        """处理 .xls 文件：用 LibreOffice 临时转 .xlsx，再用 openpyxl 处理
+        """处理 .xls 文件（阶段十九：本地安全网路径）
 
-        旧 .xls 格式（OLE Compound Document）xlrd >= 2.0 已不再支持。
-        最稳妥的方式是用 LibreOffice 转 .xlsx 后用 openpyxl 直读。
-
-        注意事项：LibreOffice + subprocess 在 Windows 下对中文文件名支持差，
-        所以我们先把源文件拷贝到临时目录并用 ASCII 名，再调用 LibreOffice。
+        正常流程中 .xls 由 anydoc 首选引擎处理（毫秒级直读 OLE 格式）。
+        本函数仅在 anydoc 不可用/失败时作为本地兜底被 router 调用。
+        xlrd >= 2.0 不支持 .xls、openpyxl 也不支持 → 本地引擎无法处理旧 .xls，
+        返回明确错误（由 router 语义返回给用户）。
         """
-        import subprocess
-        import shutil
-        import tempfile
-        import uuid
-        from pathlib import Path
-
-        try:
-            # 1. 把源 .xls 拷贝到临时目录，用 ASCII 文件名（避免 LibreOffice 中文名问题）
-            workdir = tempfile.mkdtemp(prefix='xls_convert_')
-            ascii_xls = Path(workdir) / f"src_{uuid.uuid4().hex[:8]}.xls"
-            shutil.copy2(file_path, ascii_xls)
-
-            try:
-                # 2. 准备 LibreOffice 输出目录
-                outdir = tempfile.mkdtemp(prefix='xls_out_')
-
-                # 3. 找 LibreOffice 可执行文件
-                soffice = shutil.which("soffice")
-                if not soffice:
-                    for win_path in [
-                        r"C:\Program Files\LibreOffice\program\soffice.exe",
-                        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-                    ]:
-                        if Path(win_path).exists():
-                            soffice = win_path
-                            break
-
-                if not soffice:
-                    return ExtractionResult(
-                        error="未找到 LibreOffice（soffice）。请安装 LibreOffice 或将 .xls 另存为 .xlsx"
-                    )
-
-                # 4. 调用 LibreOffice 转换
-                cmd = [soffice, "--headless", "--convert-to", "xlsx",
-                       "--outdir", outdir, str(ascii_xls)]
-                proc = subprocess.run(cmd, capture_output=True, timeout=120)
-
-                # 5. 找转换后的 .xlsx（不依赖原文件名，用通配）
-                converted = list(Path(outdir).glob("*.xlsx"))
-                if not converted:
-                    err_msg = proc.stderr.decode('utf-8', errors='ignore')[:200]
-                    return ExtractionResult(
-                        error=f".xls 转 .xlsx 失败（输出目录为空）。LibreOffice: {err_msg}"
-                    )
-
-                # 6. 用现有 _extract_xlsx 流程处理
-                result = self._extract_xlsx(str(converted[0]))
-                # 在 JSON 里标记原始格式
-                if result.json_data and "file" in result.json_data:
-                    result.json_data["file"]["original_format"] = "xls"
-                    result.json_data["file"]["converted_via"] = "libreoffice"
-                return result
-            finally:
-                # 清理临时文件
-                try:
-                    shutil.rmtree(workdir, ignore_errors=True)
-                    shutil.rmtree(outdir, ignore_errors=True)
-                except Exception:
-                    pass
-
-        except FileNotFoundError as e:
-            return ExtractionResult(error=f"源文件读取失败: {e}")
-        except subprocess.TimeoutExpired:
-            return ExtractionResult(error="LibreOffice 转换超时（>120s）")
-        except Exception as e:
-            logger.exception(f"_extract_xls_legacy 失败: {file_path}")
-            return ExtractionResult(error=f".xls 处理失败: {e}")
+        return ExtractionResult(
+            error=(
+                ".xls（旧版二进制格式）本地引擎不支持，且 anydoc 未成功。"
+                "请将文件另存为 .xlsx 后重新上传。"
+            )
+        )
 
     def _process_sheet(self, ws, sheet_name: str) -> Tuple[str, Dict[str, Any]]:
         """处理单个工作表 → (markdown, json)"""

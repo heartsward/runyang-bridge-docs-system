@@ -1,13 +1,26 @@
+# -*- coding: utf-8 -*-
 """
 提取路由器：按文件扩展名分发到对应 extractor
 
-新架构入口（阶段 3A）：
-- XLSX/XLS → XlsxExtractor（openpyxl 直读，**关键改进：修错位**）
-- DOCX/DOC → DocxExtractor（python-docx 直读）
-- 文本类 (.txt/.md/.csv/.json/...) → TextExtractor
-- PDF → PdfExtractor（LibreOffice + 后处理）
-- 图片 → ImageExtractor（OCR）
-- 兜底 → 旧 SearchService.extract_file_content
+阶段十九（anydoc 替换 LibreOffice）后的引擎优先级链：
+
+    图片（png/jpg/bmp/webp/gif...）
+        → ImageExtractor（多模态 AI 优先 + OCR 兜底，内部已含降级）
+    anydoc 支持的 21 个文档格式（doc/docx/xls/xlsx/ppt/odt/rtf/epub/csv/pdf...）
+        ① AnyDocExtractor（anydoc，纯 Rust，<5ms，首选）
+        ② 失败/空内容 → 降级本地引擎：
+             PDF  → PdfExtractor（多模态 AI 优先 + pymupdf 本地兜底）
+             其他 → Xlsx/Docx/Text（安全网）
+        ③ 本地也失败 → 报错（语义与阶段四起一致）
+    anydoc 不覆盖的格式（.txt/.md/.json 等纯文本）
+        → 直接本地引擎（TextExtractor）
+
+历史：
+- 阶段 3A：按扩展名分发到各 extractor
+- 阶段四：删除旧 LibreOffice 管线
+- 阶段十三：AI_ALL_FORMATS_AI 全格式 AI 规整（阶段十九起移除——anydoc 输出已是
+  高质量 GFM，不再需要"全格式 AI 规整"开关）
+- 阶段十九：anydoc 成为所有文档格式首选引擎，LibreOffice 链路彻底退役
 """
 import logging
 from typing import Optional
@@ -15,6 +28,7 @@ from pathlib import Path
 
 from .models import ExtractionResult
 from .base import BaseExtractor
+from .anydoc_extractor import AnyDocExtractor
 from .xlsx_extractor import XlsxExtractor
 from .docx_extractor import DocxExtractor
 from .text_extractor import TextExtractor
@@ -25,10 +39,11 @@ logger = logging.getLogger(__name__)
 
 
 class ExtractionRouter:
-    """文件格式路由器"""
+    """文件格式路由器（anydoc 优先 + 本地引擎安全网 + AI 兜底）"""
 
     def __init__(self):
-        self._extractors: list[BaseExtractor] = [
+        self.anydoc = AnyDocExtractor()
+        self._local_extractors: list[BaseExtractor] = [
             XlsxExtractor(),
             DocxExtractor(),
             TextExtractor(),
@@ -37,100 +52,41 @@ class ExtractionRouter:
         ]
 
     def extract(self, file_path: str) -> ExtractionResult:
-        """
-        按扩展名分发到对应 extractor
+        """图片走 ImageExtractor；其余先 anydoc，失败降级本地引擎（PDF 本地引擎内含多模态 AI 优先）"""
+        ext = Path(file_path).suffix.lower()
+        local_extractor = self._find_local_extractor(file_path)
 
-        阶段四：不再 fallback 到旧管线（旧 LibreOffice 管线已删除）。
-        阶段十三：AI_ALL_FORMATS_AI=true 时，**所有格式**（含 docx/xlsx/txt）都先用
-                 本地引擎拿到一份文本表示，再交给统一 AI 整理为最终 Markdown；
-                 AI 失败按 AI_FALLBACK_TO_LOCAL 决定是否回退到本地结果。
-        PDF/图片：其自身 extractor 内部已做"AI 优先 + 降级"，路由器不再二次套 AI，
-                 直接走本地分发（保持既有行为不变）。
-        """
-        # 找到能处理的 extractor
-        extractor = self._find_extractor(file_path)
-        if extractor is None:
-            return ExtractionResult(
-                error=f"没有 extractor 支持该文件: {Path(file_path).suffix}",
+        # 1) 图片：anydoc 不处理图片文档，直接走 ImageExtractor（内部含多模态 AI 优先 + OCR 兜底）
+        if type(local_extractor).__name__ == "ImageExtractor":
+            logger.info(f"[ExtractionRouter] 图片 → ImageExtractor: {file_path}")
+            return self._run(local_extractor, file_path)
+
+        # 2) anydoc 支持的文档格式：首选 anydoc
+        if self.anydoc.can_handle(file_path):
+            anydoc_result = self._run(self.anydoc, file_path)
+            if anydoc_result.is_success:
+                return anydoc_result
+            logger.info(
+                f"[ExtractionRouter] anydoc 未成功（{anydoc_result.error}），降级本地引擎: {file_path}"
             )
 
-        # PDF/图片 走原路径（其内部已含 AI 优先 + 降级）
-        is_image_format = type(extractor).__name__ in ("PdfExtractor", "ImageExtractor")
-        if is_image_format:
-            logger.info(f"[ExtractionRouter] 使用 {type(extractor).__name__}: {file_path}")
-            return self._run_local(extractor, file_path)
+        # 3) 降级：本地引擎（PDF 的本地引擎内部 = 多模态 AI 优先 + pymupdf 兜底）
+        if local_extractor is None:
+            return ExtractionResult(error=f"没有 extractor 支持该文件: {ext}")
+        logger.info(f"[ExtractionRouter] 降级使用 {type(local_extractor).__name__}: {file_path}")
+        return self._run(local_extractor, file_path)
 
-        from app.core.config import settings
-        all_formats = getattr(settings, "AI_ALL_FORMATS_AI", False)
-        ai_enabled = getattr(settings, "AI_SERVICE_ENABLED", False)
-
-        # 全格式 AI 开启：本地引擎先出一份 md（作为 AI 输入 + 降级兜底），再让 AI 规整
-        if all_formats and ai_enabled:
-            logger.info(f"[ExtractionRouter] 全格式 AI 模式: 本地引擎 → AI 规整: {file_path}")
-            local_result = self._run_local(extractor, file_path)
-            if local_result.is_success:
-                ai_result = self._refine_with_ai(local_result, extractor, file_path)
-                if ai_result is not None:
-                    return ai_result
-                # AI 失败：fallback 开关决定回退本地 or 报错
-                if not getattr(settings, "AI_FALLBACK_TO_LOCAL", True):
-                    return ExtractionResult(
-                        error="AI 提取失败且已禁用本地降级",
-                        json_data={"format": (local_result.json_data or {}).get("format")},
-                    )
-                logger.info(f"[ExtractionRouter] AI 失败，回退本地引擎: {file_path}")
-                return local_result
-            # 本地引擎也失败 → 直接返回本地错误
-            return local_result
-
-        logger.info(f"[ExtractionRouter] 使用 {type(extractor).__name__}: {file_path}")
-        return self._run_local(extractor, file_path)
-
-    def _run_local(self, extractor: "BaseExtractor", file_path: str) -> ExtractionResult:
-        """跑本地引擎（原分发逻辑，保留异常兜底）"""
+    def _run(self, extractor: "BaseExtractor", file_path: str) -> ExtractionResult:
+        """跑一个 extractor（异常兜底，不抛出）"""
         try:
             return extractor.extract(file_path)
         except Exception as e:
             logger.exception(f"[ExtractionRouter] {type(extractor).__name__} 抛异常: {e}")
             return ExtractionResult(error=f"提取异常 ({type(extractor).__name__}): {e}")
 
-    def _refine_with_ai(
-        self,
-        local_result: ExtractionResult,
-        extractor: "BaseExtractor",
-        file_path: str,
-    ) -> Optional[ExtractionResult]:
-        """阶段十三：把本地引擎已提取的 Markdown 交给统一 AI 整理/规整。
-
-        返回:
-          - ExtractionResult（AI 成功，engine=unified-ai）
-          - None（AI 未启用/失败 → 调用方按 fallback 开关决定回退本地）
-        """
-        try:
-            from app.services.extraction.ai_client import get_unified_ai_client
-            client = get_unified_ai_client()
-            if not client.is_enabled():
-                return None
-            md, error = client.parse_text(local_result.markdown)
-            if md:
-                fmt = (local_result.json_data or {}).get("format", Path(file_path).suffix.lstrip("."))
-                return ExtractionResult(
-                    markdown=md,
-                    json_data={
-                        "format": fmt,
-                        "engine": "unified-ai",
-                        "ai_provider": client.provider,
-                        "ai_model": client.model,
-                        "char_count": len(md),
-                    },
-                )
-            logger.warning(f"[ExtractionRouter] 全格式 AI 规整失败: {error}")
-        except Exception as e:
-            logger.exception(f"[ExtractionRouter] 全格式 AI 规整异常: {e}")
-        return None
-
-    def _find_extractor(self, file_path: str) -> Optional[BaseExtractor]:
-        for ext in self._extractors:
+    def _find_local_extractor(self, file_path: str) -> Optional[BaseExtractor]:
+        """在本地引擎列表里找能处理的 extractor（不含 anydoc）"""
+        for ext in self._local_extractors:
             if ext.can_handle(file_path):
                 return ext
         return None

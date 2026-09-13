@@ -65,6 +65,9 @@ python-dateutil>=2.8.0           # 日期时间处理增强
 Pillow>=9.0.0
 PyMuPDF>=1.22.0
 
+# ============ 文档转换（阶段十九：anydoc 替换 LibreOffice）============
+firecrawl-anydoc>=0.2.4           # 纯 Rust 文档→GFM Markdown（doc/docx/xls/xlsx/ppt/odt/rtf/epub/csv/pdf，14 格式，<5ms）
+
 # ============ OCR和图像处理（生产环境必需） ============
 pytesseract>=0.3.10          # OCR文字识别（需要Tesseract程序）
 pdf2image>=1.16.0            # PDF转图像

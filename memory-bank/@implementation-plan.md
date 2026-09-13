@@ -1760,3 +1760,116 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 风险 4：MD 内嵌图引用会让"编辑保存"（storage.update）可能误伤图片行 → 18.3 实现时图片引用行加注释标记（HTML 注释 `<!-- img:... -->`）供 update 保护
 
 ---
+
+---
+
+## 阶段十九：集成 anydoc 替换 LibreOffice（用户提出于 2026-09-13 15:05）
+
+### 背景与目标
+用户要求调研 [firecrawl/anydoc](https://github.com/firecrawl/anydoc)（纯 Rust 文档→GFM Markdown 转换器，Firecrawl 出品），若效果优于现有 LibreOffice 相关链路，则**集成进项目替换 LibreOffice**：所有文件优先用 anydoc 转换，失败或需要 OCR 的文件再走多模态大模型；同时**去除**系统设置里"所有格式文档都使用 AI 提取 Markdown"开关。
+
+### anydoc 研究结论（已浅克隆通读 + 实测）
+- **形态**：Rust 库 + Node/Python/WASM 绑定；Python 包 `pip install firecrawl-anydoc`（单 wheel ~3.6MB，cp310-abi3-win_amd64 兼容 venv 的 Python 3.13）
+- **API**：`anydoc.to_markdown(path) -> str`（GFM）；`to_markdown_bytes(data, fmt?)`；内容嗅探格式（PDF header/OLE stream/ZIP mimetype），CSV 需给扩展名
+- **支持 14 格式**：`.doc/.docx/.docm/.ppt/.pps/.pot/.pptx/.pptm/.ppsx/.ppsm/.xls/.xlsx/.xlsm/.xlsb/.odt/.ods/.odp/.rtf/.epub/.csv/.pdf`
+- **实测（真实业务文件）**：
+  - `交换机统计0723.xls`（当年 LibreOffice 转 TXT 错位反复修的那个）→ **0.8ms**，6 列表格结构完整、中文站名/账号密码全对
+  - `春暖花开燕自来.docx` → 1.0ms 全文段落正确
+  - `润扬大桥设备资产清单.xlsx` → 13.2ms，22550 字符，机柜图表格+设备编号保留
+- **官方基准**（LLM judge 盲评 482 对）：唯一覆盖全部 14 格式且每种格式得分最高的工具，比次快的工具快一个数量级（中位 <5ms/文档）
+- **短板**：PDF 仅文本层提取（pdf-inspector），**扫描件不支持本地 OCR**（只支持 firecrawl 付费 hosted OCR，数据上云，不采用）→ 扫描件走我们自己的多模态 AI
+- **结论：全面优于 LibreOffice 链路**（速度、质量、部署重量、Windows 中文文件名坑）。用户的"如果更好"条件满足 → 执行集成
+
+### 现状 LibreOffice 使用点（grep 实测）
+| 位置 | 用途 | 处置 |
+|------|------|------|
+| `extraction/xlsx_extractor.py:_extract_xls_legacy` | .xls → .xlsx（subprocess soffice，ASCII 文件名绕中文坑） | **替换为 anydoc**（anydoc 原生读 .xls，输出 MD） |
+| `extraction/docx_extractor.py:49-56` | .doc → .docx（soffice 转 docx 再 python-docx） | **替换为 anydoc**（原生读 .doc） |
+| `services/search_service.py` | 文档头注释 + 旧 `extract_file_content` 历史说明 | 更新注释（旧管线阶段四已删） |
+| `document_formatter.py:232-241` | "LibreOffice处理" 标识判断（死逻辑残留） | 清理/更新 |
+| `api/endpoints/search.py:351` | 注释"LibreOffice已经提供了良好的格式" | 更新注释 |
+
+### 设计：引擎优先级链（新链路）
+```
+所有文件 → AnyDocExtractor（anydoc 优先）
+  ├─ 成功且内容非空 → 直接用（engine=anydoc）
+  └─ 失败/空内容 → 按格式降级：
+       ├─ PDF → 多模态 AI（vision_parse，现有 _extract_with_unified_ai）→ 失败则 pymupdf 本地兜底
+       ├─ 图片 → 多模态 AI（现有 ImageExtractor 不变）
+       ├─ 其余 office/文本 → 现有本地引擎（openpyxl/python-docx/TextExtractor 安全网）
+       └─ 本地也失败 → 报错（现状语义不变）
+```
+- **保留 openpyxl/python-docx 作安全网**（不删）：anydoc 成功则用 anydoc；边角格式回归时有兜底，符合"失败再走 AI/本地"的用户要求
+- **去除 `AI_ALL_FORMATS_AI` 开关**：anydoc 输出已是高质量 GFM，无需"全格式 AI 规整"；router 的 `all_formats` 分支删除，`AI_FALLBACK_TO_LOCAL` 保留（AI 降级仍需要）
+- PDF 文本型（非扫描）：anydoc 直接出文本层 MD（<5ms），比现在"整页渲染喂 VLM（几十秒）"快得多；**空内容**（扫描件）才走多模态 AI——正好满足"失败或需要 OCR 的走多模态"
+
+### 非目标（本次不做）
+- ❌ anydoc 的 firecrawl hosted OCR（付费+数据上云，用我们的多模态替代）
+- ❌ 删除 openpyxl/python-docx 本地引擎（保留为安全网）
+- ❌ 历史文档批量重提取（用户按需重传/重建）
+- ❌ 前端其他 UI 改动（只删一个开关）
+
+### 步骤 19.1 — 依赖与基础
+- **做什么**：
+  1. `backend/requirements-windows.txt` + `requirements.txt` 加 `firecrawl-anydoc>=0.2.4`
+  2. 新文件 `backend/app/services/extraction/anydoc_extractor.py`：
+     - `AnyDocExtractor(BaseExtractor)`：`can_handle` = 扩展名在 anydoc 14 格式表内（doc/docx/docm/ppt 系/xls 系/odt/ods/odp/rtf/epub/csv/pdf）
+     - `extract(path)` → `anydoc.to_markdown(path)`（try/except 全部捕获，失败返回 `ExtractionResult(error=...)`，**不抛异常**）；空/极短（<20 字）也视为失败
+     - `json_data`：`{format, engine:"anydoc", char_count}`
+- **能改什么**：requirements 两文件、新增 anydoc_extractor.py
+- **不能改什么**：现有任何 extractor
+- **怎么验**：3 个业务文件（xls/docx/xlsx）转 MD 成功；造一个损坏文件（改 magic 字节）→ 返回 error 不抛
+- **回退方案**：删新文件、revert requirements
+
+### 步骤 19.2 — router 接入（anydoc 优先 + 降级）
+- **做什么**：
+  1. `router.py`：`_extractors` 列表**首位**插入 `AnyDocExtractor()`（优先级最高）
+  2. `extract()` 重写分发逻辑：
+     - 图片（png/jpg 等，非 anydoc 格式表内）→ 直接 ImageExtractor（现状不变）
+     - anydoc 格式：先跑 AnyDocExtractor；成功 → 返回
+     - anydoc 失败/空：
+       - PDF → `PdfExtractor._extract_with_unified_ai`（多模态）→ 失败 pymupdf 本地
+       - 其他 → 现有对应本地引擎（Xlsx/Docx/Text）→ 失败报错
+  3. **删除** `AI_ALL_FORMATS_AI` 全格式 AI 规整分支（`all_formats` 判断 + `_refine_with_ai` 调用；`_refine_with_ai` 方法保留或删除均可，倾向删除）
+- **能改什么**：`router.py`
+- **不能改什么**：PdfExtractor/ImageExtractor 内部逻辑（复用不改）
+- **怎么验**：xls→anydoc 直出（json_data.engine=anydoc，耗时 <1s）；损坏 xls→降级本地引擎（openpyxl 也读不了则报错）；PDF 文本型→anydoc 出文本；`AI_ALL_FORMATS_AI` 不再被读取
+- **回退方案**：git checkout router.py
+
+### 步骤 19.3 — 清理 LibreOffice 残留
+- **做什么**：
+  1. `xlsx_extractor.py:_extract_xls_legacy`：保留函数但**内部改走 anydoc**（或 router 已兜住，此函数仅作文档化 fallback；倾向：函数体改为调 anydoc，去掉 soffice subprocess 全部逻辑）
+  2. `docx_extractor.py` .doc 分支：去掉 soffice 转 docx 逻辑（router 层 anydoc 已兜住；此分支保留"anydoc 不可用时报清晰错误"）
+  3. `search_service.py` / `document_formatter.py` / `search.py` 的 LibreOffice 注释/死逻辑清理
+- **能改什么**：上述 4 文件
+- **不能改什么**：`_extract_xlsx`（openpyxl 主路径）/`_process_sheet` 等本地引擎核心
+- **怎么验**：全仓 grep `soffice` → 仅剩文档说明；.xls/.doc 上传走新链路成功
+- **回退方案**：git checkout 4 文件
+
+### 步骤 19.4 — 去除"所有格式 AI 提取"开关
+- **做什么**：
+  1. `config.py`：删 `AI_ALL_FORMATS_AI` 字段（保留 `AI_SERVICE_ENABLED`/`AI_FALLBACK_TO_LOCAL`）
+  2. `api/endpoints/extraction_config.py`：schema/PUT/GET 去掉 `ai_all_formats_ai` 字段（.env 清理列表保留该 key 的删除逻辑，清掉存量）
+  3. `backend/.env`：删 `AI_ALL_FORMATS_AI=false` 行
+  4. 前端 `extraction-config.ts`：接口去字段；`SettingsView.vue`：删开关 UI（line 67 附近）+ 初始值（line 572 附近）
+- **能改什么**：上述 4 文件
+- **不能改什么**：AI 服务配置的其他字段（url/model/provider/timeout 等）
+- **怎么验**：GET extraction-config 不再返回该字段；设置页无此开关；vue-tsc 0 error；存量 .env 里的 key 被 PUT 后清掉
+- **回退方案**：git checkout 4 文件
+
+### 步骤 19.5 — 端到端验收
+- **做什么**：
+  1. 上传：`交换机统计0723.xls`（anydoc 直读）+ 1 个 docx + 1 个文本型 PDF（anydoc 文本层）→ 全部 engine=anydoc 成功
+  2. 上传扫描件/图片类 → 走多模态 AI 成功
+  3. 上传损坏文件 → 降级/报错语义正确
+  4. 系统设置页确认开关已消失、AI 配置其他项正常
+  5. `vue-tsc --noEmit` 0 error；后端重启后 `/health` 200
+- **通过标准**：anydoc 优先链路全通；失败降级链路全通；开关无残留（代码+.env+前端）
+- **回退方案**：N/A（验收不改代码）
+
+### 实施顺序与风险
+- 顺序：19.1 → 19.2 → 19.3 → 19.4 → 19.5
+- 风险 1：anydoc 对某些**边角 xls/doc**（老格式/宏/加密）解析可能失败 → 已设计本地引擎安全网 + 报错语义不变
+- 风险 2：anydoc 表格对**复杂合并单元格**的 GFM 表达与 openpyxl HTML 表格不同 → 前端 markdown-it 渲染 GFM 表格无问题；HTML 表格（colspan）场景 anydoc 输出为纯 GFM（可能丢失合并关系）→ 若业务发现台账类表格合并丢失，该格式可临时切回本地引擎（router 加白名单开关，本期不做）
+- 风险 3：`AI_ALL_FORMATS_AI` 删除后，用户之前若开过该开关（.env=true）行为变化 → .env 当前为 false，无实际影响；PUT 会清掉该 key
+- 风险 4：PDF 文本型从"VLM 整页识别"变为"anydoc 文本层" → 排版复杂的 PDF 文本层提取质量可能不如 VLM 渲染识别 → 空/短内容自动降级 VLM 兜住；用户如需强制 VLM 可后续加配置

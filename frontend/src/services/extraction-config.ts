@@ -11,8 +11,7 @@ export interface ExtractionConfig {
   ai_service_api_key: string
   ai_service_timeout: number
   ai_fallback_to_local: boolean
-  // 阶段十三：True=所有格式文档（docx/xlsx/txt 等）也尝试 AI 提取 md；False=仅 PDF+图片
-  ai_all_formats_ai: boolean
+  // 注：ai_all_formats_ai 开关阶段十九已移除（anydoc 已是全格式首选转换引擎，无需全格式 AI 规整）
 
   // 可选：阶段五的 PaddleOCR 兼容
   ai_ocr_enabled: boolean
