@@ -7,10 +7,9 @@
               <n-input
                 v-model:value="searchQuery"
                 size="large"
-                placeholder="输入关键词搜索文档内容..."
+                placeholder="输入关键词搜索，多个词用空格分隔（如：交换机 配置）"
                 clearable
                 @keydown.enter="handleSearch"
-                @input="handleInputChange"
               >
                 <template #prefix>
                   <n-icon :component="SearchOutline" />
@@ -26,48 +25,6 @@
                   </n-button>
                 </template>
               </n-input>
-              
-              <!-- 高级搜索选项 -->
-              <n-collapse>
-                <n-collapse-item title="高级搜索" name="advanced">
-                  <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="12">
-                    <n-grid-item>
-                      <n-form-item label="搜索范围">
-                        <n-text>仅搜索文档内容</n-text>
-                      </n-form-item>
-                    </n-grid-item>
-                    <n-grid-item>
-                      <n-form-item label="文档类型">
-                        <n-select
-                          v-model:value="filters.type"
-                          :options="documentTypes"
-                          placeholder="全部类型"
-                          clearable
-                        />
-                      </n-form-item>
-                    </n-grid-item>
-                    <n-grid-item>
-                      <n-form-item label="创建时间">
-                        <n-date-picker
-                          v-model:value="filters.dateRange"
-                          type="daterange"
-                          placeholder="选择时间范围"
-                          clearable
-                        />
-                      </n-form-item>
-                    </n-grid-item>
-                    <n-grid-item>
-                      <n-form-item label="排序方式">
-                        <n-select
-                          v-model:value="filters.sortBy"
-                          :options="sortOptions"
-                          placeholder="相关度"
-                        />
-                      </n-form-item>
-                    </n-grid-item>
-                  </n-grid>
-                </n-collapse-item>
-              </n-collapse>
             </n-space>
           </n-card>
 
@@ -84,35 +41,6 @@
               </n-space>
             </n-space>
           </div>
-
-          <!-- 搜索建议 -->
-          <n-card v-if="searchSuggestions.length > 0 && !hasSearched" title="搜索建议">
-            <n-space>
-              <n-tag
-                v-for="suggestion in searchSuggestions"
-                :key="suggestion"
-                clickable
-                @click="searchQuery = suggestion; handleSearch()"
-              >
-                {{ suggestion }}
-              </n-tag>
-            </n-space>
-          </n-card>
-          
-          <!-- 搜索实时建议 -->
-          <n-card v-if="inputSuggestions.length > 0 && searchQuery.length >= 2 && !hasSearched" title="相关建议">
-            <n-space>
-              <n-tag
-                v-for="suggestion in inputSuggestions"
-                :key="suggestion"
-                clickable
-                size="small"
-                @click="searchQuery = suggestion; handleSearch()"
-              >
-                {{ suggestion }}
-              </n-tag>
-            </n-space>
-          </n-card>
 
           <!-- 搜索结果统计 -->
           <n-card v-if="searchResults.length > 0" class="search-stats">
@@ -163,6 +91,10 @@
                     </n-tag>
                     <n-text depth="3" v-if="result.score">相关度: {{ Math.round(result.score * 100) }}%</n-text>
                     <n-text depth="3" v-if="result.match_count">匹配: {{ result.match_count }}处</n-text>
+                    <!-- 阶段二十：多词联合搜索 — 显示命中词数（单词查询不显示） -->
+                    <n-tag type="success" size="small" v-if="result.term_total && result.term_total > 1">
+                      命中 {{ (result.matched_terms || []).length }}/{{ result.term_total }} 词
+                    </n-tag>
                   </n-space>
                 </n-space>
               </template>
@@ -384,7 +316,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NLayout,
@@ -442,7 +374,10 @@ interface DocumentSearchResult {
   }>
   updated_at: string
   type: 'document'
-  match_type?: 'content' | 'title'
+  match_type?: 'content' | 'title' | 'description'
+  // 阶段二十：多词联合搜索（后端返回命中的词与总词数）
+  matched_terms?: string[]
+  term_total?: number
 }
 
 // 资产搜索相关接口已移除
@@ -492,17 +427,9 @@ const currentHighlightIndex = ref(0)
 
 // 搜索结果
 const documentResults = ref<DocumentSearchResult[]>([])
-const inputSuggestions = ref<string[]>([])
 
 // XSS防护
 const { sanitizeHighlightHtml, sanitizeDocumentHtml } = useSafeHtml()
-
-const filters = ref({
-  searchScope: 'all',
-  type: null,
-  dateRange: null,
-  sortBy: 'relevance'
-})
 
 const searchResults = computed<SearchResult[]>(() => {
   return documentResults.value
@@ -515,26 +442,6 @@ const displayResults = computed(() => {
 const previewTitle = computed(() => {
   return previewDocumentData.value ? previewDocumentData.value.title : '文档预览'
 })
-
-const searchSuggestions = ref(['Nginx配置', '数据库优化', '监控告警', '故障排查', '部署文档', 'API文档', '运维手册', '技术规范'])
-
-// 搜索范围选项已移除 - 现在只搜索文档
-
-const documentTypes = [
-  { label: 'TXT文本', value: 'txt' },
-  { label: 'Markdown', value: 'md' },
-  { label: 'JSON数据', value: 'json' },
-  { label: 'CSV表格', value: 'csv' },
-  { label: 'Excel表格', value: 'xlsx' },
-  { label: '其他', value: 'other' }
-]
-
-const sortOptions = [
-  { label: '相关度', value: 'relevance' },
-  { label: '创建时间', value: 'created' },
-  { label: '更新时间', value: 'updated' },
-  { label: '标题', value: 'title' }
-]
 
 const getResultTypeColor = (result: SearchResult): 'default' | 'error' | 'primary' | 'info' | 'success' | 'warning' => {
   const fileType = result.file_type?.toLowerCase()
@@ -631,22 +538,6 @@ const shouldShowViewToggle = (document: any): boolean => {
 }
 
 
-// 实时输入建议
-const handleInputChange = async () => {
-  if (searchQuery.value.length >= 2) {
-    try {
-      const response = await apiService.get('/search/suggestions', {
-        params: { q: searchQuery.value }
-      })
-      inputSuggestions.value = response.suggestions || []
-    } catch (error) {
-      inputSuggestions.value = []
-    }
-  } else {
-    inputSuggestions.value = []
-  }
-}
-
 const handleSearch = async () => {
   if (!searchQuery.value.trim()) {
     message.warning('请输入搜索关键词')
@@ -655,7 +546,6 @@ const handleSearch = async () => {
 
   searching.value = true
   hasSearched.value = true
-  inputSuggestions.value = [] // 清空实时建议
   const startTime = Date.now()
 
   try {
@@ -664,12 +554,7 @@ const handleSearch = async () => {
       q: searchQuery.value,
       limit: 50
     }
-    if (filters.value.type) {
-      docParams.doc_type = filters.value.type
-    }
-    
-    console.log('🔍 搜索参数:', docParams)
-    
+
     // 使用统一API
     const response = await apiService.get('/search/documents', { params: docParams })
     documentResults.value = response.results.map((item: any) => ({
@@ -888,18 +773,9 @@ const downloadDocument = async (id: number | undefined, type: 'original' | 'mark
 const clearSearch = () => {
   searchQuery.value = ''
   documentResults.value = []
-  inputSuggestions.value = []
   hasSearched.value = false
   totalResults.value = 0
-  filters.value = {
-    searchScope: 'all',
-    type: null,
-    dateRange: null,
-    sortBy: 'relevance'
-  }
 }
-
-// 搜索范围监听已移除 - 只搜索文档
 
 // 监听预览模式变化
 watch(previewMode, async (newMode) => {
@@ -942,15 +818,6 @@ watch(previewMode, async (newMode) => {
   }
 })
 
-onMounted(async () => {
-  // 初始化搜索建议
-  try {
-    const response = await apiService.get('/search/suggestions')
-    searchSuggestions.value = response.suggestions || searchSuggestions.value
-  } catch (error) {
-    console.log('获取搜索建议失败')
-  }
-})
 </script>
 
 <style scoped>

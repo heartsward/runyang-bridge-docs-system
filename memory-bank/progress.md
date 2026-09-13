@@ -815,3 +815,27 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - **前端渲染链 bug 必须用真实浏览器（headless）验证，curl 测不出来**。这次服务端 curl 全链路 200 都正常，但浏览器里 src 被剥——只有 headless 抓最终 DOM + 网络请求才暴露。排查顺序里"②下载端点 200"通过不代表前端就能渲染，还要验"④浏览器最终 DOM 的 img 是否真有 src、图片是否解码（naturalWidth>0）"。
   - **jsdom 跑 DOMPurify 的结果可能与真实浏览器不一致**（本次 jsdom 显示 src 保留，真实浏览器却剥离）——涉及 DOM/URL 解析的行为，ground truth 必须用真实 Chromium。
   - 手写 `ALLOWED_URI_REGEXP` 极易因字符类未转义而出错；**能复用 DOMPurify 官方默认就别自己改**，确需加 scheme 时只增不删、`-` 必须转义。
+
+### 2026-09-13（21:40 - 22:20）— 阶段二十：智能搜索模块优化（方案 A）
+- **用户拍板**：先去掉搜索建议 + 高级搜索；GitHub 调研后选方案 A（清理 + 多词联合搜索）；语义搜索（sqlite-vec + BGE）列为后续候选本期不做
+- **调研结论**（记录供后续参考）：
+  - 现状：主搜索 `/search/documents` 是**内存全量扫描**（`query.all()` + 逐篇正则），43 篇/611KB 时 ~1.6ms 不慢，但**无多词能力**（"交换机 配置"整体当一串搜不到）
+  - 搜索建议是**假数据**（无查询词时返回 8 个写死词）；高级搜索面板 4 项筛选基本是摆设
+  - wiki FTS5 三路索引（阶段十八）只覆盖 11/43 篇 → **本期不接 FTS**（作主路会漏召回；规模上来后再做，需先解决新文档自动入索引）
+  - 本地 llama.cpp（192.168.66.234:8081）**不支持 embeddings**（501），真语义搜索需另部署 BGE-small-zh 等专用模型
+  - GitHub 候选：sqlite-vec 8.1k⭐（SQLite 向量扩展，最契合）/ txtai 12.9k / LanceDB 11.4k / Chroma 29.3k / Qdrant 34.5k / FAISS 40.9k / BGE 12.2k
+- **代码变更**：
+  - `search.py`：删 `/search/suggestions` 端点（~60 行）；`/search/documents` 重写检索核心——`tokenize_query(q)`（空白+中英文标点分词、去重、每词 ≤30 字）；单词（无分隔符）完全保留原匹配与打分公式（召回不降）；多词逐词独立匹配（content/title/description 三桶），score = 0.5×命中词覆盖率 + 0.5×桶权重，结果附 `matched_terms`/`term_total`；`_highlight_terms` 多词高亮
+  - `search_service.py`：新增 `search_terms_in_text(text, terms)`——**单次逐行遍历**同时匹配所有词（每词最多 20 条，全命中即提前退出）
+  - `SearchView.vue`：删两张建议卡 + 高级搜索面板（范围/类型/时间/排序）+ `filters`/`documentTypes`/`sortOptions`/`searchSuggestions`/`inputSuggestions`/`handleInputChange`/onMounted 建议拉取 + `onMounted` import；placeholder 改为多词提示；结果卡片多词时显示"命中 X/Y 词"标签；`DocumentSearchResult` 类型加 `matched_terms`/`term_total`
+- **验证**：
+  - `/search/suggestions` → 404 ✓
+  - 单词"交换机" total=12（与改造前基准一致，召回不降）✓
+  - 多词"交换机 配置" total=17：**2/2 全词命中排前（0.90），1/2 部分命中在后（0.65）** ✓
+  - 多词"Nginx 反向代理" total=0（数据确实没有，与单词一致）✓
+  - headless E2E：单词 64ms / 多词 68ms（不慢）；截图确认 UI 干净（无建议卡/高级面板）、"命中 2/2 词"标签正常、多词 `<mark>` 高亮正确
+  - `py_compile` / `import app.main` / `vue-tsc --noEmit` 全过
+- **教训**：
+  - 大段代码替换用 Python 脚本做**行范围替换**（断言首尾行）比 Edit 工具的长字符串匹配可靠（长文本里空白不一致会反复失败）
+  - 后端 8002 被旧 task 占用时，`taskkill /F /IM python.exe` 杀不干净（沙箱下部分进程杀不掉），用 `netstat -ano | grep :8002` 找 PID 再 `taskkill /F /PID <pid>` 精确杀
+  - "搜索不慢"≠"不需要优化"——用户感知快是因为数据量小（43 篇），优化价值在**功能缺失（多词）+ 规模余量**，方案沟通时先用实测基准数据对齐预期

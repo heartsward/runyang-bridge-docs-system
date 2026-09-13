@@ -55,7 +55,7 @@ runyang-bridge-docs-system/
   | `documents.py` | 文档 CRUD、获取内容 |
   | `assets.py` | 资产 CRUD、批量、导出、文件提取 |
   | `categories.py` | 文档分类管理 |
-  | `search.py` | 全文搜索与建议 |
+  | `search.py` | 全文搜索（阶段二十起支持**多词联合搜索**：`tokenize_query` 空格/标点分词 + 命中词数加权；`/search/suggestions` 端点已删除） |
   | `upload.py` / `upload_multiple.py` / `file_upload.py` | 单文件 / 多文件上传 |
   | `tasks.py` | 后台任务状态 |
   | `settings.py` | 用户/系统设置 |

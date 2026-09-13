@@ -37,9 +37,10 @@
 - 全文搜索（基于提取出的完整内容）
 - 权重排序：内容 > 标题 > 描述
 - 关键词高亮显示
-- 搜索建议（基于历史热词）
-- 多维筛选：文档类型、上传时间、分类
+- **多词联合搜索**（阶段二十起）：空格/标点分隔多词，逐词独立匹配，命中词覆盖率加权排序（全词命中排前）
 - 搜索行为统计
+- ~~搜索建议（基于历史热词）~~ — 阶段二十已移除（2026-09-13，用户决策：写死词无意义）
+- ~~多维筛选：文档类型、上传时间、分类~~ — 阶段二十已移除（高级搜索面板，实际使用率低）
 
 ### F3 设备资产管理
 - 全类型：服务器 / 网络 / 存储 / 安全 / 其他
@@ -121,7 +122,6 @@ POST   /api/v1/assets/batch/delete
 POST   /api/v1/assets/export
 POST   /api/v1/assets/file-extract    # 从文件抽取资产
 GET    /api/v1/search/
-GET    /api/v1/search/suggestions
 GET    /api/v1/settings/users         # 管理员
 POST   /api/v1/settings/users
 PUT    /api/v1/settings/users/{id}

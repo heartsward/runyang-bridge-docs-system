@@ -21,6 +21,39 @@ import time
 
 router = APIRouter()
 
+# 多词切分：空白 + 中英文标点（阶段二十·20.2）
+_TERM_SPLIT_RE = re.compile(r'[\s，。、；：！？,.;:!?()（）\[\]【】"\'""''《》<>／/\\|]+')
+
+
+def tokenize_query(q: str) -> List[str]:
+    """把用户查询切分为搜索词（阶段二十·20.2）
+
+    - 空白与中英文标点均为分隔符（"交换机 配置"→["交换机","配置"]）
+    - 去重保序；每词截断到 30 字符（防止超长词拖慢正则）
+    - 无分隔符时返回单元素列表 → 调用方保持"整体串匹配"的旧语义
+    """
+    parts = _TERM_SPLIT_RE.split((q or '').strip())
+    terms: List[str] = []
+    seen = set()
+    for p in parts:
+        t = p.strip()[:30]
+        if t and t not in seen:
+            seen.add(t)
+            terms.append(t)
+    return terms
+
+
+def _highlight_terms(text: str, terms: List[str]) -> str:
+    """对文本中所有词做 <mark> 高亮（多词联合搜索用）"""
+    if not text or not terms:
+        return text
+    try:
+        pattern = re.compile('|'.join(re.escape(t) for t in terms), re.IGNORECASE)
+        return pattern.sub(lambda m: f"<mark>{m.group()}</mark>", text)
+    except re.error:
+        return text
+
+
 def get_actual_file_path(stored_path: str) -> Optional[str]:
     """
     获取文件的实际路径，支持路径自动修正
@@ -72,164 +105,164 @@ async def search_documents(
         # 获取所有相关文档进行搜索
         documents = query.all()  # 搜索所有文档以确保完整性
         
-        # 搜索结果分类
-        content_results = []     # 内容匹配的结果
-        title_results = []       # 仅标题匹配的结果
-        description_results = [] # 仅描述匹配的结果
-        
-        for i, doc in enumerate(documents):
-            
-            content_found = False
-            
-            # 优先搜索文档的预处理内容（不直接读取文件）
+        # ===== 阶段二十·20.2：多词联合搜索 =====
+        # 单词（无分隔符）：完全保留改造前的匹配与打分语义（召回不降）
+        # 多词（空格/标点分隔）：逐词独立匹配，命中词数多的排前
+        terms = tokenize_query(q)
+        single_term = len(terms) == 1
+        all_terms = [q.strip()] if single_term else terms
+
+        search_results = []
+
+        for doc in documents:
+            content_terms: List[str] = []
+            title_terms: List[str] = []
+            desc_terms: List[str] = []
+            highlights: List[Dict[str, Any]] = []
+            match_count = 0
+
+            # --- 1) 内容匹配（最高优先级） ---
             if doc.content_extracted and doc.content:
-                
-                try:
-                    # 只搜索数据库中已提取的内容
-                    matches = search_service.search_in_text(doc.content, q)
-                    
-                    if matches:
-                        content_found = True
-                        # 计算相关度分数 - 内容匹配给最高分
-                        base_content_score = 0.8  # 内容匹配基础分最高
-                        match_bonus = min(len(matches) / 20.0, 0.15)  # 根据匹配数量给予奖励分
-                        score = min(base_content_score + match_bonus, 1.0)
-                        
-                        # 生成高亮片段
-                        highlights = []
-                        for match in matches[:3]:  # 显示前3个匹配片段
-                            highlights.append({
-                                "text": match["content"],  # 修复：使用正确的键名
-                                "line_number": match["line_number"]
-                            })
-                        
-                        content_results.append({
-                            "id": doc.id,
-                            "title": doc.title,
-                            "description": doc.description,
-                            "file_type": doc.file_type,
-                            "file_path": doc.file_path,
-                            "score": score,
-                            "match_count": len(matches),
-                            "highlights": highlights,
-                            "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                            "match_type": "content"  # 标记匹配类型
-                        })
-                    else:
+                if single_term:
+                    try:
+                        matches = search_service.search_in_text(doc.content, q)
+                        if matches:
+                            content_terms = [q.strip()]
+                            match_count = len(matches)
+                            for match in matches[:3]:  # 显示前3个匹配片段
+                                highlights.append({
+                                    "text": match["content"],
+                                    "line_number": match["line_number"]
+                                })
+                    except Exception:
                         pass
-                        
-                except Exception as e:
-                    pass
+                else:
+                    try:
+                        term_matches = search_service.search_terms_in_text(doc.content, terms)
+                    except Exception:
+                        term_matches = {}
+                    for t in terms:
+                        ms = term_matches.get(t) or []
+                        if ms:
+                            content_terms.append(t)
+                            match_count += len(ms)
+                            if len(highlights) < 3:
+                                highlights.append({
+                                    "text": _highlight_terms(ms[0]["content"], terms),
+                                    "line_number": ms[0]["line_number"]
+                                })
+
+            # --- 2) 标题匹配（对内容未命中的词） ---
+            remaining = [t for t in all_terms if t not in content_terms]
+            if remaining:
+                for t in remaining:
+                    if t.lower() in doc.title.lower():
+                        title_terms.append(t)
+
+            # --- 3) 描述匹配（对内容/标题未命中的词） ---
+            remaining = [t for t in remaining if t not in title_terms]
+            if remaining and doc.description:
+                for t in remaining:
+                    if t.lower() in doc.description.lower():
+                        desc_terms.append(t)
+
+            matched_terms = content_terms + title_terms + desc_terms
+            if not matched_terms:
+                continue
+
+            # 文档级匹配类型：内容 > 标题 > 描述
+            if content_terms:
+                match_type = "content"
+            elif title_terms:
+                match_type = "title"
             else:
-                pass
-            
-            # 如果内容中没有找到，检查标题和描述
-            if not content_found:
-                title_match = q.lower() in doc.title.lower()
-                description_match = doc.description and q.lower() in doc.description.lower()
-                
-                if title_match:
-                    # 标题匹配分数 - 低于内容匹配
-                    base_score = 0.6
-                    # 如果标题开头匹配，分数更高
-                    if doc.title.lower().startswith(q.lower()):
-                        score = base_score + 0.15
-                    # 如果是完全匹配，分数最高
-                    elif doc.title.lower() == q.lower():
-                        score = base_score + 0.2
+                match_type = "description"
+
+            # --- 打分 ---
+            if single_term:
+                # 与改造前完全一致的打分公式
+                if match_type == "content":
+                    score = min(0.8 + min(match_count / 20.0, 0.15), 1.0)
+                elif match_type == "title":
+                    t0 = title_terms[0]
+                    if doc.title.lower() == t0.lower():
+                        score = 0.6 + 0.2
+                    elif doc.title.lower().startswith(t0.lower()):
+                        score = 0.6 + 0.15
                     else:
-                        score = base_score
-                    
-                    # 对标题进行高亮处理
-                    import re
-                    pattern = re.compile(re.escape(q), re.IGNORECASE)
-                    highlighted_title = pattern.sub(lambda m: f"<mark>{m.group()}</mark>", doc.title)
-                    highlight_text = f"标题: {highlighted_title}"
-                    
-                    title_results.append({
-                        "id": doc.id,
-                        "title": doc.title,
-                        "description": doc.description,
-                        "file_type": doc.file_type,
-                        "file_path": doc.file_path,
-                        "score": score,
-                        "match_count": 1,
-                        "highlights": [{"text": highlight_text, "line_number": 1}],
-                        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                        "match_type": "title"  # 标记匹配类型
-                    })
-                
-                elif description_match:
-                    # 描述匹配分数 - 最低优先级
-                    base_score = 0.4
-                    # 计算关键词在描述中出现的次数
-                    match_count = doc.description.lower().count(q.lower())
-                    # 检查是否在描述开头出现
-                    starts_with_keyword = doc.description.lower().startswith(q.lower())
-                    
-                    # 根据匹配次数和位置调整分数
-                    if starts_with_keyword:
-                        score = base_score + 0.1
-                    elif match_count > 1:
-                        score = base_score + 0.05
+                        score = 0.6
+                else:
+                    t0 = desc_terms[0]
+                    desc_lower = doc.description.lower()
+                    if desc_lower.startswith(t0.lower()):
+                        score = 0.4 + 0.1
+                    elif desc_lower.count(t0.lower()) > 1:
+                        score = 0.4 + 0.05
                     else:
-                        score = base_score
-                    
-                    # 对描述进行高亮处理
-                    import re
-                    pattern = re.compile(re.escape(q), re.IGNORECASE)
-                    highlighted_desc = pattern.sub(lambda m: f"<mark>{m.group()}</mark>", doc.description)
-                    
-                    # 截取描述的一部分作为高亮显示
-                    desc_snippet = doc.description
-                    if len(desc_snippet) > 200:
-                        # 找到关键词附近的文本
-                        match_pos = doc.description.lower().find(q.lower())
-                        start = max(0, match_pos - 100)
-                        end = min(len(desc_snippet), match_pos + 100)
+                        score = 0.4
+            else:
+                # 多词：命中词覆盖率为主（全词命中 > 部分命中），命中桶质量为辅
+                coverage = len(matched_terms) / len(terms)
+                bucket_score = {"content": 0.8, "title": 0.6, "description": 0.4}[match_type]
+                score = min(0.5 * coverage + 0.5 * bucket_score, 1.0)
+
+            # 标题/描述命中的高亮文本（内容命中时 highlights 已由片段填充）
+            if match_type == "title":
+                highlights = [{"text": f"标题: {_highlight_terms(doc.title, title_terms)}", "line_number": 1}]
+            elif match_type == "description":
+                desc_snippet = doc.description
+                if len(desc_snippet) > 200:
+                    # 找首个命中词附近的文本窗口
+                    pos = -1
+                    for t in desc_terms:
+                        pos = desc_snippet.lower().find(t.lower())
+                        if pos >= 0:
+                            break
+                    if pos >= 0:
+                        start = max(0, pos - 100)
+                        end = min(len(desc_snippet), pos + 100)
                         desc_snippet = desc_snippet[start:end]
                         if start > 0:
                             desc_snippet = "..." + desc_snippet
                         if end < len(doc.description):
                             desc_snippet = desc_snippet + "..."
-                    
-                    highlighted_snippet = pattern.sub(lambda m: f"<mark>{m.group()}</mark>", desc_snippet)
-                    highlight_text = f"描述: {highlighted_snippet}"
-                    
-                    description_results.append({
-                        "id": doc.id,
-                        "title": doc.title,
-                        "description": doc.description,
-                        "file_type": doc.file_type,
-                        "file_path": doc.file_path,
-                        "score": score,
-                        "match_count": 1,
-                        "highlights": [{"text": highlight_text, "line_number": 1}],
-                        "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-                        "match_type": "description"  # 标记匹配类型
-                    })
-        
-        # 合并结果：内容匹配优先，然后是标题匹配，最后是描述匹配
-        search_results = content_results + title_results + description_results
-        
+                highlights = [{"text": f"描述: {_highlight_terms(desc_snippet, desc_terms)}", "line_number": 1}]
+
+            search_results.append({
+                "id": doc.id,
+                "title": doc.title,
+                "description": doc.description,
+                "file_type": doc.file_type,
+                "file_path": doc.file_path,
+                "score": score,
+                "match_count": match_count if match_type == "content" else len(matched_terms),
+                "highlights": highlights,
+                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                "match_type": match_type,
+                # 阶段二十：多词联合搜索新增字段（单词查询时 matched_terms 为单元素）
+                "matched_terms": matched_terms,
+                "term_total": len(terms),
+            })
+
         # 按优先级排序：内容 > 标题 > 描述，同类型内按相关度分数排序
+        # 多词时 score 已含"命中词覆盖率"，全词命中的文档自然排前
         def sort_key(result):
             score = result["score"]
             match_type = result["match_type"]
-            
+
             # 给不同匹配类型设置明确的优先级权重
             type_priority = {
                 "content": 1000,    # 内容匹配：权重最高，确保始终排在前面
                 "title": 500,       # 标题匹配：中等权重
                 "description": 100  # 描述匹配：最低权重
             }
-            
+
             # 综合排序分数 = 类型优先级权重 + 相关度分数
             # 这样可以确保类型优先级的绝对性，同时在同类型中按相关度排序
             combined_score = type_priority.get(match_type, 0) + score
-            
+
             return combined_score
-        
+
         search_results.sort(key=sort_key, reverse=True)
         
         # 分页
@@ -528,66 +561,3 @@ async def get_original_file(
         raise HTTPException(status_code=500, detail=f"获取原始文件失败: {str(e)}")
 
 # 资产搜索功能已移除 - 智能搜索模块现在只搜索文档内容
-
-@router.get("/suggestions", summary="获取搜索建议")
-async def get_search_suggestions(
-    q: Optional[str] = Query(None, description="部分关键词"),
-    db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user)
-):
-    """获取搜索建议"""
-    try:
-        suggestions = []
-        
-        if q and len(q) >= 2:
-            # 从文档标题中获取建议
-            doc_titles = db.query(Document.title).filter(
-                Document.title.contains(q)
-            ).limit(3).all()
-            
-            for title in doc_titles:
-                if title[0] not in suggestions:
-                    suggestions.append(title[0])
-            
-            # 从文档描述中获取关键词建议
-            docs_with_desc = db.query(Document.description).filter(
-                Document.description.isnot(None),
-                Document.description.contains(q)
-            ).limit(5).all()
-            
-            # 从描述中提取包含搜索词的短语
-            import re
-            for desc_tuple in docs_with_desc:
-                desc = desc_tuple[0]
-                if desc:
-                    # 找到包含搜索词的句子片段
-                    sentences = re.split(r'[，。、；]', desc)
-                    for sentence in sentences:
-                        if q.lower() in sentence.lower() and len(sentence.strip()) > 0:
-                            # 提取关键短语（去掉过长的句子）
-                            if len(sentence.strip()) <= 50:
-                                clean_sentence = sentence.strip()
-                                if clean_sentence not in suggestions and len(suggestions) < 8:
-                                    suggestions.append(clean_sentence)
-            
-            # 资产搜索建议已移除 - 只提供文档相关建议
-        else:
-            # 返回热门搜索建议 - 仅文档相关
-            suggestions = [
-                "Nginx配置",
-                "数据库优化", 
-                "监控告警",
-                "故障排查",
-                "部署文档",
-                "API文档",
-                "运维手册",
-                "技术规范"
-            ]
-        
-        return {
-            "query": q,
-            "suggestions": suggestions[:10]  # 最多返回10个建议
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取搜索建议失败: {str(e)}")

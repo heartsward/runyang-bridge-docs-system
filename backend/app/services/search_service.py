@@ -101,6 +101,46 @@ class SearchService:
                     break
         
         return results
+
+    def search_terms_in_text(
+        self,
+        text: str,
+        terms: List[str],
+        max_matches_per_term: int = 20,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """多词联合搜索：一次遍历文本，同时匹配所有词（阶段二十·20.2）
+
+        与 search_in_text 的差异：
+        - 输入为词列表（已分词），单次逐行遍历完成全部词的匹配
+        - 返回 {term: [match, ...]}，每词最多 max_matches_per_term 条
+        - 某词零匹配时其值为空列表（调用方可据此判断命中词数）
+        """
+        if not text or not terms:
+            return {t: [] for t in terms}
+
+        # 预编译所有词的正则（去重，避免重复编译）
+        unique_terms = list(dict.fromkeys(terms))
+        patterns = {t: re.compile(re.escape(t), re.IGNORECASE) for t in unique_terms}
+
+        results: Dict[str, List[Dict[str, Any]]] = {t: [] for t in unique_terms}
+        done = set()
+
+        for line_num, line in enumerate(text.split('\n'), 1):
+            for term, pattern in patterns.items():
+                if term in done:
+                    continue
+                if pattern.search(line):
+                    results[term].append({
+                        'line_number': line_num,
+                        'content': line.strip(),
+                        'keyword': term,
+                    })
+                    if len(results[term]) >= max_matches_per_term:
+                        done.add(term)
+            if len(done) == len(patterns):
+                break
+
+        return results
     
     def extract_file_content(self, file_path: str) -> Optional[str]:
         """提取文件内容（阶段四：统一走新路由器）

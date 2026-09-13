@@ -1873,3 +1873,60 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 风险 2：anydoc 表格对**复杂合并单元格**的 GFM 表达与 openpyxl HTML 表格不同 → 前端 markdown-it 渲染 GFM 表格无问题；HTML 表格（colspan）场景 anydoc 输出为纯 GFM（可能丢失合并关系）→ 若业务发现台账类表格合并丢失，该格式可临时切回本地引擎（router 加白名单开关，本期不做）
 - 风险 3：`AI_ALL_FORMATS_AI` 删除后，用户之前若开过该开关（.env=true）行为变化 → .env 当前为 false，无实际影响；PUT 会清掉该 key
 - 风险 4：PDF 文本型从"VLM 整页识别"变为"anydoc 文本层" → 排版复杂的 PDF 文本层提取质量可能不如 VLM 渲染识别 → 空/短内容自动降级 VLM 兜住；用户如需强制 VLM 可后续加配置
+
+---
+
+## 阶段二十 — 智能搜索模块优化（2026-09-13，用户拍板方案 A）
+
+> 目标：① 去掉搜索建议 + 高级搜索（用户点名）② 主搜索支持**多词联合搜索**（空格分隔多词，命中词数加权排序）。
+> 关键事实（调研实测）：当前 43 篇/611KB，内存全量扫描 ~1.6ms，"不慢"但无多词能力。
+> **本期不接 FTS5**：wiki FTS 索引仅覆盖 11/43 篇（33 篇未入索引），作主路会漏召回；当前规模无速度压力（4300 篇才 ~109ms）。FTS 接线留待文档量上千后再做（届时需先解决"新文档自动入 wiki 索引"）。
+> 语义搜索（sqlite-vec + BGE-small-zh）列为后续候选，本期不做（需新增 embedding 模型部署）。
+
+### 步骤 20.1 — 前端清理：删搜索建议 + 高级搜索
+- **做什么**：
+  1. `SearchView.vue` 模板：删"搜索建议"卡（原 L89-100）、"相关建议"卡（原 L102-115）、"高级搜索" n-collapse 面板（原 L30-70，4 项筛选：范围/类型/时间/排序）
+  2. 删对应 script 状态与函数：`searchSuggestions`/`inputSuggestions`/`filters`/`documentTypes`/`sortOptions` 及 `handleInputChange`（实时建议 debounce 调用）、`loadSuggestions`（onMounted 里的建议拉取）
+  3. 删 `handleSearch` 中 `filters.value.type` 拼 `docParams.doc_type` 的逻辑
+- **能改什么**：`SearchView.vue`
+- **不能改什么**：搜索结果列表/统计/预览/下载逻辑（阶段十六的下载入口在结果卡片上，不动）
+- **怎么验**：`/search` 页无建议卡、无高级面板；搜索功能正常；vue-tsc 0 error
+- **回退方案**：git checkout SearchView.vue
+
+### 步骤 20.2 — 后端：删 suggestions 端点 + 多词联合搜索
+- **做什么**：
+  1. `search.py`：删 `/search/suggestions` 端点（L532-593）
+  2. `/search/documents` 重构检索核心：
+     - 新增 `tokenize_query(q)`：按空白/中英文标点切词，去重、去空、每词 ≤30 字符；单词时行为与现状一致（连续串匹配）
+     - 单词查询：保持现有"整体串正则"语义（召回不降）
+     - 多词查询：每词独立在 content/title/description 匹配；文档命中词数 = 各词命中计数；**命中词数多的排前**（同分再按现有 score）；结果附 `matched_terms` 与 `term_total`
+     - 打分沿用现有权重（content 0.8+ / title 0.6+ / desc 0.4+），多词时按命中词数加权
+  3. `search_service.py` 新增 `search_terms_in_text(text, terms) -> {term: [matches]}`（多词逐行匹配，一次遍历完成所有词，避免每词全文扫描）
+- **能改什么**：`search.py`、`search_service.py`
+- **不能改什么**：`/preview`、`/original` 端点；SearchLog 记录逻辑；`get_actual_file_path`
+- **怎么验**：单文档 404；单词搜索召回与改造前一致（抽 4 个词对比）；多词"交换机 配置"→ 同时含两词排前、只含一词在后、都不含不出现；`matched_terms` 正确
+- **回退方案**：git checkout search.py search_service.py
+
+### 步骤 20.3 — 前端：多词结果展示
+- **做什么**：
+  1. `SearchView.vue` 结果卡片：多词查询时显示"命中 X/Y 个词"标签；高亮从单词改为**每个词都高亮**（预览高亮参数传主串不变，列表卡片内多词高亮前端自行处理）
+  2. 搜索框 placeholder 提示多词用法（空格分隔）
+- **能改什么**：`SearchView.vue`
+- **不能改什么**：预览弹窗（DocumentView 逻辑不动）
+- **怎么验**：多词搜索列表卡片显示命中词数标签 + 多词高亮；单词搜索外观与现状一致
+- **回退方案**：git checkout SearchView.vue
+
+### 步骤 20.4 — 端到端验收 + 记忆库同步
+- **做什么**：
+  1. E2E：`/search` 页单词/多词/无结果/中英文混合各测一次；确认建议卡与高级面板消失
+  2. 性能：多词查询端到端 < 当前单词查询耗时（43 篇规模下）
+  3. `vue-tsc --noEmit` 0 error；后端重启 `/health` 200
+  4. 记忆库：`@architecture.md`（search.py 职责更新）、`@product-requirements-document.md`（F2 删"搜索建议/多维筛选"两行，加"多词联合搜索"）、`progress.md`、每日日志
+- **通过标准**：清理无残留（前端 UI + 后端端点）；多词搜索可用且排序合理；召回不降；性能不降
+- **回退方案**：N/A（验收不改代码）
+
+### 实施顺序与风险
+- 顺序：20.1 → 20.2 → 20.3 → 20.4
+- 风险 1：多词语义变化（"交换机配置"单串 → 用户加空格变两词）→ 不加空格时行为 100% 不变，只有显式空格/标点才触发多词模式
+- 风险 2：`/search/suggestions` 被其他前端位置引用 → 20.1 实施时全仓 grep 确认（已知仅 SearchView 两处）
+- 风险 3：多词打分细节（命中词权重）主观 → 用"命中词数为主、score 为辅"的保守排序，不引入新算法
