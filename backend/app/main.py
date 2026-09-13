@@ -75,15 +75,22 @@ def init_default_users():
                 created_user = crud_user.create(db, obj_in=admin_user)
                 print("OK: 默认管理员用户创建成功 (admin/admin123)")
             else:
-                # 检查现有admin用户是否具有管理员权限
+                # 检查现有admin用户是否具有管理员权限与激活状态
+                needs_save = False
                 if not existing_admin.is_superuser:
                     print("INFO: admin用户存在但缺少管理员权限，正在修复...")
                     existing_admin.is_superuser = True
+                    needs_save = True
+                if not existing_admin.is_active:
+                    print("INFO: admin用户存在但处于未激活，正在自动激活...")
+                    existing_admin.is_active = True
+                    needs_save = True
+                if needs_save:
                     db.add(existing_admin)
                     db.commit()
-                    print("OK: admin用户管理员权限已修复")
+                    print("OK: admin用户状态已修复")
                 else:
-                    print("OK: 管理员用户已存在且权限正常")
+                    print("OK: 管理员用户已存在且状态正常")
         finally:
             db.close()
     except Exception as e:
@@ -99,46 +106,76 @@ def startup_background_tasks():
     except Exception as e:
         print(f"后台任务处理器启动失败: {e}")
 
+# 阶段十五：MCP 的 lifespan 默认空实现；挂载 MCP 成功后在下方替换为真实上下文。
+# 主 lifespan 会在启动时 `async with mcp_lifespan(app)`，把 MCP 初始化纳入主启动流程，
+# 避免"用 mcp_app.lifespan 整体覆盖 app.router.lifespan_context"导致主应用 startup
+# （默认用户初始化 + 后台提取 worker）永远不执行。
+@asynccontextmanager
+async def _noop_lifespan(app: FastAPI):
+    yield
+
+mcp_lifespan = _noop_lifespan
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时执行
+    # 启动时执行（MCP 初始化与主应用启动同生命周期，统一在这里管理）
     print("=" * 50)
     print(f"启动 {settings.PROJECT_NAME} v{settings.VERSION}...")
     print("=" * 50)
-    
-    # 1. 验证bcrypt功能
-    print("[1/3] 验证密码哈希功能...")
-    bcrypt_ok = verify_bcrypt_functionality()
-    
-    # 2. 初始化默认用户
-    print("[2/3] 初始化用户系统...")
-    init_default_users()
-    
-    # 3. 启动后台任务
-    print("[3/3] 启动后台任务...")
-    startup_background_tasks()
-    
-    print("=" * 50)
-    if bcrypt_ok:
-        print("SUCCESS: 系统启动完成，所有功能正常")
-    else:
-        print("WARNING: 系统启动完成，但密码功能可能有问题")
-    print(f"API文档: http://localhost:8000/docs")
-    print(f"健康检查: http://localhost:8000/health")
-    print("=" * 50)
-    
-    yield
-    
+
+    async with mcp_lifespan(app):
+        # 1. 验证bcrypt功能
+        print("[1/3] 验证密码哈希功能...")
+        bcrypt_ok = verify_bcrypt_functionality()
+
+        # 2. 初始化默认用户
+        print("[2/3] 初始化用户系统...")
+        init_default_users()
+
+        # 3. 启动后台任务
+        print("[3/3] 启动后台任务...")
+        startup_background_tasks()
+
+        print("=" * 50)
+        if bcrypt_ok:
+            print("SUCCESS: 系统启动完成，所有功能正常")
+        else:
+            print("WARNING: 系统启动完成，但密码功能可能有问题")
+        print(f"API文档: http://localhost:8000/docs")
+        print(f"健康检查: http://localhost:8000/health")
+        print("=" * 50)
+
+        yield
+
     # 关闭时执行
     print("应用程序正在关闭...")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="运维文档管理系统后端API",
+    description="运维资产管理系统后端API",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+
+# 阶段十·W3：挂载 FastMCP（HTTP transport）
+# 注意：必须用 lifespan=mcp_app.lifespan，否则 FastMCP 内部 task group 不能初始化
+try:
+    from fastmcp import FastMCP
+    from app.services.wiki.mcp_server import register_tools
+
+    wiki_mcp = FastMCP("AI-Wiki")
+    register_tools(wiki_mcp)
+
+    mcp_app = wiki_mcp.http_app(path="/")
+    app.mount("/mcp", mcp_app)
+    # 阶段十五：不再覆盖 app.router.lifespan_context（那会让主应用 startup 不执行）。
+    # 改为把 MCP 的 lifespan 交给主 lifespan 在启动时 `async with` 调用。
+    mcp_lifespan = mcp_app.lifespan
+    print("AI Wiki MCP server 已挂载到 /mcp (HTTP transport)")
+except Exception as e:
+    print(f"WARN: FastMCP 挂载失败: {e}")
 
 # 设置CORS
 cors_origins = settings.BACKEND_CORS_ORIGINS

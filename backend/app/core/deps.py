@@ -82,14 +82,30 @@ def get_optional_user(
     """获取可选用户（允许匿名）"""
     if not credentials:
         return None
-    
+
     try:
         payload = verify_token(credentials.credentials)
         username: str = payload.get("sub")
         if username is None:
             return None
-        
+
         user = crud_user.get_by_username(db, username=username)
         return user
     except Exception:
         return None
+
+
+def require_test_endpoints_enabled() -> None:
+    """
+    测试/调试端点门禁依赖
+
+    当 ENABLE_TEST_ENDPOINTS=False（默认）时返回 404（伪装成端点不存在）
+    当 ENABLE_TEST_ENDPOINTS=True 时放行（开发/调试用）
+
+    使用方法：在端点签名上加 `Depends(require_test_endpoints_enabled)`
+    """
+    if not settings.ENABLE_TEST_ENDPOINTS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not Found",
+        )

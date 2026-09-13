@@ -6,6 +6,7 @@ import os
 import json
 import time
 import threading
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -114,44 +115,47 @@ class BackgroundTaskManager:
             logger.error(f"保存任务状态失败: {e}")
     
     def _worker_loop(self):
-        """后台任务处理循环"""
+        """后台任务处理循环（在线程中运行，桥接 asyncio）"""
+        import asyncio
         logger.info("后台任务处理循环已启动")
-        
+        asyncio.run(self._async_worker_loop())
+
+    async def _async_worker_loop(self):
+        logger.info("后台任务处理循环已启动")
+
         while self.is_running:
             try:
                 task = None
-                
                 # 从队列获取任务
                 with self.lock:
                     if self.task_queue:
                         task = self.task_queue.pop(0)
-                
+
                 if task:
-                    self._process_task(task)
+                    await self._process_task(task)
                 else:
                     # 没有任务时短暂休眠
-                    time.sleep(1)
-                    
+                    await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"后台任务处理异常: {e}")
-                time.sleep(5)  # 出错时等待5秒
+                await asyncio.sleep(5)  # 出错时等待5秒
     
-    def _process_task(self, task: Dict[str, Any]):
+    async def _process_task(self, task: Dict[str, Any]):
         """处理单个任务"""
         task_id = task["task_id"]
         task_type = task["task_type"]
-        
+
         logger.info(f"开始处理任务: {task_id} - {task_type}")
-        
+
         # 更新任务状态为进行中
         task["status"] = "processing"
         task["started_at"] = datetime.utcnow().isoformat()
         task["progress"] = 10
         self._save_task_status(task_id, task)
-        
+
         try:
             if task_type == "content_extraction":
-                self._process_content_extraction(task)
+                await self._process_content_extraction(task)
             else:
                 raise ValueError(f"未知任务类型: {task_type}")
                 
@@ -162,21 +166,20 @@ class BackgroundTaskManager:
             task["completed_at"] = datetime.utcnow().isoformat()
             self._save_task_status(task_id, task)
     
-    def _process_content_extraction(self, task: Dict[str, Any]):
+    async def _process_content_extraction(self, task: Dict[str, Any]):
         """处理内容提取任务"""
         document_id = task["document_id"]
         file_path = task["file_path"]
         title = task["title"]
         task_id = task["task_id"]
-        
+
         # 检查文件是否存在
         if not os.path.exists(file_path):
             raise Exception(f"文件不存在: {file_path}")
-        
+
         # 更新进度
         task["progress"] = 30
         self._save_task_status(task_id, task)
-        
         # 检查是否支持提取
         if not self.content_extractor.is_supported_file(file_path):
             raise Exception("不支持的文件格式")
@@ -185,9 +188,20 @@ class BackgroundTaskManager:
         task["progress"] = 50
         self._save_task_status(task_id, task)
         
-        # 开始提取内容
+        # 开始提取内容（阶段十：async 提取并保存 MD 副本）
         logger.info(f"开始提取文档内容: {title}")
-        content, error = self.content_extractor.extract_content(file_path)
+        from app.services.content_extractor import ContentExtractor as _CE
+        ce = self.content_extractor
+        # 优先用 async 版本（包含 MD 副本保存）
+        if hasattr(ce, 'extract_content_async'):
+            content, error = await ce.extract_content_async(
+                file_path,
+                doc_id=document_id,
+                source_filename=title,
+                doc_type=os.path.splitext(file_path)[1].lstrip('.').lower() or 'unknown',
+            )
+        else:
+            content, error = ce.extract_content(file_path)
         
         # 更新进度
         task["progress"] = 80

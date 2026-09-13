@@ -142,6 +142,13 @@ tests/__pycache__/
 *.p12
 
 # ===== 项目特定 =====
+# 运行时数据（AI Wiki MD 副本 + FTS5 索引，由系统生成，不进版本库）
+backend/wiki/
+backend/app/wiki/
+
+# 本地调试遗留
+token.txt
+
 # Alembic
 alembic/versions/
 

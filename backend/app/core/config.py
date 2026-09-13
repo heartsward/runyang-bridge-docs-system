@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     )
     
     # 项目基本信息
-    PROJECT_NAME: str = "运维文档管理系统"
+    PROJECT_NAME: str = "运维资产管理系统"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # 文件上传配置
     UPLOAD_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'uploads'))
     MAX_FILE_SIZE: int = 10485760  # 10MB
-    ALLOWED_EXTENSIONS: str = "pdf,doc,docx,txt,md,xls,xlsx,csv,jpg,jpeg,png,bmp,tiff,gif,webp"
+    ALLOWED_EXTENSIONS: str = "pdf,doc,docx,txt,md,xls,xlsx,csv,jpg,jpeg,png"
     
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379"
@@ -120,6 +120,38 @@ class Settings(BaseSettings):
     # 监控配置
     ENABLE_MONITORING: bool = False
     MONITORING_DATA_PATH: str = "./monitoring"
+
+    # 测试端点开关（生产环境必须 False；开发环境设 ENABLE_TEST_ENDPOINTS=true 启用）
+    ENABLE_TEST_ENDPOINTS: bool = False
+
+    # 阶段四：PDF / OCR 引擎选择（环境变量切换）
+    # PDF_ENGINE: pymupdf (默认，无需额外依赖) | mineru (需安装 MinerU + GPU)
+    PDF_ENGINE: str = "pymupdf"
+    # OCR_ENGINE: tesseract (默认) | paddleocr (中文 OCR 精度更高)
+    OCR_ENGINE: str = "tesseract"
+    # MinerU 配置
+    MINERU_ENABLED: bool = False
+    MINERU_DEVICE: str = "cuda"  # GPU 推理
+    # PaddleOCR 配置
+    PADDLEOCR_LANG: str = "ch"  # 中文模型
+
+    # 阶段七：统一多模态 AI（一个服务搞定 PDF + 图片解析）
+    # 推荐用 llama.cpp server 或 vLLM 起的 Qwen3-VL；也可指 DashScope/OpenAI 兼容端点
+    AI_SERVICE_URL: str = "http://localhost:8080/v1"  # llama.cpp server 默认端口
+    AI_SERVICE_PROVIDER: str = "openai"  # ollama | openai（llama.cpp server 走 openai 兼容）
+    AI_SERVICE_MODEL: str = "qwen3-vl-8b"  # 模型名（llama.cpp 不严格校验）
+    AI_SERVICE_ENABLED: bool = False
+    AI_SERVICE_API_KEY: str = ""  # 本地 llama.cpp 留空；在线服务填 key
+    AI_SERVICE_TIMEOUT: int = 120
+    AI_FALLBACK_TO_LOCAL: bool = True
+    # 阶段十三：是否让"所有格式"文档（docx/xlsx/txt 等）都走统一 AI 提取 md
+    # False（默认）：仅 PDF + 图片 调用 AI；True：全部格式先试 AI，失败降级本地引擎
+    AI_ALL_FORMATS_AI: bool = False
+    # 阶段十：AI 元数据生成（title/tags）开关
+    AI_METADATA_ENABLED: bool = True
+    # 阶段五遗留（高速 CPU 兜底，可选）
+    AI_OCR_SERVICE_URL: str = "http://localhost:8001"
+    AI_OCR_ENABLED: bool = False
     
     # 自定义配置
     ADMIN_EMAIL: str = "admin@runyang.com"
@@ -129,11 +161,11 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = ""  # 手动指定的CORS源（逗号分隔）
     CORS_CUSTOM_ORIGINS: str = ""  # 新增：自定义CORS源（为了兼容）
     CORS_MODE: str = "auto"  # 配置模式：auto/manual/mixed
-    CORS_AUTO_DETECT: bool = True  # 是否自动检测本机IP
+    CORS_AUTO_DETECT: bool = False  # 是否自动检测本机IP（默认关闭，避免生产环境意外暴露私网）
     CORS_INCLUDE_LOCALHOST: bool = True  # 是否包含localhost
-    CORS_INCLUDE_HTTPS: bool = True  # 是否包含HTTPS变体
+    CORS_INCLUDE_HTTPS: bool = False  # 是否包含HTTPS变体（开发环境通常为 http）
     CORS_FRONTEND_PORT: str = "5173"  # 前端端口（开发和生产统一）
-    CORS_EXTRA_PORTS: str = "3000,8080,9000,5174,5175"  # 额外端口（添加了5174和5175）
+    CORS_EXTRA_PORTS: str = ""  # 额外端口（默认空，按需通过环境变量启用）
     
     @property
     def BACKEND_CORS_ORIGINS(self) -> List[str]:
@@ -218,6 +250,39 @@ class Settings(BaseSettings):
             print(f"[CORS] 最终配置：{len(unique_origins)} 个源")
             return unique_origins
     
+    def reload(self) -> "Settings":
+        """从磁盘 .env 重新加载配置并刷新当前实例（热更新）。
+
+        Settings 单例在 import 时只读一次 .env；本方法用于"保存配置后立即生效"——
+        重新读取 .env，把变化同步到 self 的对应字段，避免必须重启进程。
+        返回 self 便于链式调用。
+        """
+        # 重新加载 .env 到 os.environ（dotenv 已加载过的变量会覆盖刷新）
+        try:
+            from dotenv import load_dotenv
+            env_file = self.model_config.get("env_file")
+            if env_file:
+                # override=True 确保 .env 里的新值覆盖进程启动时的旧值
+                load_dotenv(env_file, override=True)
+        except Exception:
+            # dotenv 缺失时退化为：仅用当前 os.environ 重建
+            pass
+
+        # 此时 .env 已刷新进 os.environ（环境变量优先级高于 dotenv 文件），
+        # 用当前环境重建一个新实例，再把这些字段搬回 self（property 等跳过）。
+        try:
+            fresh = Settings()
+            for name, _field in self.__class__.model_fields.items():
+                if name.startswith("_"):
+                    continue
+                attr = getattr(self.__class__, name, None)
+                if isinstance(attr, property):
+                    continue
+                setattr(self, name, getattr(fresh, name))
+        except Exception as e:
+            print(f"[config] Settings.reload 部分失败: {e}")
+        return self
+
     def _detect_local_ips(self) -> List[str]:
         """检测本机IP地址"""
         local_ips = []

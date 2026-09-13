@@ -10,6 +10,8 @@ from pathlib import Path
 
 # 导入现有的搜索服务来复用文件读取逻辑
 from app.services.search_service import SearchService
+from app.services.wiki.storage import WikiStorage, sanitize_title
+
 from app.services.ocr_extractor import OCRExtractor
 
 logger = logging.getLogger(__name__)
@@ -20,79 +22,153 @@ class ContentExtractor:
     def __init__(self):
         self.search_service = SearchService()
         self.ocr_extractor = OCRExtractor()
-        
+        self.wiki_storage = WikiStorage()
+
+    async def extract_content_async(
+        self,
+        file_path: str,
+        doc_id: Optional[int] = None,
+        source_filename: Optional[str] = None,
+        doc_type: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        异步版：提取后立即保存 MD 副本到 wiki 目录
+
+        Returns:
+            (markdown, error)
+        """
+        # 先调用同步的提取
+        result = self.extract_content(file_path)
+        # result 是 (content, error) 元组
+        markdown, error = result
+
+        # 保存到 wiki（如有 doc_id）
+        if markdown and doc_id is not None:
+            try:
+                from .wiki import generate_metadata_via_ai, derive_fallback_tags
+
+                filename = source_filename or Path(file_path).name
+                fallback_title = sanitize_title(filename)
+
+                # 调 AI 生成 title/tags
+                meta = await generate_metadata_via_ai(
+                    content_sample=markdown[:2000],
+                    fallback_title=fallback_title,
+                    fallback_tags=derive_fallback_tags(filename, markdown),
+                )
+
+                title = (meta or {}).get("title") or fallback_title
+                tags = (meta or {}).get("tags") or []
+
+                md_path = self.wiki_storage.write(
+                    doc_id=doc_id,
+                    title=title,
+                    source_file=filename,
+                    doc_type=doc_type or Path(file_path).suffix.lstrip(".").lower() or "unknown",
+                    tags=tags,
+                    markdown_body=markdown,
+                )
+
+                # 阶段十·W2：写入后立即建索引
+                try:
+                    from .wiki.index import WikiIndex
+                    WikiIndex().index_doc(doc_id, str(md_path))
+                except Exception as e:
+                    logger.exception(f"建索引失败 (doc_id={doc_id}): {e}")
+            except Exception as e:
+                logger.exception(f"保存 MD 副本失败 (doc_id={doc_id}): {e}")
+                # 不影响主流程
+
+        return result
+
     def extract_content(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:
         """
         提取文档内容
-        
+
+        阶段四：只走新路由器（app.services.extraction.ExtractionRouter）。
+        旧 LibreOffice 管线已删除；新路由器失败时直接返回错误。
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             Tuple[content, error]: (提取的内容, 错误信息)
         """
         try:
             if not os.path.exists(file_path):
                 return None, f"文件不存在: {file_path}"
-            
+
             # 获取文件大小
             file_size = os.path.getsize(file_path)
             size_mb = file_size / (1024 * 1024)
-            
+
             # 限制文件大小（避免处理过大的文件）
             max_size_mb = 50  # 最大50MB
             if file_size > max_size_mb * 1024 * 1024:
                 return None, f"文件过大: {size_mb:.2f}MB，超过{max_size_mb}MB限制"
-            
+
             logger.info(f"开始提取文件内容: {file_path} ({size_mb:.2f}MB)")
-            
-            # 检查文件类型
-            file_ext = Path(file_path).suffix.lower()
-            
-            # 对图片文件使用OCR提取
-            if self._is_image_file(file_ext):
-                content, error = self._extract_image_with_ocr(file_path)
-                if not content:
-                    return None, error or "图片OCR内容提取失败"
-            else:
-                # PDF和Office文档统一通过搜索服务处理（内部使用LibreOffice）
-                content = self.search_service.extract_file_content(file_path)
-            
-            if content:
-                try:
-                    # 确保内容是有效的UTF-8字符串
-                    if isinstance(content, bytes):
-                        # 如果是字节，尝试解码
+
+            # 新路由器
+            try:
+                from app.services.extraction import ExtractionRouter
+                router = ExtractionRouter()
+                result = router.extract(file_path)
+
+                if result.is_success:
+                    markdown = result.markdown
+
+                    # 写入结构化 JSON 备用（AI Wiki 等）
+                    if result.json_data:
                         try:
-                            content = content.decode('utf-8')
-                        except UnicodeDecodeError:
-                            try:
-                                content = content.decode('gbk')
-                            except UnicodeDecodeError:
-                                content = content.decode('utf-8', errors='ignore')
-                    
-                    # 清理无效字符
-                    content = content.replace('\x00', '')  # 移除空字符
-                    content = ''.join(char for char in content if ord(char) >= 32 or char in '\t\n\r')
-                    
-                    # 限制内容长度
-                    max_content_length = 1000000  # 1MB文本内容
-                    if len(content) > max_content_length:
-                        content = content[:max_content_length] + "\n\n[内容过长，已截断...]"
-                    
-                    logger.info(f"内容提取成功: {file_path}, 内容长度: {len(content)}")
-                    return content, None
-                    
-                except Exception as encoding_error:
-                    logger.error(f"内容编码处理失败: {encoding_error}")
-                    return None, f"内容编码处理失败: {str(encoding_error)}"
-            else:
-                return None, "无法提取文件内容"
-                
+                            import json as _json
+                            json_path = file_path + ".json"
+                            with open(json_path, "w", encoding="utf-8") as f:
+                                _json.dump(result.json_data, f, ensure_ascii=False, indent=2)
+                        except Exception:
+                            pass
+
+                    markdown = self._clean_markdown(markdown)
+
+                    logger.info(
+                        f"内容提取成功 (format={result.json_data.get('format')}): "
+                        f"{file_path}, 长度: {len(markdown)}"
+                    )
+                    return markdown, None
+
+                # 阶段四：不再 fallback 到旧管线，直接报错
+                logger.warning(f"提取失败: {result.error} | file={file_path}")
+                return None, result.error or "无法提取文件内容"
+
+            except Exception as e:
+                logger.exception(f"提取异常: {file_path}")
+                return None, f"内容提取异常: {str(e)}"
+
         except Exception as e:
             error_msg = f"内容提取失败: {str(e)}"
             logger.error(f"{error_msg} - 文件: {file_path}")
             return None, error_msg
+
+    @staticmethod
+    def _clean_markdown(content: str) -> str:
+        """清理 Markdown 文本"""
+        if not isinstance(content, str):
+            if isinstance(content, bytes):
+                try:
+                    content = content.decode('utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        content = content.decode('gbk')
+                    except UnicodeDecodeError:
+                        content = content.decode('utf-8', errors='ignore')
+
+        content = content.replace('\x00', '')
+        content = ''.join(ch for ch in content if ord(ch) >= 32 or ch in '\t\n\r')
+
+        max_content_length = 1000000  # 1MB
+        if len(content) > max_content_length:
+            content = content[:max_content_length] + "\n\n[内容过长，已截断...]"
+        return content
     
     
     def get_extraction_methods(self) -> dict:

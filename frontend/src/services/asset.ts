@@ -1,11 +1,9 @@
 import apiService from './api'
-import type { 
-  Asset, 
-  AssetCreate, 
-  AssetUpdate, 
+import type {
+  Asset,
+  AssetCreate,
+  AssetUpdate,
   AssetSearchQuery,
-  AssetExtractRequest,
-  AssetExtractResult,
   AssetStatistics
 } from '@/types/asset'
 import { NetworkLocation } from '@/types/asset'
@@ -67,34 +65,6 @@ export class AssetService {
   // 删除资产
   async deleteAsset(id: number): Promise<void> {
     await apiService.delete(`${this.baseURL}/${id}`)
-  }
-
-  // 从文档提取资产
-  async extractAssetsFromDocument(request: AssetExtractRequest): Promise<AssetExtractResult> {
-    const response = await apiService.post<AssetExtractResult>(`${this.baseURL}/extract`, request)
-    return response
-  }
-
-  // 获取文档相关的资产
-  async getAssetsByDocument(documentId: number): Promise<Asset[]> {
-    const response = await apiService.get<Asset[]>(`${this.baseURL}/document/${documentId}`)
-    return response
-  }
-
-  // 批量创建资产
-  async bulkCreateAssets(assets: AssetCreate[]): Promise<Asset[]> {
-    const response = await apiService.post<Asset[]>(`${this.baseURL}/bulk-create`, assets)
-    return response
-  }
-
-  // 合并资产
-  async mergeAssets(sourceIds: number[], targetId?: number): Promise<Asset> {
-    const response = await apiService.post<Asset>(`${this.baseURL}/merge`, {
-      source_ids: sourceIds,
-      target_id: targetId,
-      merge_strategy: 'smart'
-    })
-    return response
   }
 
   // 获取资产类型显示名称

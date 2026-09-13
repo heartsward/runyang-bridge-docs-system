@@ -203,14 +203,19 @@
                     <n-button size="small" @click.stop="previewDocument(result)">
                       预览内容
                     </n-button>
-                    <n-button 
-                      size="small" 
-                      type="primary" 
-                      @click.stop="downloadDocument(result.id)"
-                      style="background-color: #18a058; border-color: #18a058; color: white;"
+                    <n-dropdown
+                      trigger="click"
+                      :options="downloadMenuOptions"
+                      @select="(key: string) => downloadDocument(result.id, key, result.title)"
                     >
-                      下载
-                    </n-button>
+                      <n-button
+                        size="small"
+                        type="primary"
+                        style="background-color: #18a058; border-color: #18a058; color: white;"
+                      >
+                        下载
+                      </n-button>
+                    </n-dropdown>
                   </n-space>
                 </n-space>
               </n-space>
@@ -257,17 +262,22 @@
               </template>
               复制内容
             </n-button>
-            <n-button 
-              size="small" 
-              type="primary" 
-              @click="downloadDocument(previewDocumentData?.document_id)"
-              style="background-color: #18a058; border-color: #18a058; color: white;"
+            <n-dropdown
+              trigger="click"
+              :options="downloadMenuOptions"
+              @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title)"
             >
-              <template #icon>
-                <n-icon :component="DownloadOutline" />
-              </template>
-              下载文件
-            </n-button>
+              <n-button
+                size="small"
+                type="primary"
+                style="background-color: #18a058; border-color: #18a058; color: white;"
+              >
+                <template #icon>
+                  <n-icon :component="DownloadOutline" />
+                </template>
+                下载文件
+              </n-button>
+            </n-dropdown>
           </n-space>
         </n-space>
         
@@ -346,12 +356,18 @@
                 <n-space vertical align="center">
                   <n-text>文件名：{{ previewDocumentData.title }}</n-text>
                   <n-text depth="3">文件大小：{{ formatFileSize(previewDocumentData.file_size) }}</n-text>
-                  <n-button type="primary" @click="downloadDocument(previewDocumentData?.document_id)">
-                    <template #icon>
-                      <n-icon><DownloadOutline /></n-icon>
-                    </template>
-                    下载文件
-                  </n-button>
+                  <n-dropdown
+                    trigger="click"
+                    :options="downloadMenuOptions"
+                    @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title)"
+                  >
+                    <n-button type="primary">
+                      <template #icon>
+                        <n-icon><DownloadOutline /></n-icon>
+                      </template>
+                      下载文件
+                    </n-button>
+                  </n-dropdown>
                 </n-space>
               </template>
             </n-empty>
@@ -411,6 +427,7 @@ import {
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { apiService } from '@/services/api'
+import { downloadWikiDocument } from '@/utils/file-download'
 
 interface DocumentSearchResult {
   id: number
@@ -848,20 +865,23 @@ const copyContent = async () => {
   }
 }
 
-const downloadDocument = async (id: number | undefined) => {
+// 下载文档（阶段十六：与文档管理三个下载点统一——选 原文件 / Markdown，走 wiki 下载端点）
+const downloadMenuOptions = [
+  { label: '下载原文件', key: 'original' },
+  { label: '下载 Markdown（AI 编辑版）', key: 'markdown' },
+]
+
+const downloadDocument = async (id: number | undefined, type: 'original' | 'markdown' = 'original', title?: string) => {
   if (!id) {
     message.error('文档ID无效')
     return
   }
-  
   try {
-    message.info('开始下载文档...')
-    // 实际应该调用下载API
-    await apiService.download(`/documents/${id}/download`)
-    message.success('下载完成')
-  } catch (error) {
+    await downloadWikiDocument(id, type, title || `document_${id}`)
+    message.success(type === 'markdown' ? 'Markdown 已下载' : '原文件已下载')
+  } catch (error: any) {
     console.error('下载失败:', error)
-    message.error('下载失败')
+    message.error('下载失败' + (error?.message ? `：${error.message}` : ''))
   }
 }
 

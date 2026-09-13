@@ -28,6 +28,10 @@ aiofiles>=0.8.0
 httpx>=0.24.0                    # AI服务HTTP客户端
 chardet>=5.0.0
 
+# ============ AI Wiki MCP（数据查询服务） ============
+fastmcp>=4.0.0                   # Wiki 知识库 MCP server（/mcp 端点）
+PyYAML>=6.0                      # Wiki frontmatter 解析（wiki/storage.py 直接 import）
+
 # ============ 测试框架 ============
 pytest>=7.0.0
 pytest-asyncio>=0.20.0

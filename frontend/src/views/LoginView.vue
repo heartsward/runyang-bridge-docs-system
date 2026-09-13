@@ -8,7 +8,7 @@
             <n-icon :component="ServerOutline" size="120" />
             <n-h1 style="color: white; margin: 0;">润扬大桥运维资产管理系统</n-h1>
             <n-text style="color: rgba(255,255,255,0.8); font-size: 18px;">
-              智慧高速，工匠精神 - 专业运维文档管理平台
+              智慧高速，工匠精神 - 专业运维资产管理平台
             </n-text>
           </n-space>
         </n-grid-item>

@@ -307,15 +307,6 @@
           <n-switch v-model:value="extractForm.use_ai" />
           <n-text depth="3" style="margin-left: 8px;">启用AI智能提取（需配置AI服务）</n-text>
         </n-form-item>
-        <n-form-item label="AI提供商" v-if="extractForm.use_ai">
-          <n-select
-            v-model:value="extractForm.ai_provider"
-            :options="aiProviderOptions"
-            placeholder="选择AI提供商（默认使用第一个可用）"
-            clearable
-            style="width: 300px"
-          />
-        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -871,8 +862,6 @@ import {
 import PageLayout from '../components/PageLayout.vue'
 import { assetService, documentService, authService } from '@/services'
 import { getAssetTypes, updateAssetTypes, getDepartments, updateDepartments } from '@/services/system-config'
-import { getAIProviders } from '@/services/ai'
-import type { AIProvider } from '@/services/ai'
 import apiService from '@/services/api'
 import type { Asset, AssetCreate, AssetExtractRequest, AssetExtractResult, AssetStatistics } from '@/types/asset'
 import { AssetType, AssetStatus } from '@/types/asset'
@@ -890,8 +879,6 @@ const submitting = ref(false)
 const extracting = ref(false)
 const confirming = ref(false)
 const assets = ref<Asset[]>([])
-const aiProviders = ref<AIProvider[]>([])
-const currentUser = ref<User | null>(null)
 const statistics = ref<AssetStatistics>({
   total_count: 0,
   by_type: {},
@@ -960,6 +947,7 @@ const exportFormat = ref('excel')
 const exportFields = ref(['name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'network_location', 'department', 'status'])
 const fileList = ref<UploadFileInfo[]>([])
 const uploadRef = ref(null)
+const currentUser = ref<User | null>(null)
 
 // 单个资产编辑相关
 const showEditSingleAsset = ref(false)
@@ -1031,18 +1019,6 @@ const pagination = reactive({
 // 选项数据 - 设备类型（从后端加载）
 const editableAssetTypeOptions = ref<Array<{label: string, value: string}>>([])
 const assetTypeOptions = computed(() => editableAssetTypeOptions.value)
-
-// AI提供商选项
-const aiProviderOptions = computed(() => {
-  return aiProviders.value
-    .filter(p => p.is_available)
-    .map(p => ({
-      label: p.display_name,
-      value: p.name
-    }))
-})
-
-// 加载设备类型
 const loadAssetTypes = async () => {
   try {
     const types = await getAssetTypes()
@@ -1054,17 +1030,6 @@ const loadAssetTypes = async () => {
       label: assetService.getAssetTypeName(type),
       value: type
     }))
-  }
-}
-
-// 加载AI提供商列表
-const loadAIProviders = async () => {
-  try {
-    const providers = await getAIProviders()
-    aiProviders.value = providers
-  } catch (error) {
-    console.error('加载AI提供商列表失败:', error)
-    aiProviders.value = []
   }
 }
 
@@ -2008,7 +1973,7 @@ const confirmExtractedAssets = async () => {
     
     const token = authService.getToken()
     
-    const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract/confirm`, {
+    const response = await fetch(`${apiBaseUrl}/api/v1/assets/file-extract/single-confirm`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2638,7 +2603,6 @@ onMounted(async () => {
     loadAssetTypes(),
     loadDepartments(),
     loadNetworkLocations(),
-    loadAIProviders()
   ])
 })
 </script>

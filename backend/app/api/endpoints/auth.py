@@ -2,7 +2,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy.orm import Session
 from app.core.config import settings
-from app.core.deps import get_db, get_current_user
+from app.core.deps import get_db, get_current_user, require_test_endpoints_enabled
 from app.core.security import create_access_token
 from app.crud import user as crud_user
 from app.schemas.user import Token, User, UserCreate, PasswordChange
@@ -84,7 +84,7 @@ def read_users_me(
 
 
 @router.post("/test-token", response_model=User, summary="测试token")
-def test_token(current_user: User = Depends(get_current_user)):
+def test_token(_test: None = Depends(require_test_endpoints_enabled), current_user: User = Depends(get_current_user)):
     """
     测试访问令牌
     """

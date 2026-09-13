@@ -10,17 +10,20 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.deps import get_db, get_optional_user
 from app.core.config import settings
 from app.models.user import User
-from app.schemas.mobile import MobileBaseResponse
+from pydantic import BaseModel
 
 router = APIRouter()
 
 
-class SystemInfoResponse(MobileBaseResponse):
+class SystemInfoResponse(BaseModel):
     """系统信息响应"""
+    success: bool = True
+    message: str = "请求成功"
     data: Dict[str, Any]
 
 
@@ -41,7 +44,7 @@ async def get_system_info(
     try:
         # 系统基础信息
         system_info = {
-            "server_name": "润扬大桥运维文档管理系统",
+            "server_name": "润扬大桥运维资产管理系统",
             "version": "1.0.2",
             "api_version": "v1.1",
             "build_time": "2024-08-10",
@@ -83,49 +86,29 @@ async def get_system_info(
             "document_management": True,
             "asset_management": True,
             "intelligent_search": True,
-            "mobile_api": True,
             "voice_query": True,  # 准备支持
             "file_upload": True,
             "multi_file_upload": True,
             "analytics": False,
             "user_management": True,
-            "offline_cache": True,  # 移动端支持
+            "ai_wiki_mcp": True,  # AI 工作台通过 MCP 查询知识库
             "push_notifications": False  # 待实现
-        }
-        
-        # 移动端配置
-        mobile_config = {
-            "max_file_size": 10 * 1024 * 1024,  # 10MB
-            "supported_file_types": [
-                "pdf", "doc", "docx", "txt", "md", 
-                "xls", "xlsx", "csv", "jpg", "jpeg", "png"
-            ],
-            "cache_duration": 3600,  # 1小时
-            "pagination_size": 20,
-            "search_limit": 100,
-            "token_expiry_days": 30,
-            "refresh_token_expiry_days": 60
         }
         
         # API端点列表
         api_endpoints = {
             "authentication": {
                 "login": "/api/v1/auth/login",
-                "mobile_login": "/api/v1/mobile/auth/login", 
-                "refresh": "/api/v1/mobile/auth/refresh",
-                "profile": "/api/v1/mobile/auth/profile"
+                "me": "/api/v1/auth/me"
             },
             "documents": {
-                "list": "/api/v1/mobile/documents/",
-                "detail": "/api/v1/mobile/documents/{id}",
-                "search": "/api/v1/mobile/documents/search",
-                "upload": "/api/v1/upload/single",
+                "list": "/api/v1/documents/",
+                "detail": "/api/v1/documents/{id}",
                 "download": "/api/v1/documents/{id}/download"
             },
             "assets": {
-                "list": "/api/v1/mobile/assets/",
-                "detail": "/api/v1/mobile/assets/{id}",
-                "search": "/api/v1/mobile/assets/search"
+                "list": "/api/v1/assets/",
+                "detail": "/api/v1/assets/{id}"
             },
             "voice_query": {
                 "query": "/api/v1/voice/query",
@@ -150,7 +133,7 @@ async def get_system_info(
         # 数据库连接状态
         try:
             # 测试数据库连接
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
             database_status = {
                 "status": "connected",
                 "type": "SQLite",
@@ -168,7 +151,6 @@ async def get_system_info(
             "server_status": server_status,
             "platform": platform_info,
             "features": supported_features,
-            "mobile_config": mobile_config,
             "api_endpoints": api_endpoints,
             "security": security_info,
             "database": database_status,
@@ -199,12 +181,12 @@ async def health_check(
     """
     try:
         # 测试数据库连接
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         
         return {
             "status": "healthy",
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "service": "润扬大桥运维文档管理系统",
+            "service": "润扬大桥运维资产管理系统",
             "version": "1.0.2"
         }
         
@@ -227,7 +209,6 @@ async def get_version():
         "system_version": "1.0.2",
         "build_date": "2024-08-10",
         "features": {
-            "mobile_api": "1.0.0",
             "voice_query": "0.9.0",  # 开发中
             "core_features": "1.0.2"
         }
@@ -238,7 +219,6 @@ async def get_version():
 async def get_capabilities():
     """
     获取系统支持的功能能力
-    用于移动端动态调整功能
     """
     return {
         "document_formats": [
@@ -256,13 +236,6 @@ async def get_capabilities():
             "category_filter": True,
             "date_range_filter": True,
             "content_type_filter": True
-        },
-        "mobile_features": {
-            "offline_cache": True,
-            "background_sync": False,
-            "push_notifications": False,
-            "biometric_auth": False,
-            "voice_search": True  # 准备支持
         },
         "limits": {
             "max_file_size_mb": 10,

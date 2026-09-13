@@ -161,7 +161,7 @@
           :file-list="fileList"
           multiple
           @update:file-list="handleFileChange"
-          accept=".pdf,.doc,.docx,.txt,.md,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.bmp,.tiff,.gif,.webp"
+          accept=".pdf,.doc,.docx,.txt,.md,.xls,.xlsx,.csv,.jpg,.jpeg,.png"
         >
           <n-button>
             <template #icon>
@@ -202,6 +202,18 @@
           <n-radio-button value="extracted">提取内容</n-radio-button>
           <n-radio-button value="original">原文件</n-radio-button>
         </n-radio-group>
+
+        <!-- W4：编辑模式切换（仅管理员可编辑 Markdown 副本） -->
+        <n-button
+          v-if="currentUser?.is_superuser && previewMode === 'extracted'"
+          size="small"
+          type="primary"
+          @click="togglePreviewEdit"
+          :loading="savingPreviewEdit"
+        >
+          <template #icon><n-icon><PencilOutline /></n-icon></template>
+          {{ previewEditMode ? '退出编辑' : '编辑' }}
+        </n-button>
         
         <!-- 搜索高亮信息（仅在提取内容模式下显示） -->
         <n-space v-if="previewMode === 'extracted' && searchKeyword && highlightedCount > 0" size="small">
@@ -223,12 +235,22 @@
       </n-space>
 
       <div class="preview-container">
-        <!-- 提取内容模式 -->
-        <pre 
-          v-if="previewMode === 'extracted' || !shouldShowViewToggle(currentDocument)"
-          v-html="sanitizeDocumentHtml(previewContent)" 
-          class="preview-content-table"
-        ></pre>
+        <!-- 提取内容模式（阶段 3E：后端发 Markdown → 前端 markdown-it 渲染为 HTML → DOMPurify sanitize） -->
+        <div
+          v-if="(previewMode === 'extracted' || !shouldShowViewToggle(currentDocument)) && !previewEditMode"
+          v-html="renderedPreviewContent"
+          class="markdown-content"
+        ></div>
+
+        <!-- W4：编辑模式 textarea -->
+        <n-input
+          v-if="previewEditMode"
+          v-model:value="previewEditContent"
+          type="textarea"
+          :autosize="{ minRows: 15, maxRows: 30 }"
+          placeholder="编辑 Markdown 内容..."
+          style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
+        />
         
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
         <div v-else-if="shouldShowViewToggle(currentDocument) && previewMode === 'original'" class="original-file-preview">
@@ -256,12 +278,16 @@
                 <n-space vertical align="center">
                   <n-text>文件名：{{ currentDocument.title }}</n-text>
                   <n-text depth="3">文件大小：{{ formatFileSize(currentDocument.file_size) }}</n-text>
-                  <n-button type="primary" @click="downloadDocument(currentDocument!)">
-                    <template #icon>
-                      <n-icon><DownloadOutline /></n-icon>
-                    </template>
-                    下载文件
-                  </n-button>
+                  <n-dropdown
+                    trigger="click"
+                    :options="downloadMenuOptions"
+                    @select="(key: string) => downloadDocument(currentDocument!, key)"
+                  >
+                    <n-button type="primary">
+                      <template #icon><n-icon><DownloadOutline /></n-icon></template>
+                      下载文件
+                    </n-button>
+                  </n-dropdown>
                 </n-space>
               </template>
             </n-empty>
@@ -271,8 +297,27 @@
     </div>
     <template #footer>
       <n-space justify="end">
-        <n-button @click="showPreviewModal = false">关闭</n-button>
-        <n-button type="primary" @click="downloadDocument(currentDocument!)" v-if="currentDocument">下载</n-button>
+        <!-- W4：编辑模式时显示保存/取消 -->
+        <template v-if="previewEditMode">
+          <n-button @click="cancelPreviewEdit">取消</n-button>
+          <n-button type="primary" @click="savePreviewEdit" :loading="savingPreviewEdit">
+            保存
+          </n-button>
+        </template>
+        <template v-else>
+          <n-button @click="showPreviewModal = false">关闭</n-button>
+          <n-dropdown
+            v-if="currentDocument"
+            trigger="click"
+            :options="downloadMenuOptions"
+            @select="(key: string) => downloadDocument(currentDocument!, key)"
+          >
+            <n-button type="primary">
+              <template #icon><n-icon><DownloadOutline /></n-icon></template>
+              下载
+            </n-button>
+          </n-dropdown>
+        </template>
       </n-space>
     </template>
   </n-modal>
@@ -298,8 +343,17 @@
     <template #footer>
       <n-space justify="end">
         <n-button @click="showDetailModal = false">关闭</n-button>
-        <n-button type="primary" @click="previewDocument(currentDocument!)" v-if="currentDocument">预览</n-button>
-        <n-button type="info" @click="downloadDocument(currentDocument!)" v-if="currentDocument">下载</n-button>
+        <n-dropdown
+          v-if="currentDocument"
+          trigger="click"
+          :options="downloadMenuOptions"
+          @select="(key: string) => downloadDocument(currentDocument!, key)"
+        >
+          <n-button type="info">
+            <template #icon><n-icon><DownloadOutline /></n-icon></template>
+            下载
+          </n-button>
+        </n-dropdown>
       </n-space>
     </template>
   </n-modal>
@@ -434,6 +488,7 @@ import {
   NTag,
   NText,
   NModal,
+  NDropdown,
   NForm,
   NFormItem,
   NSelect,
@@ -454,12 +509,14 @@ import {
   useMessage,
   useDialog
 } from 'naive-ui'
-import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline } from '@vicons/ionicons5'
+import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline, PencilOutline } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { documentService, uploadService, authService, taskService } from '@/services'
+import { wikiService } from '@/services/wiki'
 import type { Document, Category, User } from '@/types/api'
 import apiService from '@/services/api'
 import { debounce } from '@/utils'
+import { downloadWikiDocument } from '@/utils/file-download'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -468,6 +525,14 @@ const debouncedSearchQuery = ref('')
 
 // XSS防护
 const { sanitizeDocumentHtml } = useSafeHtml()
+// Markdown 渲染（阶段 3E：后端发 Markdown → 前端先渲染为 HTML 再 sanitize）
+import { renderDocumentMarkdown, renderDocumentMarkdownHtml } from '@/utils/markdown-renderer'
+
+// 计算属性：根据 searchKeyword 生成渲染后的 HTML
+const renderedPreviewContent = computed(() => {
+  if (!previewContent.value) return ''
+  return renderDocumentMarkdownHtml(previewContent.value)
+})
 const showUploadModal = ref(false)
 const showConflictModal = ref(false)
 const uploading = ref(false)
@@ -487,6 +552,11 @@ const previewLoading = ref(false)
 const previewMode = ref<'extracted' | 'original'>('extracted')
 const currentDocument = ref<Document | null>(null)
 const editLoading = ref(false)
+
+// W4：预览编辑模式
+const previewEditMode = ref(false)
+const previewEditContent = ref('')
+const savingPreviewEdit = ref(false)
 
 // 搜索相关状态
 const searchKeyword = ref('')  // 存储当前搜索关键词用于高亮
@@ -705,12 +775,15 @@ const columns = [
         }, {
           default: () => '预览'
         }),
-        h(NButton, {
-          size: 'small',
-          type: 'info',
-          onClick: () => downloadDocument(row)
+        h(NDropdown, {
+          trigger: 'click',
+          options: downloadMenuOptions,
+          onSelect: (key: string) => downloadDocument(row, key)
         }, {
-          default: () => '下载'
+          default: () => h(NButton, {
+            size: 'small',
+            type: 'info'
+          }, { default: () => '下载' })
         }),
         // 只有管理员才能看到编辑和删除按钮
         ...(currentUser.value?.is_superuser ? [
@@ -1040,7 +1113,7 @@ const previewDocument = async (document: Document, keyword: string = '') => {
       // 后端已处理高亮，统计数量
       updateHighlightCount()
     }
-    
+
     // 文档访问统计已在后端预览API中自动记录，无需前端额外调用
   } catch (error) {
     console.error('预览文档失败:', error)
@@ -1052,33 +1125,77 @@ const previewDocument = async (document: Document, keyword: string = '') => {
   }
 }
 
-// 前端补充关键词高亮处理
+// W4：切换编辑模式（拉取 MD 副本，渲染到 textarea）
+const togglePreviewEdit = async () => {
+  if (previewEditMode.value) {
+    cancelPreviewEdit()
+    return
+  }
+  if (!currentDocument.value) return
+  try {
+    const { content } = await wikiService.getMarkdown(currentDocument.value.id)
+    previewEditContent.value = content
+    previewEditMode.value = true
+  } catch (e: any) {
+    message.error('加载 MD 副本失败：' + (e?.message || '未知错误'))
+  }
+}
+
+// W4：取消编辑（恢复渲染模式）
+const cancelPreviewEdit = () => {
+  previewEditMode.value = false
+  previewEditContent.value = ''
+}
+
+// W4：保存编辑（调后端 PUT → 自动重建索引）
+const savePreviewEdit = async () => {
+  if (!currentDocument.value) return
+  savingPreviewEdit.value = true
+  try {
+    const result = await wikiService.saveMarkdown(
+      currentDocument.value.id,
+      previewEditContent.value,
+    )
+    if (result.success) {
+      message.success('已保存并重建索引')
+      // 刷新预览内容
+      previewContent.value = previewEditContent.value
+      cancelPreviewEdit()
+    } else {
+      message.error('保存失败')
+    }
+  } catch (e: any) {
+    message.error('保存失败：' + (e?.message || '未知错误'))
+  } finally {
+    savingPreviewEdit.value = false
+  }
+}
+
+// 前端补充关键词高亮处理（阶段 3E：先渲染后注入 mark）
+// 设计：直接修改 previewContent（Markdown 源），但用占位符策略避开 markdown-it 转义
+// 占位符: H_<index>_（在 markdown-renderer.ts 的 placeholdersToMark 中替换为 <mark>）
 const applyClientHighlight = (keyword: string) => {
   if (!keyword || !previewContent.value) return
-  
+
   try {
-    // 创建正则表达式，忽略大小写，避免在HTML标签内匹配
     const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regex = new RegExp(`(?!<[^>]*)(${escapedKeyword})(?![^<]*>)`, 'gi')
-    
-    // 对预览内容应用高亮，添加索引用于导航
+    const regex = new RegExp(`(${escapedKeyword})`, 'gi')
+
     let highlightIndex = 0
-    const highlightedContent = previewContent.value.replace(regex, (match, p1) => {
-      return `<mark data-highlight-index="${highlightIndex++}">${p1}</mark>`
+    const highlightedContent = previewContent.value.replace(regex, () => {
+      const placeholder = `H_${highlightIndex}_`
+      highlightIndex++
+      return placeholder
     })
-    
-    // 更新预览内容
+
     previewContent.value = highlightedContent
-    
-    // 更新高亮计数
     highlightedCount.value = highlightIndex
     currentHighlightIndex.value = 0
-    
-    // 自动跳转到第一个高亮位置
+
     if (highlightIndex > 0) {
       setTimeout(() => scrollToHighlight(0), 100)
     }
-    
+
     console.log(`Applied client-side highlighting: ${highlightIndex} matches for "${keyword}"`)
   } catch (error) {
     console.error('前端高亮处理失败:', error)
@@ -1151,79 +1268,20 @@ const scrollToHighlight = (direction: number) => {
   }, 100)
 }
 
-// 下载文档
-const downloadDocument = async (doc: Document) => {
+// 下载文档（阶段十·W5：支持选择 原文件 / MD）
+const downloadMenuOptions = [
+  { label: '下载原文件', key: 'original' },
+  { label: '下载 Markdown（AI 编辑版）', key: 'markdown' },
+]
+
+const downloadDocument = async (doc: Document, type: 'original' | 'markdown' = 'original') => {
   try {
-    // 使用动态地址检测，支持多机器访问
-    const currentHost = window.location.hostname
-    const currentProtocol = window.location.protocol
-    let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
-    
-    // 如果没有环境变量配置，自动推断API地址
-    if (!apiBaseUrl) {
-      if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
-        // 如果是通过IP访问，使用相同IP的8002端口
-        apiBaseUrl = `${currentProtocol}//${currentHost}:8002`
-      } else {
-        // 本地访问使用localhost
-        apiBaseUrl = 'http://localhost:8002'
-      }
-    }
-    
-    const token = localStorage.getItem('access_token')
-    
-    const response = await fetch(`${apiBaseUrl}/api/v1/documents/${doc.id}/download`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    
-    if (!response.ok) {
-      throw new Error(`下载失败: ${response.status}`)
-    }
-    
-    // 获取文件数据 - 保持原始响应类型
-    const blob = await response.blob()
-    
-    // 创建安全的下载链接
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    
-    // 尝试从响应头获取文件名，否则使用文档标题
-    let filename = doc.title
-    const contentDisposition = response.headers.get('content-disposition')
-    
-    if (contentDisposition) {
-      // 更严格的文件名解析
-      const filenameMatch = contentDisposition.match(/filename\*?=['"]?([^'"\r\n]*)['"]?/i)
-      if (filenameMatch && filenameMatch[1]) {
-        filename = decodeURIComponent(filenameMatch[1])
-      }
-    }
-    
-    // 如果文件名没有扩展名，尝试从文档的file_path中获取
-    if (!filename.includes('.') && doc.file_path) {
-      const originalFilename = doc.file_path.split('/').pop() || doc.file_path.split('\\').pop()
-      if (originalFilename) {
-        filename = originalFilename
-      }
-    }
-    
-    link.download = filename
-    link.style.display = 'none'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    
-    // 清理URL对象
-    window.URL.revokeObjectURL(url)
-    
-    message.success('下载成功')
-  } catch (error) {
+    // 阶段十六：统一走共享下载工具（三个下载点同一逻辑/同一端点）
+    await downloadWikiDocument(doc.id, type, doc.title)
+    message.success(type === 'markdown' ? 'Markdown 已下载' : '原文件已下载')
+  } catch (error: any) {
     console.error('下载文档失败:', error)
-    message.error('下载失败')
+    message.error('下载失败' + (error?.message ? `：${error.message}` : ''))
   }
 }
 
@@ -1777,6 +1835,127 @@ const getFileUrl = (document: Document | null): string => {
 }
 
 .preview-content-table mark.active-highlight {
+  background-color: #ffc107;
+  color: #212529;
+  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
+  font-weight: bold;
+}
+
+/* 阶段 3E：Markdown 渲染样式（替代旧的 preview-content-table） */
+.markdown-content {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #24292e;
+  background-color: #ffffff;
+  padding: 24px;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
+  margin: 0;
+  width: 100%;
+  min-width: 800px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 8px;
+}
+
+.markdown-content h1 { font-size: 2em; }
+.markdown-content h2 { font-size: 1.5em; }
+.markdown-content h3 { font-size: 1.25em; border-bottom: none; }
+.markdown-content h4 { font-size: 1em; border-bottom: none; }
+
+.markdown-content p {
+  margin: 0 0 16px 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0 0 16px 0;
+  padding-left: 32px;
+}
+
+.markdown-content li {
+  margin: 4px 0;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 16px 0;
+  width: auto;
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.markdown-content table th,
+.markdown-content table td {
+  border: 1px solid #d0d7de;
+  padding: 6px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-content table th {
+  background-color: #f6f8fa;
+  font-weight: 600;
+}
+
+.markdown-content code {
+  background-color: #f6f8fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.markdown-content pre {
+  background-color: #f6f8fa;
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.markdown-content pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid #d0d7de;
+  padding-left: 16px;
+  color: #57606a;
+  margin: 16px 0;
+}
+
+.markdown-content hr {
+  border: 0;
+  border-top: 2px solid #eaecef;
+  margin: 24px 0;
+}
+
+.markdown-content mark {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.markdown-content mark.active-highlight {
   background-color: #ffc107;
   color: #212529;
   box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);

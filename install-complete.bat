@@ -7,12 +7,19 @@ echo ==========================================
 echo.
 
 echo Checking Python...
+set "PYTHON_EXE="
 python --version >nul 2>&1
-if errorlevel 1 (
+if not errorlevel 1 (
+    set "PYTHON_EXE=python"
+) else (
+    for /d %%V in ("%USERPROFILE%\.workbuddy\binaries\python\versions\3.*") do if exist "%%V\python.exe" set "PYTHON_EXE=%%V\python.exe"
+)
+if not defined PYTHON_EXE (
     echo ERROR: Python not found
     pause
     exit /b 1
 )
+echo Using Python: %PYTHON_EXE%
 
 echo Checking Node.js...
 node --version >nul 2>&1
@@ -28,7 +35,7 @@ cd backend
 
 echo Creating virtual environment...
 if not exist venv (
-    python -m venv venv
+    %PYTHON_EXE% -m venv venv
     if errorlevel 1 (
         echo ERROR: Virtual environment creation failed
         pause
@@ -36,11 +43,17 @@ if not exist venv (
     )
 )
 
+if not exist "venv\Scripts\python.exe" (
+    echo ERROR: Virtual environment is broken, please delete backend\venv and retry
+    pause
+    exit /b 1
+)
+
 echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
 echo Upgrading pip...
-python -m pip install --upgrade pip >nul
+venv\Scripts\python -m pip install --upgrade pip >nul
 
 echo Installing from requirements file...
 if exist "requirements-windows.txt" (
@@ -83,20 +96,31 @@ if errorlevel 1 (
 )
 
 echo.
-echo Verifying OCR dependencies for production...
-python -c "import pytesseract; print('✓ pytesseract installed')" 2>nul || (
-    echo ⚠ pytesseract missing, installing...
-    pip install pytesseract>=0.3.10
+echo Verifying core dependencies...
+venv\Scripts\python -c "import fastapi, uvicorn, sqlalchemy, jose, passlib, pydantic; print('OK core web/auth deps')" 2>nul || (
+    echo [WARN] core deps import failed, please check pip output above
 )
 
-python -c "import pdf2image; print('✓ pdf2image installed')" 2>nul || (
-    echo ⚠ pdf2image missing, installing...
-    pip install pdf2image>=1.16.0
+venv\Scripts\python -c "import yaml, fastmcp; print('OK AI Wiki MCP deps')" 2>nul || (
+    echo [WARN] yaml or fastmcp missing, installing...
+    venv\Scripts\python -m pip install PyYAML fastmcp
 )
 
-python -c "import cv2; print('✓ opencv installed')" 2>nul || (
-    echo ⚠ opencv missing, installing...
-    pip install opencv-python-headless>=4.7.0
+venv\Scripts\python -c "import pytesseract; print('OK pytesseract')" 2>nul || (
+    echo [WARN] pytesseract missing, installing...
+    venv\Scripts\python -m pip install pytesseract
+)
+
+venv\Scripts\python -c "import cv2; print('OK opencv')" 2>nul || (
+    echo [WARN] opencv missing, installing...
+    venv\Scripts\python -m pip install opencv-python-headless
+)
+
+echo.
+echo Verifying app startup...
+venv\Scripts\python -c "from app.main import app; paths=[getattr(r,'path','') for r in app.routes]; print('OK: app.main imports; /mcp mounted' if any('mcp' in p for p in paths) else 'WARN: app.main imports but /mcp NOT mounted')" 2>&1
+if errorlevel 1 (
+    echo [WARN] app import check failed, check pip output above
 )
 
 call venv\Scripts\deactivate.bat
@@ -114,8 +138,7 @@ if errorlevel 1 (
 echo.
 echo Testing database connection...
 cd ..\backend
-call venv\Scripts\activate.bat
-python -c "from app.db.database import engine; print('Database connection OK')" 2>nul
+venv\Scripts\python -c "from app.db.database import engine; print('Database connection OK')" 2>nul
 if errorlevel 1 (
     echo Database will be initialized on first run
 )

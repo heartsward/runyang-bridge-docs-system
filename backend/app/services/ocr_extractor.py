@@ -9,9 +9,9 @@ from typing import Optional, Tuple
 from pathlib import Path
 
 try:
-    import fitz  # PyMuPDF
+    import pymupdf  # PyMuPDF (formerly `fitz`)
 except ImportError:
-    fitz = None
+    pymupdf = None
 
 try:
     from PIL import Image
@@ -57,11 +57,11 @@ class OCRExtractor:
     
     def is_scanned_pdf(self, file_path: str) -> bool:
         """检查是否为扫描版PDF"""
-        if not fitz:
+        if not pymupdf:
             return False
-            
+
         try:
-            doc = fitz.open(file_path)
+            doc = pymupdf.open(file_path)
             
             # 检查前3页
             scanned_pages = 0
@@ -98,23 +98,23 @@ class OCRExtractor:
         """从扫描版PDF提取文本"""
         if not self.tesseract_available:
             return None, "OCR功能不可用：需要安装pytesseract和Tesseract"
-        
-        if not fitz:
+
+        if not pymupdf:
             return None, "需要PyMuPDF库"
-        
+
         try:
-            doc = fitz.open(file_path)
+            doc = pymupdf.open(file_path)
             extracted_texts = []
-            
+
             page_count = min(len(doc), max_pages)
             logger.info(f"开始OCR处理，页数: {page_count}")
-            
+
             for page_num in range(page_count):
                 try:
                     page = doc.load_page(page_num)
-                    
+
                     # 将页面转为图像
-                    mat = fitz.Matrix(2.0, 2.0)  # 提高分辨率
+                    mat = pymupdf.Matrix(2.0, 2.0)  # 提高分辨率
                     pix = page.get_pixmap(matrix=mat)
                     img_data = pix.tobytes("png")
                     

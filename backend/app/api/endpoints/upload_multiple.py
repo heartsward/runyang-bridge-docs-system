@@ -1,7 +1,7 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from app.core.deps import get_db, get_current_active_user
+from app.core.deps import get_db, get_current_active_user, require_test_endpoints_enabled
 from app.models.user import User
 from app.schemas.document import Document
 
@@ -48,6 +48,6 @@ async def upload_multiple_files(
     return results
 
 @router.get("/test", summary="测试端点")
-async def test_endpoint():
+async def test_endpoint(_test: None = Depends(require_test_endpoints_enabled)):
     """测试端点"""
     return {"message": "多文件上传路由器工作正常"}

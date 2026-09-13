@@ -87,83 +87,105 @@ def validate_file_content(file: UploadFile) -> bool:
 
 
 def _validate_text_file(file_header: bytes) -> bool:
-    """验证文本文件内容"""
-    # 检查常见的BOM标记
-    bom_signatures = [
-        b'\xff\xfe',        # UTF-16 LE
-        b'\xfe\xff',        # UTF-16 BE  
-        b'\xef\xbb\xbf',    # UTF-8 BOM
-    ]
-    
-    # 如果有BOM标记，直接通过
-    for bom in bom_signatures:
-        if file_header.startswith(bom):
-            return True
-    
-    # 对于无BOM的文件，进行内容检测
-    try:
-        # 尝试多种编码方式解码
-        encodings = ['utf-8', 'ascii', 'gbk', 'utf-16']
-        
-        for encoding in encodings:
-            try:
-                decoded_content = file_header.decode(encoding)
-                
-                # 检查内容是否主要是可打印字符
-                if _is_likely_text_content(decoded_content):
-                    return True
-                    
-            except (UnicodeDecodeError, UnicodeError):
-                continue
-        
-        # 如果所有编码都失败，进行二进制内容检查
-        return _is_safe_binary_content(file_header)
-        
-    except Exception:
-        return False
+    """验证文本文件内容（修复中文 Markdown 误判 + 保留危险签名拒绝）
 
+    验证顺序：
+    1. 空文件 → accept
+    2. 危险签名（MZ/ELF/PHP/Shell）→ **直接 reject**（先于编码检查，避免误通过）
+    3. UTF-8 BOM / UTF-16 BOM → accept
+    4. UTF-8 decode (errors='replace') + 70% printable → accept
+    5. GBK fallback + 70% printable → accept
+    6. 最后二进制安全检查（应对确实非文本的二进制）
+    """
+    if not file_header:
+        return True  # 空文件当作合法文本
 
-def _is_likely_text_content(content: str) -> bool:
-    """检查内容是否像文本文件"""
-    if not content:
-        return True  # 空文件认为是合法文本文件
-    
-    # 计算可打印字符的比例（更宽松的标准）
-    printable_chars = sum(1 for char in content if char.isprintable() or char in '\r\n\t\x0b\x0c')
-    printable_ratio = printable_chars / len(content)
-    
-    # 降低门槛：如果80%以上是可打印字符，认为是文本文件
-    return printable_ratio >= 0.8
-
-
-def _is_safe_binary_content(file_header: bytes) -> bool:
-    """检查二进制内容是否安全（用于无法解码的文件）"""
-    # 检查是否包含危险的可执行文件标记
+    # 第 1 步：危险签名检查（最高优先级，防止 <?php 等被误判为正常文本）
     dangerous_signatures = [
         b'MZ',              # DOS/Windows executable
-        b'\x7fELF',         # ELF executable  
+        b'\x7fELF',         # ELF executable
         b'\xca\xfe\xba\xbe', # Mach-O executable
         b'<?php',           # PHP script
-        b'<script',         # JavaScript
         b'#!/bin/',         # Shell script
         b'#!/usr/bin/',     # Shell script
     ]
-    
-    # 如果包含危险签名，拒绝
+    header_lower = file_header.lower()
     for signature in dangerous_signatures:
-        if signature in file_header.lower():
+        if signature in header_lower:
             return False
-    
+
+    # 第 2 步：BOM 检测（已知编码直接通过）
+    if file_header.startswith(b'\xef\xbb\xbf'):           # UTF-8 BOM
+        return True
+    if file_header.startswith(b'\xff\xfe') or file_header.startswith(b'\xfe\xff'):  # UTF-16 LE/BE
+        return True
+
+    # 第 3 步：UTF-8 解码（errors='replace' 容忍末尾截断）
+    try:
+        decoded = file_header.decode('utf-8', errors='replace')
+        if _is_likely_text_content(decoded):
+            return True
+    except Exception:
+        pass
+
+    # 第 4 步：GBK fallback（中文 Windows 常见）
+    try:
+        decoded = file_header.decode('gbk', errors='replace')
+        if _is_likely_text_content(decoded):
+            return True
+    except Exception:
+        pass
+
+    # 第 5 步：二进制安全检查（含 <script> 检查）
+    return _is_safe_binary_content(file_header)
+
+
+def _is_likely_text_content(content: str) -> bool:
+    """检查内容是否像文本文件（70% 阈值 + 替换字符 ≤ 5%）
+
+    规则：
+    - 末尾截断产生 1 个 \ufffd 是允许的（不计入 printable 也不算坏）
+    - 如果 \ufffd 占比 > 5%，说明原文不是合法编码（可能是二进制），拒绝
+    """
+    if not content:
+        return True
+
+    # 替换字符过多 → 真二进制（不是末尾单字节截断）
+    replacement_count = content.count('\ufffd')
+    if replacement_count / len(content) > 0.05:
+        return False
+
+    printable_chars = sum(1 for char in content if char.isprintable() or char in '\r\n\t\x0b\x0c')
+    printable_ratio = printable_chars / len(content)
+
+    # 70% 阈值：足够排除明显二进制，但接受含表格/标记的中文 Markdown
+    return printable_ratio >= 0.7
+
+
+def _is_safe_binary_content(file_header: bytes) -> bool:
+    """检查二进制内容是否安全（用于确实非文本的文件）
+
+    注：MZ/ELF/PHP/Shell 头已在外层 _validate_text_file 第 1 步检查；
+    此处主要处理 JS 与纯二进制场景。
+    """
+    dangerous_signatures = [
+        b'<script',         # JavaScript
+    ]
+
+    header_lower = file_header.lower()
+    for signature in dangerous_signatures:
+        if signature in header_lower:
+            return False
+
     # 检查二进制内容的可打印字符比例
     try:
         printable_bytes = sum(1 for byte in file_header if 32 <= byte <= 126 or byte in [9, 10, 13, 11, 12])
         if len(file_header) > 0:
             printable_ratio = printable_bytes / len(file_header)
-            # 降低门槛：如果60%以上是可打印ASCII，可能是文本文件
             return printable_ratio >= 0.6
     except Exception:
         pass
-    
+
     return False
 
 

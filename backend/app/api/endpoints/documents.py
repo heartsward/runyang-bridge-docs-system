@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 import os
-from app.core.deps import get_db, get_current_active_user, get_optional_user
+from app.core.deps import get_db, get_current_active_user
 from app.crud import document as crud_document
 from app.models.user import User
 from app.models.document import Document as DocumentModel
@@ -79,10 +79,10 @@ def read_documents(
     category_id: Optional[int] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
-    获取文档列表
+    获取文档列表（需登录）
     """
     documents = crud_document.get_multi(
         db, skip=skip, limit=limit, 
@@ -122,7 +122,7 @@ def read_document(
     *,
     db: Session = Depends(get_db),
     document_id: int,
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     获取指定文档的详细信息
@@ -479,7 +479,7 @@ def download_document(
     *,
     db: Session = Depends(get_db),
     document_id: int,
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     下载文档文件
@@ -661,97 +661,4 @@ async def analyze_document(
             "success": False,
             "error": str(e),
             "message": "文档分析失败"
-        }
-
-@router.get("/ai/providers")
-async def get_ai_providers(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """获取可用的AI提供商列表"""
-    try:
-        from app.services.ai.ai_config import AIProvider
-        
-        providers_info = []
-        for provider in AIProvider:
-            provider_info = {
-                "name": provider,
-                "display_name": {
-                    AIProvider.OPENAI: "OpenAI",
-                    AIProvider.ANTHROPIC: "Anthropic",
-                    AIProvider.ALIBABA: "阿里云通义",
-                    AIProvider.ZHIPU: "智谱AI",
-                    AIProvider.MINIMAX: "MiniMax"
-                }.get(provider, provider),
-                "is_available": False
-            }
-            
-            # 检查是否有配置
-            if provider == AIProvider.OPENAI:
-                from app.services.ai.ai_service import ai_service
-                if provider in ai_service.providers:
-                    provider_info["is_available"] = True
-            
-            if provider == AIProvider.ANTHROPIC:
-                from app.services.ai.ai_service import ai_service
-                if provider in ai_service.providers:
-                    provider_info["is_available"] = True
-            
-            if provider == AIProvider.ALIBABA:
-                from app.services.ai.ai_service import ai_service
-                if provider in ai_service.providers:
-                    provider_info["is_available"] = True
-
-            if provider == AIProvider.ZHIPU:
-                from app.services.ai.ai_service import ai_service
-                if provider in ai_service.providers:
-                    provider_info["is_available"] = True
-
-            if provider == AIProvider.MINIMAX:
-                from app.services.ai.ai_service import ai_service
-                if provider in ai_service.providers:
-                    provider_info["is_available"] = True
-
-            providers_info.append(provider_info)
-
-        # 添加自定义提供商选项
-        providers_info.append({
-            "name": "custom",
-            "display_name": "自定义",
-            "is_available": True,
-            "description": "自定义AI服务提供商"
-        })
-
-        return {
-            "success": True,
-            "providers": providers_info,
-            "default_provider": "openai"
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-@router.get("/ai/stats")
-async def get_ai_stats(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """获取AI使用统计"""
-    try:
-        from app.services.ai.ai_service import ai_service
-        
-        stats = ai_service.get_cost_stats()
-        
-        return {
-            "success": True,
-            "stats": stats
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
         }

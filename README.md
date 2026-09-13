@@ -115,11 +115,10 @@ npm run dev
 - **性能监控**: 系统性能指标和使用情况
 - **智能报表**: 自定义统计维度和导出功能
 
-### 📱 移动端支持
-- **Android 应用**: 完整的 Android 客户端 (开发中)
+### 🤖 AI Wiki 与 MCP 数据服务
+- **AI Wiki**: 文档自动提取 Markdown 副本 + 元数据（标题/标签）+ FTS5 全文索引
+- **MCP 服务**: 内置 MCP server（`/mcp`），供 WorkBuddy 等 AI 工作台进行数据查询和利用
 - **响应式设计**: Web 界面适配移动设备
-- **触控优化**: 移动端交互体验优化
-- **离线功能**: 文档下载和离线浏览 (规划中)
 
 ---
 
@@ -148,17 +147,6 @@ FastAPI + Python 3.8+
 ├── Web 服务器: Uvicorn (ASGI)
 ├── 异步处理: AsyncIO
 └── 数据验证: Pydantic V2
-```
-
-### 移动端技术 (Android)
-```
-Kotlin + Jetpack Compose
-├── 架构模式: MVVM + Clean Architecture
-├── 依赖注入: Dagger Hilt
-├── 网络请求: Retrofit + OkHttp
-├── 本地存储: Room Database
-├── 响应式编程: Coroutines + Flow
-└── UI 组件: Material Design 3
 ```
 
 ### 数据存储架构
@@ -190,6 +178,7 @@ runyang-bridge-docs-system/
 │   │   └── utils/            # 工具函数
 │   ├── uploads/              # 上传文件存储
 │   ├── task_status/          # 后台任务状态
+│   ├── wiki/                 # AI Wiki Markdown 副本（文档知识库）
 │   └── requirements*.txt     # Python 依赖
 ├── frontend/                  # 前端 Vue.js 应用
 │   ├── src/
@@ -200,11 +189,6 @@ runyang-bridge-docs-system/
 │   │   └── router/           # 路由配置
 │   ├── public/               # 静态资源
 │   └── package.json          # Node.js 依赖
-├── android/                   # Android 应用 (开发中)
-│   ├── app/src/main/
-│   │   ├── java/             # Kotlin 源代码
-│   │   └── res/              # Android 资源
-│   └── build.gradle.kts      # Android 构建配置
 ├── docs/                      # 项目文档
 ├── logs/                      # 应用日志
 ├── backups/                   # 数据备份

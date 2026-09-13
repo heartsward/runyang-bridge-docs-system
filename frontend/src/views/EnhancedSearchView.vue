@@ -393,7 +393,7 @@ const performSearch = async () => {
       params.end_date = dateRange.value[1]
     }
 
-    const response = await apiService.get('/search', { params })
+    const response = await apiService.get('/search/documents', { params })
     
     searchResults.value = {
       total: response.total || 0,

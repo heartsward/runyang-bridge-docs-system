@@ -22,8 +22,8 @@ def create_access_token(
     Args:
         subject: 用户ID或数据字典
         expires_delta: 过期时间
-        token_type: 令牌类型 (access, refresh, mobile)
-        device_id: 设备ID (用于移动端绑定)
+        token_type: 令牌类型 (access, refresh)
+        device_id: 设备ID
         additional_claims: 额外的声明
     """
     # 处理主体数据
@@ -39,8 +39,6 @@ def create_access_token(
         # 根据令牌类型设置默认过期时间
         if token_type == "refresh":
             expire = datetime.utcnow() + timedelta(days=60)  # 刷新令牌60天
-        elif token_type == "mobile":
-            expire = datetime.utcnow() + timedelta(days=30)  # 移动端30天
         else:
             expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
@@ -80,7 +78,7 @@ def verify_token(token: str) -> dict:
         
         # 验证令牌类型（可选）
         token_type = payload.get("type", "access")
-        if token_type not in ["access", "refresh", "mobile"]:
+        if token_type not in ["access", "refresh"]:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="无效的令牌类型",
@@ -163,50 +161,4 @@ def verify_refresh_token(refresh_token: str) -> Optional[Dict[str, Any]]:
             
         return payload
     except JWTError:
-        return None
-
-
-def create_mobile_tokens(user_id: int, device_id: Optional[str] = None) -> Dict[str, Any]:
-    """创建移动端令牌对（访问令牌 + 刷新令牌）"""
-    # 创建访问令牌（30天）
-    access_token = create_access_token(
-        subject=user_id,
-        token_type="mobile",
-        device_id=device_id,
-        expires_delta=timedelta(days=30)
-    )
-    
-    # 创建刷新令牌（60天）
-    refresh_token = create_refresh_token(user_id, device_id)
-    
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "expires_in": 30 * 24 * 60 * 60,  # 30天的秒数
-        "token_type": "bearer"
-    }
-
-
-def validate_device_token(token: str, device_id: str) -> bool:
-    """验证令牌是否与指定设备匹配"""
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        token_device_id = payload.get("device_id")
-        
-        # 如果令牌没有设备绑定，允许通过（向后兼容）
-        if not token_device_id:
-            return True
-            
-        return token_device_id == device_id
-    except JWTError:
-        return False
-
-
-def extract_user_id_from_token(token: str) -> Optional[int]:
-    """从令牌中提取用户ID"""
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        return int(user_id) if user_id else None
-    except (JWTError, ValueError):
         return None

@@ -4,7 +4,7 @@ api_router = APIRouter()
 
 # 临时禁用有问题的路由，使用直接API替代
 try:
-    from app.api.endpoints import auth, documents, upload, upload_multiple, search, categories, settings, tasks, assets, mobile, system, voice, file_upload, encoding_fix, system_config
+    from app.api.endpoints import auth, documents, upload, upload_multiple, search, categories, settings, tasks, assets, system, voice, file_upload, encoding_fix, system_config
     
     # 包含核心路由
     api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
@@ -17,8 +17,7 @@ try:
     api_router.include_router(tasks.router, prefix="/tasks", tags=["后台任务"])
     api_router.include_router(assets.router, prefix="/assets", tags=["资产管理"])
     
-    # 移动端和系统API路由
-    api_router.include_router(mobile.router, prefix="/mobile", tags=["移动端API"])
+    # 系统API路由
     api_router.include_router(system.router, prefix="/system", tags=["系统信息"])
     
     # 语音查询API路由
@@ -32,7 +31,15 @@ try:
     
     # 系统配置API路由
     api_router.include_router(system_config.router, prefix="/system-config", tags=["系统配置"])
-        
+
+    # 阶段六：AI 引擎服务配置 API
+    from app.api.endpoints import extraction_config
+    api_router.include_router(extraction_config.router, prefix="/settings", tags=["AI引擎服务"])
+
+    # 阶段十：Wiki API（搜索/索引/编辑）
+    from app.api.endpoints import wiki
+    api_router.include_router(wiki.router, prefix="/wiki", tags=["AI Wiki"])
+
 except Exception as e:
     print(f"警告：API路由加载失败: {e}")
     # 至少包含认证路由

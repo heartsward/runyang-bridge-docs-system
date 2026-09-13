@@ -1,0 +1,225 @@
+# @architecture.md — 文件架构（关键文件）
+
+> ⚠️ AI 在本项目下写**任何代码前必须完整阅读本文件**。
+> 依据：`D:\sdxtywzsk\VIBE_CODING_GUIDE.md` 阶段二"必须强调的规则（标记为 Always）"。
+> 本文件列出仓库中**每个目录与关键文件的职责**，便于后续修改时快速定位。
+
+---
+
+## 仓库根
+
+```
+runyang-bridge-docs-system/
+├── README.md              # 项目说明（用户视角）
+├── AI_FEATURE_CHECKLIST.md
+├── AI_SERVICE_DEPLOYMENT.md
+├── FRONTEND_AI_INTEGRATION.md
+├── .claude/settings.local.json
+├── .mcp.json              # promptx-local MCP 服务
+├── install-complete.bat / start-services.bat / stop-services.bat
+├── backend/               # FastAPI 后端（含 AI Wiki MCP server，挂载 /mcp）
+├── frontend/              # Vue 3 前端
+├── docs/                  # 项目级文档（API、架构、部署等）
+└── memory-bank/           # ⭐ Vibe Coding 记忆库（本目录）
+```
+
+> **2026-09-12 变更**：`android/` 目录及后端移动端 API（mobile 端点/schema/JWT 函数）已整体移除（阶段十一）。
+> 数据查询与利用改由 AI 工作台（如 WorkBuddy）通过 **AI Wiki MCP**（`http://<host>:8002/mcp`，6 个 tools）接入。
+>
+> **2026-09-12 变更（阶段十五）**：修复 `main.py` 挂载 MCP 时用 `app.router.lifespan_context = mcp_app.lifespan` **整体覆盖**主应用 lifespan 导致后台提取 worker 永不启动（上传卡 pending）的 P0 回归。
+> 现改为：模块级 `mcp_lifespan`（默认空），MCP 挂载成功块里 `mcp_lifespan = mcp_app.lifespan`；主 `lifespan` 内 `async with mcp_lifespan(app)` 执行原 3 步（bcrypt/默认用户/后台 worker）。**改 `main.py` 后需手动重启后端**（本机 8002 无 supervisor 自动重生）。
+>
+> **2026-09-12 变更（阶段十三）**：统一 AI 服务配置"保存后立即生效"——`Settings` 新增 `reload()`（写 .env 后热刷新内存单例），`extraction_config.py` PUT 写完 .env 调 `settings.reload()`，无需重启。
+> 新增配置项 `AI_ALL_FORMATS_AI`（默认 false）：开启后**所有格式**文档（docx/xlsx/txt 等）都"本地引擎先出 md → 统一 AI 规整为最终 md"，AI 失败按 `AI_FALLBACK_TO_LOCAL` 降级本地；关闭则仅 PDF+图片 走 AI。
+> 收口位置：`backend/app/services/extraction/router.py`（`_refine_with_ai`）+ `ai_client.py`（`UnifiedAIClient.parse_text`）。
+>
+> **2026-09-13 变更（阶段十六）**：统一三处文档下载点（预览 / 列表行 / 搜索结果）为"原文件 / Markdown"二选一。
+> 后端 `wiki.py` 补 `from pathlib import Path`（此前缺 import 致原文件下载 500），markdown 分支加"无 `wiki/{id}.md` 副本 → 回退 DB `content` 拼 Response"兜底。
+> 前端新增共享工具 `frontend/src/utils/file-download.ts`（`downloadWikiDocument(docId, type, fallbackTitle)`），`DocumentView.vue` + `SearchView.vue` 三处按钮全部改为 `NDropdown` + 委托该工具，统一打到 `GET /api/v1/wiki/download/{id}?type=original|markdown`。
+>
+> **2026-09-13 变更（阶段十七）**：修复 `SettingsView.vue` `onMounted` 遗漏 `loadExtractionConfig()` 调用（阶段十三重构删旧 `loadAIConfig()` 时未补新调用）→ 设置页打开时 AI 配置从不拉取、停在默认值（误报"恢复默认"）。现 onMounted 内直接调 `loadExtractionConfig()`。后端配置一直安全，无需改动。
+
+---
+
+## 1. backend/ — FastAPI 后端
+
+入口：`backend/app/main.py`，启动端口 **8002**。
+
+### 1.1 `backend/app/api/` — API 路由层
+- `api_v1.py` — v1 路由聚合（所有 `/api/v1/*` 都在此注册）
+- `endpoints/` — 各功能模块的端点
+  | 文件 | 职责 |
+  |------|------|
+  | `auth.py` | 登录/登出/me |
+  | `users.py`（settings 内） | 用户管理 |
+  | `documents.py` | 文档 CRUD、获取内容 |
+  | `assets.py` | 资产 CRUD、批量、导出、文件提取 |
+  | `categories.py` | 文档分类管理 |
+  | `search.py` | 全文搜索与建议 |
+  | `upload.py` / `upload_multiple.py` / `file_upload.py` | 单文件 / 多文件上传 |
+  | `tasks.py` | 后台任务状态 |
+  | `settings.py` | 用户/系统设置 |
+  | `system.py` / `system_config.py` | 系统级配置 |
+  | `voice.py` | 语音/语音转写 |
+  | `encoding_fix.py` | 编码修复工具端点 |
+
+### 1.2 `backend/app/core/` — 核心基础设施
+- `config.py` — Settings（Pydantic BaseSettings，DB/JWT/CORS/上传大小等）
+- `security.py` — JWT 签发与校验、密码哈希（Bcrypt）
+- `deps.py` — FastAPI Depends（current_user、db session 等）
+- `cache.py` — 内存缓存
+- `search_engine.py` — 搜索引擎实现（内容 > 标题 > 描述的权重排序）
+- `nlp_processor.py` — NLP 预处理
+
+### 1.3 `backend/app/crud/` — 数据库 CRUD
+- `base.py` — 通用 CRUD 基类
+- `user.py` / `document.py` / `asset.py` / `category.py` — 各实体的增删改查
+
+### 1.4 `backend/app/models/` — SQLAlchemy ORM 模型
+- `user.py` / `document.py` / `asset.py` / `ai_config.py` / `system_config.py`
+
+### 1.5 `backend/app/schemas/` — Pydantic 数据模式
+- `user.py` / `document.py` / `asset.py` / `category.py` / `system_config.py` / `voice.py`
+
+### 1.6 `backend/app/services/` — 业务逻辑服务
+- `search_service.py` — 文档内容提取（PDF/Docx/Excel/TXT）+ 搜索
+- `content_extractor.py` / `enhanced_asset_extractor.py` / `asset_extractor.py` — 资产/内容提取
+- `document_analyzer.py` / `document_formatter.py` — 文档分析与格式化
+- `file_manager.py` — 文件读写
+- `ocr_extractor.py` — Tesseract OCR
+- `image_preprocessor.py` — 图像预处理
+- `content_quality_validator.py` / `smart_text_processor.py` — 文本质量与处理
+- `streaming_processor.py` / `background_tasks.py` — 流式与后台任务
+- `system_monitor.py` / `log_manager.py` — 系统监控与日志
+- `ai/` — AI 子系统（providers、extractors、utils、cache、rate_limiter、cost_tracker）
+
+### 1.7 `backend/app/db/` — 数据库
+- `database.py` — engine、SessionLocal
+- `base_class.py` — Declarative Base
+
+### 1.8 `backend/app/utils/`
+- `encoding_detector.py` / `timezone_utils.py`
+
+### 1.9 顶层文件
+- `backend/database_integrated_server.py`（开发者文档中提及，作为另一入口）
+- `backend/uploads/`、`backend/task_status/`
+- `requirements.txt` / `requirements-windows.txt`
+
+---
+
+## 2. frontend/ — Vue 3 前端
+
+入口：`frontend/src/main.ts`，启动端口 **5173**。
+Vite 配置：根目录 `vite.config.ts`。
+
+### 2.1 `frontend/src/views/` — 页面视图
+| 文件 | 路由 | 权限 | 职责 |
+|------|------|------|------|
+| `WelcomeView.vue` | `/` | 公开 | 首页 |
+| `LoginView.vue` | `/login` | 仅游客 | 登录 |
+| `RegisterView.vue` | `/register` | 仅游客 | 注册 |
+| `DocumentView.vue` | `/documents` | 需登录 | 文档管理 |
+| `SearchView.vue` | `/search` | 需登录 | 搜索（旧版） |
+| `EnhancedSearchView.vue` | (按路由) | 需登录 | 增强搜索（新版） |
+| `AssetView.vue` | `/assets` | 需登录 | 资产管理 |
+| `CategoryView.vue` | `/categories` | 需登录 | 分类管理 |
+| `SettingsView.vue` | `/settings` | 需登录 | 系统/用户设置 |
+| `DashboardView.vue` | (按路由) | 需登录 | 仪表盘 |
+
+### 2.2 `frontend/src/components/` — 复用组件
+- `NavigationMenu.vue` — 侧边导航
+- `PageLayout.vue` / `EnhancedLayout.vue` — 页面布局
+- `CategoryManagement.vue` — 分类管理组件
+
+### 2.3 `frontend/src/services/` — API 服务层（按模块拆分）
+- `api.ts` — Axios 实例 + 拦截器
+- `auth.ts` / `user.ts`
+- `document.ts` / `asset.ts` / `category.ts`
+- `search.ts`
+- `upload.ts` / `task.ts`
+- `settings.ts` / `system-config.ts`
+- `ai.ts` — AI 功能调用
+- `index.ts` — 统一导出
+
+### 2.4 `frontend/src/router/index.ts` — 路由配置
+所有路由 `meta.requiresAuth` 或 `requiresGuest` 已在文件内标注。
+
+### 2.5 `frontend/src/types/` — TypeScript 类型
+- `api.ts` / `asset.ts` 等
+
+### 2.6 `frontend/src/utils/`
+- `index.ts` — 通用工具
+- `xss-protection.ts` — 前端 XSS 防护
+- `file-download.ts` — ⭐ 三处下载点共享工具（阶段十六）：`downloadWikiDocument(docId, type, fallbackTitle)`，统一走 wiki 下载端点 + Bearer + blob 触发
+
+### 2.7 `frontend/src/assets/` — 静态资源（base.css / main.css / logo.svg）
+
+### 2.8 顶层
+- `package.json` / `vite.config.ts` / `tsconfig.json`
+- `public/runyang-logo.svg`
+- `.env.production`
+
+---
+
+## 3. AI Wiki MCP — 数据查询服务（替代原 Android 客户端）
+
+> 2026-09-12 起：Android 客户端（原 `android/`）已移除。数据查询与利用统一走 AI Wiki MCP。
+
+- 挂载点：`http://<host>:8002/mcp`（FastMCP HTTP transport，见 `main.py`）
+- 实现：`backend/app/services/wiki/mcp_server.py`（`register_tools`）
+- 6 个 tools：`search_kb` / `get_doc` / `get_doc_content` / `list_backlinks` / `list_tags` / `generate_report`
+- 接入方式：AI 工作台（WorkBuddy 等）配置 MCP server 指向 `/mcp` 即可
+- 数据源：`backend/wiki/{doc_id}.md`（MD 副本）+ SQLite FTS5 索引（`wiki/index.py`）
+
+---
+
+## 4. docs/ — 项目级文档
+
+> 这些是面向人和子系统的参考资料，**不等同于** `memory-bank/`。新建 memory-bank 文档时不要重复 docs/ 内容，只引用。
+
+| 文档 | 用途 |
+|------|------|
+| `API接口文档.md` | API 接口字典 |
+| `系统架构文档.md` | 系统级架构说明 |
+| `开发者文档.md` | 开发环境与项目结构 |
+| `用户操作手册.md` | 终端用户使用手册 |
+| `部署指南.md` / `部署指南-GitHub.md` | 部署 |
+| `配置指南-前端.md` / `-CORS.md` / `-域名.md` / `-网络.md` / `-综合.md` | 各维度配置 |
+| `OCR优化说明.md` | OCR 模块说明 |
+| `AI服务部署.md` / `AI-Wiki部署与使用指南.md` | AI 引擎与 Wiki MCP 部署 |
+| `版本升级指南.md` / `版本更新日志.md` / `系统更新日志.md` | 版本演进 |
+| `环境安装-LibreOffice.md` / `生产环境脚本说明.md` | 环境与脚本 |
+| `README.md`（docs 内） | 文档目录索引 |
+
+---
+
+## 5. memory-bank/ — 本目录（Vibe Coding 上下文核心）
+
+| 文件 | 用途 | 是否关键 (@) |
+|------|------|------------|
+| `@architecture.md` | 本文件 — 文件架构 | ✅ |
+| `@product-requirements-document.md` | 产品需求 | ✅ |
+| `@tech-stack.md` | 技术栈 | ✅ |
+| `@implementation-plan.md` | 分步实施计划（不含代码） | ✅ |
+| `progress.md` | 进度追踪 | ❌ |
+| `feature-*.md`（可选） | 功能实现笔记 | ❌ |
+
+---
+
+## 6. 修改本项目的"动手前"清单
+
+每次准备修改前，先确认：
+1. 已读 `@architecture.md`（本文件）+ `@product-requirements-document.md` + `@tech-stack.md`
+2. 改动落在哪一个模块（api/endpoints、X service、view、component）已明确
+3. 改动是否会触达以下"非可改"边界（如要破坏需先和用户确认）：
+   - 数据库表结构（`backend/app/models/`）
+   - 鉴权/JWT 配置（`backend/app/core/security.py`、`config.py`）
+   - 前端路由 `meta` 权限位（`frontend/src/router/index.ts`）
+   - 默认管理员账户（`admin` / `admin123`）
+   - 上传大小/扩展名白名单（`config.py`）
+4. 改动对应到 `@implementation-plan.md` 哪一步；如未列出，**先更新计划再动手**
+
+---
+
+_生成时间：2026-09-11，基于首次克隆后的实际目录扫描（265 个文件）_
+_维护人：开发者在每次重大里程碑后更新本文件_
