@@ -27,6 +27,7 @@ def build_frontmatter(
     tags: List[str],
     related: Optional[List[str]] = None,
     extra: Optional[Dict[str, Any]] = None,
+    doc_category: str = "",
 ) -> str:
     """构建 YAML frontmatter"""
     meta: Dict[str, Any] = {
@@ -37,6 +38,9 @@ def build_frontmatter(
         "tags": tags,
         "related": related or [],
     }
+    # 阶段十八·18.5：业务分类（受控词表）
+    if doc_category:
+        meta["doc_category"] = doc_category
     if extra:
         meta.update(extra)
     yaml_str = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
@@ -120,6 +124,7 @@ class WikiStorage:
         markdown_body: str,
         related: Optional[List[str]] = None,
         extra: Optional[Dict[str, Any]] = None,
+        doc_category: str = "",
     ) -> Path:
         """写入 MD 副本（含 frontmatter）"""
         path = self.get_path(doc_id)
@@ -130,6 +135,7 @@ class WikiStorage:
             tags=tags,
             related=related,
             extra=extra,
+            doc_category=doc_category,
         )
         # 用 heading # 作为正文标题（markdown 渲染更清晰）
         heading_line = f"# {title}\n\n" if title else ""

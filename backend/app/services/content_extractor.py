@@ -43,14 +43,24 @@ class ContentExtractor:
         markdown, error = result
 
         # 保存到 wiki（如有 doc_id）
+        # 阶段十八：若内嵌了图片引用，最终返回的 markdown 也带引用，
+        # 这样 documents.content（前端预览数据源）也能渲染图片
+        final_markdown = markdown
         if markdown and doc_id is not None:
             try:
                 from .wiki import generate_metadata_via_ai, derive_fallback_tags
+                from .wiki.index import WikiIndex
+                from .wiki import image_extractor as wiki_images
+                from .wiki.image_extractor import (
+                    extract_pdf_images, register_image_doc,
+                    insert_image_refs, describe_image_sync,
+                )
 
                 filename = source_filename or Path(file_path).name
                 fallback_title = sanitize_title(filename)
+                ext = Path(file_path).suffix.lower()
 
-                # 调 AI 生成 title/tags
+                # 调 AI 生成 title/tags/category
                 meta = await generate_metadata_via_ai(
                     content_sample=markdown[:2000],
                     fallback_title=fallback_title,
@@ -59,6 +69,51 @@ class ContentExtractor:
 
                 title = (meta or {}).get("title") or fallback_title
                 tags = (meta or {}).get("tags") or []
+                category = (meta or {}).get("doc_category") or "其他"
+
+                # 阶段十八·18.3：图片提取 + 描述 + MD 内嵌引用
+                idx = WikiIndex()
+                if ext == ".pdf":
+                    try:
+                        images = extract_pdf_images(file_path, doc_id)
+                        for n, img in enumerate(images, 1):
+                            img_file = wiki_images.WIKI_DIR / "images" / str(doc_id) / img["file"]
+                            caption = describe_image_sync(
+                                img_file, fallback_caption=f"第{img['page']}页图{n}"
+                            )
+                            img["caption"] = caption
+                            idx.add_image(
+                                doc_id, img["file"], page=img["page"],
+                                caption=caption, rel_path=img["rel_path"],
+                                size=img.get("size", 0),
+                            )
+                        if images:
+                            markdown = insert_image_refs(markdown, images)
+                            logger.info(f"doc {doc_id}: MD 内嵌 {len(images)} 张图引用")
+                    except Exception as e:
+                        logger.exception(f"PDF 图片提取失败 (doc_id={doc_id}): {e}")
+                elif ext in wiki_images.IMAGE_DOC_EXTENSIONS:
+                    try:
+                        images = register_image_doc(doc_id, file_path)
+                        for img in images:
+                            img_file = wiki_images.WIKI_DIR / "images" / str(doc_id) / img["file"]
+                            caption = describe_image_sync(
+                                img_file, fallback_caption=fallback_title
+                            )
+                            idx.add_image(
+                                doc_id, img["file"], page=img.get("page", 0),
+                                caption=caption, rel_path=img["rel_path"],
+                                size=img.get("size", 0),
+                            )
+                        # 独立图片文档：MD 正文 = 图引用 + 描述
+                        if images:
+                            img_block = "\n".join(
+                                f"<!-- wiki-img -->\n![{i.get('caption', '图片')}]({i['rel_path']})"
+                                for i in images
+                            )
+                            markdown = f"{markdown.strip()}\n\n{img_block}\n" if markdown.strip() else img_block + "\n"
+                    except Exception as e:
+                        logger.exception(f"图片文档登记失败 (doc_id={doc_id}): {e}")
 
                 md_path = self.wiki_storage.write(
                     doc_id=doc_id,
@@ -67,18 +122,24 @@ class ContentExtractor:
                     doc_type=doc_type or Path(file_path).suffix.lstrip(".").lower() or "unknown",
                     tags=tags,
                     markdown_body=markdown,
+                    doc_category=category,
                 )
 
                 # 阶段十·W2：写入后立即建索引
                 try:
-                    from .wiki.index import WikiIndex
-                    WikiIndex().index_doc(doc_id, str(md_path))
+                    idx.index_doc(doc_id, str(md_path))
                 except Exception as e:
                     logger.exception(f"建索引失败 (doc_id={doc_id}): {e}")
+
+                # 阶段十八：内嵌图引用后的 markdown 也作为最终提取内容返回
+                final_markdown = markdown
             except Exception as e:
                 logger.exception(f"保存 MD 副本失败 (doc_id={doc_id}): {e}")
                 # 不影响主流程
 
+        # result 是 (markdown, error) 元组；若内嵌了图引用，返回带引用的版本
+        if final_markdown and result and final_markdown != result[0]:
+            return (final_markdown, result[1])
         return result
 
     def extract_content(self, file_path: str) -> Tuple[Optional[str], Optional[str]]:

@@ -238,7 +238,7 @@
         <!-- 提取内容模式（阶段 3E：后端发 Markdown → 前端 markdown-it 渲染为 HTML → DOMPurify sanitize） -->
         <div
           v-if="(previewMode === 'extracted' || !shouldShowViewToggle(currentDocument)) && !previewEditMode"
-          v-html="renderedPreviewContent"
+          v-html="displayPreviewHtml"
           class="markdown-content"
         ></div>
 
@@ -516,7 +516,7 @@ import { wikiService } from '@/services/wiki'
 import type { Document, Category, User } from '@/types/api'
 import apiService from '@/services/api'
 import { debounce } from '@/utils'
-import { downloadWikiDocument } from '@/utils/file-download'
+import { downloadWikiDocument, hydrateWikiImages } from '@/utils/file-download'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -532,6 +532,36 @@ import { renderDocumentMarkdown, renderDocumentMarkdownHtml } from '@/utils/mark
 const renderedPreviewContent = computed(() => {
   if (!previewContent.value) return ''
   return renderDocumentMarkdownHtml(previewContent.value)
+})
+
+// 阶段十八·18.8：图片水合（带 token 拉 wiki 图片 → blob URL）
+// 预览 MD 里嵌有 src="images/{docId}/{file}" 时异步替换；无图则保持同步渲染
+const previewHydratedHtml = ref('')
+let _revokePreviewImages: (() => void) | null = null
+const displayPreviewHtml = computed(() =>
+  previewHydratedHtml.value || renderedPreviewContent.value
+)
+watch(previewContent, async (newContent) => {
+  // 释放上一次的 blob URL
+  if (_revokePreviewImages) { _revokePreviewImages(); _revokePreviewImages = null }
+  previewHydratedHtml.value = ''
+  if (!newContent || !newContent.includes('images/')) return
+  const docId = currentDocument.value?.id
+  if (!docId) return
+  try {
+    const { html, revoke } = await hydrateWikiImages(
+      renderedPreviewContent.value, docId
+    )
+    // 内容可能已切换（预览了另一篇），丢弃过期结果
+    if (previewContent.value !== newContent) {
+      revoke()
+      return
+    }
+    previewHydratedHtml.value = html
+    _revokePreviewImages = revoke
+  } catch (e) {
+    console.warn('图片水合失败:', e)
+  }
 })
 const showUploadModal = ref(false)
 const showConflictModal = ref(false)

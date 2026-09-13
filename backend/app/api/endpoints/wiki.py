@@ -34,24 +34,90 @@ def _storage() -> WikiStorage:
     return WikiStorage()
 
 
-@router.post("/rebuild", summary="全量重建 Wiki 索引")
+@router.post("/rebuild", summary="全量重建 Wiki 索引（含存量 PDF 补提图片）")
 async def rebuild(
+    reextract_images: bool = Query(False, description="对已有 PDF 文档补跑图片提取"),
     current_user: User = Depends(get_current_active_user),
 ):
-    """扫整个 wiki/ 目录重建 FTS5 索引"""
+    """扫整个 wiki/ 目录重建 FTS5 索引；可选对存量 PDF 补提图片（阶段十八·18.7）"""
     if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="仅管理员可访问")
 
     idx = _index()
     stats = idx.rebuild_all()
-    return {
+    result = {
         "success": True,
         "total": stats.get("total", 0),
         "ok": stats.get("ok", 0),
         "fail": stats.get("fail", 0),
         "tag_count": len(stats.get("tags", set())),
         "link_count": len(stats.get("links", set())),
+        "images_added": 0,
+        "image_docs": 0,
     }
+
+    if reextract_images:
+        try:
+            from sqlalchemy import text as sa_text
+            from app.db.database import engine
+            from app.services.wiki.image_extractor import (
+                extract_pdf_images, register_image_doc,
+                insert_image_refs, describe_image_sync, WIKI_DIR,
+            )
+
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    sa_text("SELECT id, file_path FROM documents WHERE content_extracted = 1")
+                ).fetchall()
+
+            for row in rows:
+                doc_id = row[0]
+                file_path = Path(row[1])
+                if not file_path.exists():
+                    continue
+                ext = file_path.suffix.lower()
+                try:
+                    images = []
+                    if ext == ".pdf":
+                        images = extract_pdf_images(file_path, doc_id)
+                    elif ext in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tiff", ".tif"}:
+                        images = register_image_doc(doc_id, file_path)
+                    if not images:
+                        continue
+
+                    # 去重：只登记 wiki_images 表里没有的（file 名相同即视为已存在）
+                    existing = {i["file"] for i in idx.get_doc_images(doc_id)}
+                    new_imgs = [i for i in images if i["file"] not in existing]
+                    if not new_imgs:
+                        continue
+                    for n, img in enumerate(new_imgs, 1):
+                        img_file = WIKI_DIR / "images" / str(doc_id) / img["file"]
+                        caption = describe_image_sync(
+                            img_file,
+                            fallback_caption=f"第{img.get('page', 0)}页图{n}" if ext == ".pdf" else file_path.stem,
+                        )
+                        idx.add_image(
+                            doc_id, img["file"], page=img.get("page", 0),
+                            caption=caption, rel_path=img["rel_path"],
+                            size=img.get("size", 0),
+                        )
+                    # 把新图引用追加进 MD 副本并重建该文档索引
+                    storage = _storage()
+                    md = storage.read(doc_id)
+                    if md:
+                        new_md = insert_image_refs(md, new_imgs)
+                        if new_md != md:
+                            storage.update(doc_id, new_md)
+                            idx.index_doc(doc_id, str(storage.get_path(doc_id)))
+                    result["images_added"] += len(new_imgs)
+                    result["image_docs"] += 1
+                except Exception as e:
+                    logger.warning(f"补提图片失败 doc_id={doc_id}: {e}")
+        except Exception as e:
+            logger.exception(f"reextract_images 整体失败: {e}")
+            result["image_error"] = str(e)
+
+    return result
 
 
 @router.get("/search", summary="Wiki 全文检索")
@@ -237,6 +303,69 @@ async def download_doc(
                 )
             },
         )
+
+
+@router.get("/images/{doc_id}/{filename}", summary="下载文档图片（阶段十八）")
+async def get_image(
+    doc_id: int,
+    filename: str,
+    current_user: User = Depends(get_current_active_user),
+):
+    """下载 wiki/images/{doc_id}/ 下的图片。
+
+    MCP 的 get_doc_images / search_images 返回的 url 指向此端点。
+    路径防穿越：只允许 wiki/images/{doc_id}/ 下的合法文件名。
+    """
+    from fastapi.responses import FileResponse
+    from app.services.wiki.image_extractor import WIKI_DIR
+
+    # 防穿越：文件名只允许 [A-Za-z0-9._-]，禁止 / \ ..
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="非法文件名")
+
+    images_root = (WIKI_DIR / "images" / str(doc_id)).resolve()
+    full_path = (images_root / filename).resolve()
+    # 必须落在 images_root 内
+    try:
+        full_path.relative_to(images_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法路径")
+
+    if not full_path.exists() or not full_path.is_file():
+        raise HTTPException(status_code=404, detail="图片不存在")
+
+    suffix = full_path.suffix.lower()
+    media = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".bmp": "image/bmp", ".webp": "image/webp", ".gif": "image/gif",
+        ".tiff": "image/tiff", ".tif": "image/tiff",
+    }.get(suffix, "application/octet-stream")
+    return FileResponse(path=str(full_path), media_type=media, filename=filename)
+
+
+@router.get("/doc/{doc_id}/images", summary="列出文档图片（阶段十八）")
+async def list_images(
+    doc_id: int,
+    current_user: User = Depends(get_current_active_user),
+):
+    """列出某文档的已索引图片（含 caption + 下载 URL）"""
+    idx = _index()
+    images = idx.get_doc_images(doc_id)
+    base = _request_base_url()
+    for img in images:
+        img["url"] = f"{base}/api/v1/wiki/images/{doc_id}/{img['file']}"
+    return {"doc_id": doc_id, "images": images, "count": len(images)}
+
+
+def _request_base_url() -> str:
+    """推断对外可访问的 base url（默认 http://127.0.0.1:8002）"""
+    try:
+        from app.core.config import settings
+        host = getattr(settings, "WIKI_PUBLIC_HOST", "") or "127.0.0.1"
+        port = getattr(settings, "SERVER_PORT", 8002)
+        return f"http://{host}:{port}"
+    except Exception:
+        return "http://127.0.0.1:8002"
 
 
 @router.get("/doc/{doc_id}/markdown", summary="读取 MD 副本内容")

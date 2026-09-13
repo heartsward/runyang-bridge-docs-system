@@ -728,3 +728,42 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - 重构"旧加载函数→新 service"时每个调用点（尤其 onMounted）都要同步替换，最易漏
   - "配置恢复默认"先验证后端真实返回值（带 token GET），别急着怀疑持久化/重启/CWD
   - 前端 ref 的初始化默认值 ≠ 后端真实值，要分开看
+
+### 2026-09-13（10:20 - 12:30）— 阶段十八：PDF/图片提取 + 文类 + 图片检索（参考 OpenKB）
+- **用户诉求**：参考 `VectifyAI/OpenKB`，借鉴其对文件提取与"文类"（分类）的处理（如 PDF 图片单独提取）；核心目标 = **用 AI 工作台调用 AI Wiki MCP 时能快速精准搜到所需文件内容与图片，以撰写报告/PPT**
+- **方案（已批准）**：9 个子步骤（18.1~18.9），覆盖图片提取 / 文类词表 / AI 图片描述 / 三路中文检索 / MCP 扩展 / 前端图片水合
+- **借鉴 OpenKB 的关键点**：
+  - `pymupdf page.get_text("dict")` 按阅读顺序遍历 block，`type=1` 即图片块（能抓矢量渲染图，`get_images()` 只拿嵌入位图会漏）→ `Pixmap` 存 PNG，MD 原位插入引用
+  - `_MIN_IMAGE_DIM=32` 过滤图标/项目符号/噪点
+  - **OpenKB 短板 = 我们的机会**：它图片 alt 一律 "image" 无文字描述 → 图片不可检索；我们用多模态 AI 生成中文描述反超
+- **代码变更**：
+  - 新建 `backend/app/services/wiki/image_extractor.py`（18.1）：`extract_pdf_images`（dict-mode + 2x 裁剪兜底）/ `register_image_doc`（独立图片拷贝）/ `insert_image_refs`（按页/文末插图引用，带 `<!-- wiki-img -->` 保护）/ `list_doc_images` / `image_mime`
+  - `wiki/index.py`（18.2/18.4/18.5）：新表 `wiki_images` + `images_fts`(trigram) + `docs_fts_zh`(trigram) + `doc_text`(LIKE 兜底)；`search` 三路合并（unicode61 MATCH / trigram≥3字 / LIKE≤2字）；新 `add_image`/`update_image_caption`/`get_doc_images`/`search_images`/`list_categories`；`doc_meta` 加 `doc_category`（`ALTER TABLE` 迁移）
+  - `wiki/metadata.py`（18.2/18.5）：`DOC_CATEGORIES` 受控词表（8 类）；`generate_metadata_via_ai` 返回 `doc_category`（词表外归"其他"）；`IMAGE_DESCRIBE_PROMPT` + `describe_image_via_ai`
+  - `extraction/ai_client.py`（18.2）：`UnifiedAIClient.describe_image`（单图描述，委托 ollama/openai）
+  - `content_extractor.py`（18.3）：PDF/独立图片分支接图片提取 + AI 描述 + 索引 + 图引用；`final_markdown` 回传给 `documents.content`（前端预览数据源）
+  - `wiki.py` 端点（18.6/18.7）：`GET /wiki/images/{id}/{file}`（路径防穿越 + JWT）/ `GET /wiki/doc/{id}/images` / `POST /wiki/rebuild?reextract_images=`（存量补提）
+  - `wiki/mcp_server.py`（18.5/18.6）：`search_kb` 加 `category` 参数；新 tools `get_doc_images` / `search_images` / `list_categories`（均返回带 `url`）
+  - `core/config.py`（18.6）：`WIKI_PUBLIC_HOST`（MCP 返回 URL 用）
+  - 前端 `utils/file-download.ts`（18.8）：`fetchWikiImageUrl` + `hydrateWikiImages`（JWT fetch→blob URL，`<img>` 批量水合）；`DocumentView.vue` 预览水合（带过期丢弃 + revoke）
+  - 新建 `scripts/stage18_e2e_test.py`（18.9）
+- **修复的两个 AI 图片描述 bug（关键）**：
+  1. **MIME bug**：`describe_image_sync`/`describe_image_via_ai` 用 `f"image{suffix}"` 拼成 `image.png` → AI 400 "Invalid uri format"。修复：加 `IMAGE_MIME` dict + `image_mime()` helper
+  2. **thinking 模型空 content**：Qwen3.8 是 thinking 模型，先出 `reasoning_content` 再出 `content`；`max_tokens=128/512` 时 token 全被思考吃光 → `content` 空（实测 128→reasoning 267 字 content 空、512→918 字空、2048→正常）。修复：`describe_image` 及两处调用 `max_tokens=128→2048`
+- **端到端验证（全绿，真实进程 task IfHbIY + E2E task fFz0IW，1m56s）**：
+  - `py_compile` 全过 / `app.main` 导入 OK（9 MCP tools 注册）/ `vue-tsc --noEmit` EXIT 0
+  - doc76（含图 PDF）：提 2 图落盘 `wiki/images/76/`，AI caption 正常（"网络拓扑图，包含核心交换机（core-switch）与接入交换机…"）；MD 副本含 2 图引用 + `doc_category`
+  - doc77（独立 PNG）：登记 1 图，AI caption 正常（"层级结构图，顶部标有 core 的椭圆节点向下连接三个空白矩形框"）——脚本只等 PDF 完成即查 PNG 显示 0，是**时序**问题，稍晚查已闭环
+  - 中文 3 字"交换机"→命中 3 篇（trigram）；2 字"运维"→命中 3 篇（LIKE 兜底）
+  - `search_images`"拓扑"→命中 2 张；`list_categories`→3 类
+  - 图片 URL 下载 6018 字节与本地一致；无 token 401；路径穿越 404
+  - `GET /wiki/doc/76/images` 200 count=2；`GET /wiki/search?q=交换机` 200 命中 3 + `images` 字段
+- **遗留 / 待用户决策**：
+  - 测试产物（doc 74/75/76/77、`backend/uploads/_stage18_test/`、`backend/uploads/` 下测试 PDF/PNG、`wiki/images/74~77/`）是否清理
+  - `scripts/stage18_e2e_test.py` 保留为回归脚本还是删除
+  - 阶段十八改动尚未 git 提交（本地 `5a5cc10` 已推远端，阶段十八未 commit）
+- **教训**：
+  - FTS5 trigram 按 **Unicode 字符**计（非字节）：**中文查询必须 ≥3 字才命中**（"运维"/"拓扑" 2 字=0 命中，"交换机" 3 字=命中）→ 中文短词必须配 `doc_text` LIKE 兜底，三路合并才稳
+  - thinking 模型（Qwen3 系列）调 `describe_image` 等短输出场景，`max_tokens` 必须给足（≥2048）——否则 reasoning 吃光 token、content 恒空，症状是"HTTP 200 但返回空"，极隐蔽
+  - 图片 MIME 不能 `f"image{suffix}"` 拼，要用扩展名→MIME 映射表（.png→image/png，不是 image.png）
+  - 独立图片文档的 VLM 提取比 PDF 晚（后台任务时序），E2E 断言"图片数>0"要分别等两个 doc 各自完成，不能只等 PDF

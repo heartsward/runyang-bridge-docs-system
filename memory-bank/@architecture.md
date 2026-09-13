@@ -92,6 +92,13 @@ runyang-bridge-docs-system/
 - `streaming_processor.py` / `background_tasks.py` — 流式与后台任务
 - `system_monitor.py` / `log_manager.py` — 系统监控与日志
 - `ai/` — AI 子系统（providers、extractors、utils、cache、rate_limiter、cost_tracker）
+- `wiki/` — ⭐ AI Wiki 子系统（阶段十起）：
+  - `storage.py` — MD 副本 + frontmatter 读写
+  - `metadata.py` — AI 元数据生成（title/tags/**doc_category**）+ **图片描述**（`IMAGE_DESCRIBE_PROMPT`/`describe_image_via_ai`，阶段十八）
+  - `index.py` — FTS5 三路索引（unicode61 + trigram + LIKE 兜底）+ **图片索引**（`wiki_images`/`images_fts`，阶段十八）+ `search`/`get_doc`/`search_images`/`list_categories`
+  - `mcp_server.py` — **9 个 MCP tools**（search_kb/get_doc/get_doc_content/list_backlinks/list_tags/generate_report/**get_doc_images/search_images/list_categories**）
+  - `image_extractor.py` — ⭐ **PDF/图片提取器（阶段十八）**：dict-mode 提图 + 裁剪兜底 + 独立图片登记 + 图引用插入
+  - 图片落盘目录：`backend/wiki/images/{doc_id}/`
 
 ### 1.7 `backend/app/db/` — 数据库
 - `database.py` — engine、SessionLocal
@@ -167,9 +174,12 @@ Vite 配置：根目录 `vite.config.ts`。
 
 - 挂载点：`http://<host>:8002/mcp`（FastMCP HTTP transport，见 `main.py`）
 - 实现：`backend/app/services/wiki/mcp_server.py`（`register_tools`）
-- 6 个 tools：`search_kb` / `get_doc` / `get_doc_content` / `list_backlinks` / `list_tags` / `generate_report`
+- **9 个 tools**（阶段十八 +3）：
+  - 检索类：`search_kb`（含 `category` 过滤）/ `get_doc` / `get_doc_content` / `list_backlinks` / `list_tags` / `generate_report`
+  - 图片类（阶段十八）：`get_doc_images(doc_id)` / `search_images(query, top_k, doc_id?)` / `list_categories()` —— 均返回带 `url` 字段（指向 `GET /wiki/images/{id}/{file}`，需 Bearer token）
 - 接入方式：AI 工作台（WorkBuddy 等）配置 MCP server 指向 `/mcp` 即可
-- 数据源：`backend/wiki/{doc_id}.md`（MD 副本）+ SQLite FTS5 索引（`wiki/index.py`）
+- 数据源：`backend/wiki/{doc_id}.md`（MD 副本，含图片引用）+ SQLite FTS5 索引（`wiki/index.py`）+ 图片库（`wiki/images/{doc_id}/`，`wiki_images` 表登记 + AI 中文描述）
+- **图片 URL 注意**：MCP 返回的 `url` 用 `WIKI_PUBLIC_HOST` 拼（默认 127.0.0.1，局域网需改服务器 IP）；下载需 `Authorization: Bearer <token>`
 
 ---
 

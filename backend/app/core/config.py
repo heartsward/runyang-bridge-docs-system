@@ -152,6 +152,9 @@ class Settings(BaseSettings):
     # 阶段五遗留（高速 CPU 兜底，可选）
     AI_OCR_SERVICE_URL: str = "http://localhost:8001"
     AI_OCR_ENABLED: bool = False
+    # 阶段十八：AI Wiki 对外可访问 host（MCP 返回的图片/下载 URL 用；
+    # 默认 127.0.0.1 仅本机可达，局域网内 AI 工作台访问需改成服务器 IP）
+    WIKI_PUBLIC_HOST: str = "127.0.0.1"
     
     # 自定义配置
     ADMIN_EMAIL: str = "admin@runyang.com"

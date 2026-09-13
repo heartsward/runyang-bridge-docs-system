@@ -52,7 +52,53 @@ CREATE TABLE IF NOT EXISTS doc_links (
     anchor TEXT,
     PRIMARY KEY (src_doc_id, dst_doc_id, anchor)
 );
+
+-- 阶段十八·18.2：图片索引（wiki/images/{doc_id}/ 下每张图一行）
+CREATE TABLE IF NOT EXISTS wiki_images (
+    doc_id INTEGER,
+    file TEXT,
+    page INTEGER DEFAULT 0,
+    caption TEXT,
+    rel_path TEXT,
+    size INTEGER DEFAULT 0,
+    PRIMARY KEY (doc_id, file)
+);
+
+-- 图片全文索引（caption + 文件名 + 所属文档标题；trigram 支持中文子串）
+CREATE VIRTUAL TABLE IF NOT EXISTS images_fts USING fts5(
+    doc_id UNINDEXED,
+    file UNINDEXED,
+    page UNINDEXED,
+    rel_path UNINDEXED,
+    search_text,
+    tokenize='trigram'
+);
+
+-- 阶段十八·18.4：中文 trigram 全文索引（与 docs_fts 双路合并）
+-- 实测（SQLite 3.53）：trigram 按 Unicode 字符计，中文查询需 ≥3 字才命中；
+-- 1-2 字中文走 doc_text 表 LIKE 兜底
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts_zh USING fts5(
+    doc_id UNINDEXED,
+    path,
+    title,
+    content,
+    tags,
+    doc_type,
+    tokenize='trigram'
+);
+
+-- 正文普通表（供 1-2 字中文 LIKE 兜底检索）
+CREATE TABLE IF NOT EXISTS doc_text (
+    doc_id INTEGER PRIMARY KEY,
+    text TEXT
+);
 """
+
+# 旧库迁移用（CREATE VIRTUAL TABLE IF NOT EXISTS 已覆盖新表；
+# doc_meta.doc_category 列用 ALTER 兼容）
+MIGRATE_STATEMENTS = [
+    "ALTER TABLE doc_meta ADD COLUMN doc_category TEXT",
+]
 
 WIKILINK_PATTERN = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 HASHTAG_PATTERN = re.compile(r"(?:^|\s)#([\w\u4e00-\u9fa5/_-]+)")
@@ -75,6 +121,12 @@ class WikiIndex:
     def _init_schema(self):
         with self._conn() as conn:
             conn.executescript(SCHEMA_SQL)
+            # 旧库迁移：doc_meta 加 doc_category 列（已存在则忽略）
+            for stmt in MIGRATE_STATEMENTS:
+                try:
+                    conn.execute(stmt)
+                except sqlite3.OperationalError:
+                    pass  # duplicate column name 等，忽略
             conn.commit()
 
     @staticmethod
@@ -124,22 +176,24 @@ class WikiIndex:
         title = fm.get("title", "")
         tags = fm.get("tags", []) or []
         doc_type = fm.get("doc_type", "")
+        doc_category = fm.get("doc_category", "")  # 阶段十八·18.5：业务分类
         mtime = path.stat().st_mtime
 
         with self._conn() as conn:
             # 写 meta
             conn.execute(
                 """INSERT OR REPLACE INTO doc_meta
-                   (doc_id, path, title, mtime, doc_type, frontmatter_json)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (doc_id, path, title, mtime, doc_type, frontmatter_json, doc_category)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     doc_id, str(path), title,
                     mtime, doc_type,
                     str(fm),
+                    doc_category,
                 ),
             )
 
-            # 重建 FTS5 文档
+            # 重建 FTS5 文档（unicode61：英文/术语）
             conn.execute("DELETE FROM docs_fts WHERE doc_id = ?", (doc_id,))
             conn.execute(
                 """INSERT INTO docs_fts (doc_id, path, title, content, tags, doc_type)
@@ -150,6 +204,23 @@ class WikiIndex:
                     " ".join(tags),
                     doc_type,
                 ),
+            )
+
+            # 阶段十八·18.4：trigram 索引（中文 ≥3 字）+ 正文表（1-2 字 LIKE 兜底）
+            conn.execute("DELETE FROM docs_fts_zh WHERE doc_id = ?", (doc_id,))
+            conn.execute(
+                """INSERT INTO docs_fts_zh (doc_id, path, title, content, tags, doc_type)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    doc_id, str(path), title,
+                    body,
+                    " ".join(tags),
+                    doc_type,
+                ),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO doc_text (doc_id, text) VALUES (?, ?)",
+                (doc_id, body),
             )
 
             # tags 表
@@ -213,60 +284,121 @@ class WikiIndex:
         top_k: int = 5,
         tag: Optional[str] = None,
         doc_type: Optional[str] = None,
+        doc_category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """关键词检索（返回 top_k 个文档摘要）"""
-        if not query and not tag:
+        """关键词检索（返回 top_k 个文档摘要）
+
+        阶段十八·18.4：三路合并（实测 trigram 中文需 ≥3 字才命中）：
+        1. docs_fts (unicode61) MATCH —— 英文/术语
+        2. docs_fts_zh (trigram) MATCH —— 中文 ≥3 字
+        3. doc_text LIKE —— 中文 1-2 字兜底（LIKE 对任意长度有效）
+        结果按 doc_id 去重合并；每项附 images 计数（18.6）。
+        """
+        if not query and not tag and not doc_category:
             return []
 
         results: List[Dict[str, Any]] = []
+        seen: Dict[int, Dict[str, Any]] = {}
 
         with self._conn() as conn:
             if query:
-                # FTS5 全文检索
-                fts_query = query.replace('"', '""')
-                rows = conn.execute(
-                    """SELECT doc_id, path, title, snippet(docs_fts, 3, '...', '...', '...', 12) as snip
-                       FROM docs_fts
-                       WHERE docs_fts MATCH ?
-                       ORDER BY rank
-                       LIMIT ?""",
-                    (fts_query, top_k * 2),
-                ).fetchall()
-                for r in rows:
-                    results.append({
-                        "doc_id": r["doc_id"],
-                        "path": r["path"],
-                        "title": r["title"],
-                        "snippet": r["snip"],
-                        "score": 1.0,
-                    })
+                q = query.strip()
+
+                # 路 1：unicode61 MATCH（英文/术语/数字）
+                fts_query = f'"{q.replace(chr(34), chr(34) * 2)}"'
+                try:
+                    rows = conn.execute(
+                        """SELECT doc_id, path, title,
+                                  snippet(docs_fts, 3, '...', '...', '...', 12) as snip
+                           FROM docs_fts WHERE docs_fts MATCH ?
+                           ORDER BY rank LIMIT ?""",
+                        (fts_query, top_k * 3),
+                    ).fetchall()
+                    for r in rows:
+                        self._merge_result(seen, r["doc_id"], r["path"], r["title"], r["snip"], 1.0)
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"FTS unicode61 检索失败: {e}")
+
+                # 路 2：trigram MATCH（中文 ≥3 字 / 任意 ≥3 字符）
+                if len(q) >= 3:
+                    try:
+                        zh_query = f'"{q.replace(chr(34), chr(34) * 2)}"'
+                        rows = conn.execute(
+                            """SELECT doc_id, path, title,
+                                      snippet(docs_fts_zh, 3, '...', '...', '...', 12) as snip
+                               FROM docs_fts_zh WHERE docs_fts_zh MATCH ?
+                               ORDER BY rank LIMIT ?""",
+                            (zh_query, top_k * 3),
+                        ).fetchall()
+                        for r in rows:
+                            self._merge_result(seen, r["doc_id"], r["path"], r["title"], r["snip"], 1.0)
+                    except sqlite3.OperationalError as e:
+                        logger.warning(f"FTS trigram 检索失败: {e}")
+
+                # 路 3：LIKE 兜底（1-2 字中文等短词）
+                if len(q) <= 2 or not seen:
+                    like_q = f"%{q}%"
+                    rows = conn.execute(
+                        """SELECT m.doc_id, m.path, m.title,
+                                  substr(t.text, 1, 120) as snip
+                           FROM doc_text t JOIN doc_meta m ON t.doc_id = m.doc_id
+                           WHERE t.text LIKE ? OR m.title LIKE ?
+                           LIMIT ?""",
+                        (like_q, like_q, top_k * 3),
+                    ).fetchall()
+                    for r in rows:
+                        self._merge_result(seen, r["doc_id"], r["path"], r["title"], r["snip"], 0.8)
             else:
-                # 只按 tag 筛选
+                # 只按 tag / category 筛选
+                where = "1=1"
+                params: List[Any] = []
+                if tag:
+                    where += " AND m.doc_id IN (SELECT doc_id FROM doc_tags WHERE tag = ?)"
+                    params.append(tag)
+                if doc_category:
+                    where += " AND m.doc_category = ?"
+                    params.append(doc_category)
                 rows = conn.execute(
-                    """SELECT m.doc_id, m.path, m.title
-                       FROM doc_meta m
-                       JOIN doc_tags t ON m.doc_id = t.doc_id
-                       WHERE t.tag = ?
-                       ORDER BY m.mtime DESC
-                       LIMIT ?""",
-                    (tag, top_k),
+                    f"""SELECT m.doc_id, m.path, m.title FROM doc_meta m
+                        WHERE {where} ORDER BY m.mtime DESC LIMIT ?""",
+                    params + [top_k * 3],
                 ).fetchall()
                 for r in rows:
-                    results.append({
-                        "doc_id": r["doc_id"],
-                        "path": r["path"],
-                        "title": r["title"] or "",
-                        "snippet": "",
-                        "score": 1.0,
-                    })
+                    self._merge_result(seen, r["doc_id"], r["path"], r["title"] or "", "", 1.0)
 
-        # 进一步按 tag / doc_type 过滤
-        if tag or doc_type:
-            results = [r for r in results if self._match_filter(r["doc_id"], tag, doc_type)]
+            # 每项附图片计数（阶段十八·18.6：让 AI 知道"这篇有图可取"）
+            for item in seen.values():
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM wiki_images WHERE doc_id = ?",
+                    (item["doc_id"],),
+                ).fetchone()
+                item["images"] = row[0] if row else 0
 
+        results = list(seen.values())
+        if tag or doc_type or doc_category:
+            results = [r for r in results
+                       if self._match_filter(r["doc_id"], tag, doc_type, doc_category)]
         return results[:top_k]
 
-    def _match_filter(self, doc_id: int, tag: Optional[str], doc_type: Optional[str]) -> bool:
+    @staticmethod
+    def _merge_result(seen: Dict[int, Dict[str, Any]], doc_id, path, title, snippet, score):
+        """多路结果去重合并（保留更高 score 与首个非空 snippet）"""
+        if doc_id in seen:
+            item = seen[doc_id]
+            item["score"] = max(item["score"], score)
+            if not item["snippet"] and snippet:
+                item["snippet"] = snippet
+            return
+        seen[doc_id] = {
+            "doc_id": doc_id,
+            "path": path,
+            "title": title or "",
+            "snippet": snippet or "",
+            "score": score,
+        }
+
+    def _match_filter(self, doc_id: int, tag: Optional[str], doc_type: Optional[str],
+                      doc_category: Optional[str] = None) -> bool:
         with self._conn() as conn:
             if tag:
                 r = conn.execute(
@@ -275,13 +407,15 @@ class WikiIndex:
                 ).fetchone()
                 if not r:
                     return False
-            if doc_type:
-                r = conn.execute(
-                    "SELECT doc_type FROM doc_meta WHERE doc_id = ?",
-                    (doc_id,),
-                ).fetchone()
-                if not r or r["doc_type"] != doc_type:
-                    return False
+            meta = conn.execute(
+                "SELECT doc_type, doc_category FROM doc_meta WHERE doc_id = ?", (doc_id,)
+            ).fetchone()
+            if not meta:
+                return False
+            if doc_type and meta["doc_type"] != doc_type:
+                return False
+            if doc_category and (meta["doc_category"] or "") != doc_category:
+                return False
         return True
 
     def get_doc(self, doc_id: int) -> Optional[Dict[str, Any]]:
@@ -297,6 +431,12 @@ class WikiIndex:
                 "SELECT tag FROM doc_tags WHERE doc_id = ?", (doc_id,)
             ).fetchall()
             meta["tags"] = [t["tag"] for t in tags]
+            # 阶段十八·18.6：附加图片列表
+            img_rows = conn.execute(
+                "SELECT file, page, caption, rel_path, size FROM wiki_images WHERE doc_id = ? ORDER BY page, file",
+                (doc_id,),
+            ).fetchall()
+            meta["images"] = [dict(r) for r in img_rows]
             return meta
 
     def list_backlinks(self, doc_id: int) -> List[Dict[str, Any]]:
@@ -308,6 +448,119 @@ class WikiIndex:
                    JOIN doc_meta m ON l.src_doc_id = m.doc_id
                    WHERE l.dst_doc_id = ?""",
                 (doc_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ---- 阶段十八·18.2 / 18.6：图片索引 ----
+    def add_image(self, doc_id: int, file: str, page: int = 0, caption: str = "",
+                  rel_path: str = "", size: int = 0) -> None:
+        """登记一张图片（落盘后调用）；caption 进 images_fts 全文索引"""
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO wiki_images
+                   (doc_id, file, page, caption, rel_path, size)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, file, page, caption, rel_path, size),
+            )
+            conn.execute("DELETE FROM images_fts WHERE doc_id = ? AND file = ?", (doc_id, file))
+            title_row = conn.execute(
+                "SELECT title FROM doc_meta WHERE doc_id = ?", (doc_id,)
+            ).fetchone()
+            title = title_row["title"] if title_row else ""
+            search_text = f"{caption} {file} {title}"
+            conn.execute(
+                """INSERT INTO images_fts (doc_id, file, page, rel_path, search_text)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (doc_id, file, page, rel_path, search_text),
+            )
+
+    def update_image_caption(self, doc_id: int, file: str, caption: str) -> None:
+        """AI 描述异步就绪后回填 caption 并刷新 FTS"""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE wiki_images SET caption = ? WHERE doc_id = ? AND file = ?",
+                (caption, doc_id, file),
+            )
+            conn.execute("DELETE FROM images_fts WHERE doc_id = ? AND file = ?", (doc_id, file))
+            title_row = conn.execute(
+                "SELECT title FROM doc_meta WHERE doc_id = ?", (doc_id,)
+            ).fetchone()
+            title = title_row["title"] if title_row else ""
+            search_text = f"{caption} {file} {title}"
+            conn.execute(
+                """INSERT INTO images_fts (doc_id, file, page, rel_path, search_text)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (doc_id, file, 0, f"images/{doc_id}/{file}", search_text),
+            )
+
+    def get_doc_images(self, doc_id: int) -> List[Dict[str, Any]]:
+        """列出某文档的全部已索引图片"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT doc_id, file, page, caption, rel_path, size
+                   FROM wiki_images WHERE doc_id = ?
+                   ORDER BY page, file""",
+                (doc_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def search_images(self, query: str, top_k: int = 10,
+                      doc_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """图片全文检索（caption + 文件名 + 所属文档标题）
+
+        实测 trigram 中文需 ≥3 字：≥3 字走 MATCH，否则 LIKE 兜底。
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+        with self._conn() as conn:
+            rows = []
+            if len(q) >= 3:
+                try:
+                    rows = conn.execute(
+                        """SELECT doc_id, file, page, rel_path,
+                                  snippet(images_fts, 4, '...', '...', '...', 30) as snip
+                           FROM images_fts WHERE images_fts MATCH ?
+                           ORDER BY rank LIMIT ?""",
+                        (f'"{q.replace(chr(34), chr(34) * 2)}"', top_k),
+                    ).fetchall()
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"图片 FTS 检索失败: {e}")
+            if not rows:
+                like_q = f"%{q}%"
+                rows = conn.execute(
+                    """SELECT w.doc_id, w.file, w.page, w.rel_path, w.caption as snip
+                       FROM wiki_images w
+                       WHERE w.caption LIKE ? OR w.file LIKE ?
+                       LIMIT ?""",
+                    (like_q, like_q, top_k),
+                ).fetchall()
+            results = []
+            for r in rows:
+                if doc_id is not None and r["doc_id"] != doc_id:
+                    continue
+                meta = conn.execute(
+                    "SELECT title FROM doc_meta WHERE doc_id = ?", (r["doc_id"],)
+                ).fetchone()
+                results.append({
+                    "doc_id": r["doc_id"],
+                    "title": meta["title"] if meta else "",
+                    "file": r["file"],
+                    "page": r["page"],
+                    "rel_path": r["rel_path"],
+                    "caption": (r["snip"] or ""),
+                })
+            return results[:top_k]
+
+    def list_categories(self) -> List[Dict[str, Any]]:
+        """列出所有业务分类及文档数（阶段十八·18.5）"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT COALESCE(NULLIF(doc_category, ''), '其他') AS doc_category,
+                          COUNT(*) AS doc_count
+                   FROM doc_meta
+                   GROUP BY doc_category
+                   ORDER BY doc_count DESC"""
             ).fetchall()
             return [dict(r) for r in rows]
 

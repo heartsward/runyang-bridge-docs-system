@@ -185,6 +185,34 @@ class UnifiedAIClient:
             return self._call_ollama_text(text_prompt, max_tokens)
         return self._call_openai_text(text_prompt, max_tokens)
 
+    def describe_image(
+        self,
+        image: bytes,
+        mime_type: str = "image/png",
+        prompt: Optional[str] = None,
+        max_tokens: int = 2048,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """单图描述（阶段十八·18.2）：返回图片中文描述（≤60 字）
+
+        返回 (caption, error)，失败返回 (None, error)。
+
+        注意：max_tokens 默认 2048（不是 128）——thinking 模型（Qwen3 系列）
+        会先输出 reasoning_content 再输出 content，小 max_tokens 会把 token 全耗在
+        思考上导致 content 为空（实测 128/512 均空，2048 正常）。
+        """
+        if not self.enabled:
+            return None, "AI 服务未启用"
+        if not image:
+            return None, "图片数据为空"
+
+        if prompt is None:
+            from app.services.wiki.metadata import IMAGE_DESCRIBE_PROMPT
+            prompt = IMAGE_DESCRIBE_PROMPT
+
+        if self.provider == "ollama":
+            return self._call_ollama([image], mime_type, prompt, max_tokens)
+        return self._call_openai([image], mime_type, prompt, max_tokens)
+
     def _call_ollama_text(self, text_prompt: str, max_tokens: int) -> Tuple[Optional[str], Optional[str]]:
         """Ollama 纯文本调用（content 为纯字符串）"""
         payload = {

@@ -1625,3 +1625,138 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 前端"显示默认值" ≠ "后端存的是默认值"：ref 的初始化默认值与后端真实值要分开看
 
 ---
+
+## 阶段十八：AI Wiki 多模态增强——图片提取 + 文件分类 + 精准检索（参考 OpenKB，用户提出于 2026-09-13 10:56）
+
+### 背景与目标
+用户用 AI 工具台（WorkBuddy）通过 `/mcp` 调用 AI Wiki 撰写报告/PPT 时，需要**快速精准地搜到文档内容和图片**（尤其是 PDF 里嵌的图、截图、拓扑图）。
+参考项目：[VectifyAI/OpenKB](https://github.com/VectifyAI/OpenKB)（PageIndex 生态，LLM 编译式 wiki + 多模态检索）。
+
+### OpenKB 可借鉴点（已通读源码）
+1. **PDF 图片按阅读顺序单独提取**（`openkb/images.py`）：用 pymupdf `page.get_text("dict")` 按 block 遍历，type=1 即图片块 → `Pixmap` 存 PNG，**在 MD 中原位插入 `![alt](相对路径)`**，保留图片在文档中的位置；`_MIN_IMAGE_DIM=32` 过滤图标/噪点。
+   - 关键：用 dict-mode 而非 `get_images()`——**能抓到矢量渲染图**（`get_images()` 只拿嵌入位图，会漏图）。
+2. **base64 内嵌图 + 相对路径图落盘重写**：markitdown 转换出的 MD 里 `data:image/...;base64` 和相对路径图，统一解码/拷贝到 `images/{doc_name}/`，链接重写为统一前缀，渲染器无关。
+3. **图片按文档分目录**：`images/{doc_name}/p{页}_img{n}.png`，命名带页码，天然可溯源。
+4. **图片可被 AI 工具台直接"看"**：`read_wiki_image(path)` 返回 base64 data URL，路径限制在 wiki 根内（防穿越）；查询 agent 配 `get_image` 工具，遇到"要看图才能答"的问题才调。
+5. **长文档分页存 JSON**（`{page, content, images}[]`）+ PageIndex 树索引——我们暂不引入（PageIndex 是独立重依赖，见"非目标"），但**分页结构值得借鉴**用于"取某几页"。
+6. **frontmatter 是单一事实源**：title/tags 写在 MD 头部，检索与展示都读它（我们已具备）。
+7. **OpenKB 没做的（我们的机会）**：它**不给图片生成文字描述**（alt 一律 "image"）→ 图片无法被全文搜索命中。我们用现成的多模态 AI 给每张图生成中文描述，检索精度反超。
+
+### 现状差距（实测确认）
+| 能力 | 现状 | 差距 |
+|------|------|------|
+| PDF 内嵌图 | `pdf_extractor.py` 只把**整页渲染**喂 AI 做 OCR/解析，**不单独落盘图片** | 无法按图检索、无法取原图 |
+| 独立图片文档 | OCR/AI 出文字描述，**原图未入 wiki 索引** | 搜不到图、取不到图 |
+| 图片可检索性 | 零 | MD 里没有任何图片引用 |
+| 中文分词 | FTS5 `unicode61` 对**连续中文几乎不分词**（"运维报告"≠"运维"+"报告"） | 中文短词搜索命中率低 |
+| 文件"文类" | 只有扩展名 `doc_type`（pdf/docx/xlsx…）+ AI tags | 无业务分类维度（运维报告/应急预案/资产台账/拓扑图…） |
+| 检索结果粒度 | 整篇文档 + snippet | 无"命中文档的哪些图"信息 |
+| MCP 工具 | 6 个（search_kb/get_doc/get_doc_content/list_backlinks/list_tags/generate_report） | 无取图工具、无按图搜 |
+
+### 决策与边界
+- **只增强 wiki 子系统**（`services/wiki/` + `services/extraction/` 的 PDF/图片分支 + `wiki.py` 端点 + MCP tools），**不动**文档主表结构、鉴权、上传流程。
+- **零新依赖**：pymupdf 已在 venv（1.28.2）；SQLite 3.53 原生支持 FTS5 `trigram`（已实测）；不引入 PageIndex/向量库（保持"零向量库"架构原则）。
+- **图片描述用现成多模态 AI**（`UnifiedAIClient.vision_parse`，用户已配 Qwen 多模态）；AI 不可用时降级：alt 用"第N页图M"，不影响主流程。
+- **旧文档不自动重跑**：新增"重建索引"端点，用户按需触发（含图片补提取）。
+
+### 非目标（本次不做）
+- ❌ PageIndex 树索引（重依赖 + 外部服务，留作远期）
+- ❌ 图片向量/以图搜图（需向量库，违反技术栈红线）
+- ❌ PPT 直接生成（MCP 返回结构化素材即可，PPT 由 WorkBuddy 的 tencent-pptx 等 skill 完成）
+- ❌ 前端 UI 大改（图片列表只加最小展示，不做图片管理页）
+
+### 步骤 18.1 — 后端：图片提取器（新文件 `services/wiki/image_extractor.py`）
+- **做什么**：
+  1. 新模块 `extract_pdf_images(pdf_path, doc_id)`：pymupdf dict-mode 遍历，type=1 且宽高 ≥ 32px 的图块 → Pixmap 转 PNG → 存 `wiki/images/{doc_id}/p{页}_img{n}.png`；返回 `[{page, file, rel_path, size}]`
+  2. 新模块 `register_image_doc(doc_id, source_path, description)`：独立图片文档（png/jpg 上传）→ 拷贝到 `wiki/images/{doc_id}/`（保留原扩展名），登记进图片表
+  3. 命名规范照 OpenKB：`p{页码}_img{序号}.png`（独立图片文档无页码，用 `img1.png`）
+- **能改什么**：仅新增该文件
+- **不能改什么**：uploads/ 原文件（只读源，拷贝进 wiki）
+- **怎么验**：对测试 PDF（含 2+ 张图）跑函数 → `wiki/images/{id}/` 出现 PNG，数量/页码正确；图标类小图被过滤
+- **回退方案**：删除新文件
+
+### 步骤 18.2 — 后端：图片描述 + 图片表（`services/wiki/` 扩展）
+- **做什么**：
+  1. `metadata.py` 加 `describe_image_via_ai(image_path)`：多模态 AI 生成中文描述（≤ 60 字，说明图里是什么：拓扑/表格/截图/设备…）；AI 关闭/失败时回退 `第{N}页图{M}`
+  2. `index.py` 加表 `wiki_images(doc_id, file, page, caption, fts 内容列)` + FTS5 虚拟表 `images_fts`（caption + 文件名 + 所属文档 title，**tokenize='trigram'** 解决中文短词）
+  3. 图片描述写入后同步进 `images_fts`
+- **能改什么**：`metadata.py`、`index.py`（加表/加方法，不删旧表）
+- **不能改什么**：`docs_fts`/`doc_meta`/`doc_tags`/`doc_links` 现有结构
+- **怎么验**：`describe_image_via_ai` 对样图返回中文描述；断网/AI 关闭时回退文案不抛错；`images_fts` 用中文短词（如"拓扑"）能命中
+- **回退方案**：git checkout 两文件
+
+### 步骤 18.3 — 后端：MD 副本内嵌图片引用（`content_extractor.py` 衔接）
+- **做什么**：
+  1. `extract_content_async` 里，PDF 文档：调 18.1 提取图片 → 在 MD 正文**原图位置**插入 `![{caption}](images/{doc_id}/{file})`（按页码插入到对应位置；pymupdf 文本与图片按 block 顺序，可合并为一次遍历：文本块出 MD、图片块出引用）
+  2. 独立图片文档：MD 副本正文 = `![{caption}](images/{doc_id}/img1.png)` + 描述段
+  3. 非 PDF 文档（docx/xlsx）本次**不做**内嵌图提取（docx 内嵌图留 18.5 可选扩展），不影响
+- **能改什么**：`content_extractor.py`、`extraction/pdf_extractor.py`（输出结构加 images 元数据）、`storage.py`（write 支持含图 MD）
+- **不能改什么**：提取主流程的成功/失败语义、DB `documents` 表写入
+- **怎么验**：重新提取测试 PDF → `wiki/{id}.md` 里出现 `![...](images/...)` 引用且数量与落盘图一致；`/api/v1/wiki/download/{id}?type=markdown` 下载含图 MD
+- **回退方案**：git checkout 三文件
+
+### 步骤 18.4 — 后端：中文分词升级（FTS5 trigram 双索引）
+- **做什么**：
+  1. `index.py` 新 FTS 表 `docs_fts_zh`（tokenize='trigram'，同列）；`index_doc` 同时写两份
+  2. `search()` 改为**双路合并**：unicode61 MATCH（英文/术语）+ trigram（中文子串，查询 <2 字符时跳过 trigram——trigram 要求 ≥3 字节…注意中文 1 字=3 字节，2 字中文=6 字节 OK，1 字中文走 LIKE 兜底），结果按 doc_id 去重合并排序
+  3. 旧库迁移：启动时若 `docs_fts_zh` 不存在则建表 + 触发一次 `rebuild_all`
+- **能改什么**：仅 `index.py`
+- **不能改什么**：MCP tool 签名（search_kb 入参出参不变，只提升内部命中）
+- **怎么验**：建 3 篇含"交换机""运维报告"的测试 MD → 搜"运维"、"交换机维"（子串）均命中；英文搜 "OpenAI" 仍命中
+- **回退方案**：git checkout index.py
+
+### 步骤 18.5 — 后端：文件业务分类（文类）增强
+- **做什么**：
+  1. `metadata.py` 的 `METADATA_PROMPT` 加 `doc_category` 字段，**受控词表**：`运维报告 / 应急预案 / 操作规程 / 资产台账 / 拓扑与配置 / 会议纪要 / 培训材料 / 其他`（词表放 config 常量，可扩展）；AI 必须选词表内一项
+  2. frontmatter 加 `doc_category`；`doc_meta` 表加列 `doc_category`（启动时 `ALTER TABLE` 兼容旧库）
+  3. `search_kb` 加可选参数 `category`；`list_tags` 旁加 `list_categories()`
+- **能改什么**：`metadata.py`、`index.py`（加列/加方法）、`mcp_server.py`（参数）、`storage.py`（frontmatter 字段）
+- **不能改什么**：现有 tags 语义（category 是新增维度，不替代 tags）
+- **怎么验**：重新提取 2 篇（一篇周报一篇拓扑图）→ frontmatter 各有词表内 category；`search_kb(category="应急预案")` 过滤正确
+- **回退方案**：git checkout 四文件
+
+### 步骤 18.6 — MCP：新增 2 个工具 + 增强 search_kb
+- **做什么**：
+  1. 新 tool `get_doc_images(doc_id)`：返回该文档全部图片 `[{file, page, caption, url}]`，`url` 为可下载的 HTTP 地址（`http://<host>:8002/api/v1/wiki/images/{doc_id}/{file}`，host 用请求方可达地址，默认 127.0.0.1）
+  2. 新 tool `search_images(query, top_k)`：查 `images_fts`，返回 `[{doc_id, title, page, caption, url}]`——**写报告找图的主入口**
+  3. `search_kb` 结果每项加 `images` 计数（该文档有多少张已索引图），让 AI 知道"这篇有图可取"
+  4. 新 HTTP 端点 `GET /api/v1/wiki/images/{doc_id}/{filename}`（鉴权 + 路径防穿越，只允许 `wiki/images/` 下）
+- **能改什么**：`mcp_server.py`、`wiki.py`
+- **不能改什么**：现有 6 个 tool 的行为
+- **怎么验**：WorkBuddy 连 `/mcp` → `search_images("网络拓扑")` 返回带 URL 的图列表；用返回 URL 带 token 能下载 PNG（httpx 验字节）
+- **回退方案**：git checkout 两文件
+
+### 步骤 18.7 — 端点：重建索引 + 存量补图
+- **做什么**：
+  1. `POST /api/v1/wiki/rebuild`（admin）：全量 `rebuild_all()` + 对已有 PDF 文档补跑图片提取（`uploads/` 原文件还在的）
+  2. 响应返回统计 `{docs, images, failed: [...]}`
+- **能改什么**：`wiki.py`
+- **不能改什么**：文档主表
+- **怎么验**：重启后调一次 rebuild → 统计合理；旧 PDF 文档补出图片与引用
+- **回退方案**：git checkout wiki.py
+
+### 步骤 18.8 — 前端（最小改动）
+- **做什么**：
+  1. 文档预览（MD 渲染）支持 `images/{doc_id}/xxx.png` 相对路径 → 拼成 wiki 图片端点 URL（markdown-renderer.ts 加 base 处理）
+  2. 文档详情/预览头部加一行"📷 N 张图片"（读 get_doc_images，点击可单张查看）——**不做**图片管理
+- **能改什么**：`markdown-renderer.ts`、`DocumentView.vue`（预览区）
+- **不能改什么**：下载/编辑逻辑（阶段十六成果）
+- **怎么验**：含图 MD 预览能显示图片；无图文档不显示该入口
+- **回退方案**：git checkout 两文件
+
+### 步骤 18.9 — 端到端验收
+- **做什么**：
+  1. 上传 1 份含 3+ 张图的 PDF（运维报告类）+ 1 张独立 PNG（拓扑图）
+  2. WorkBuddy 连 `/mcp` 走完整链路：`search_kb("交换机")` → 命中且带 images 计数 → `get_doc_images` / `search_images("拓扑")` 取图 URL → 下载 PNG 成功 → `get_doc_content` 的 MD 含图引用与描述
+  3. 用取回的内容+图片让 WorkBuddy 生成一页 PPT/报告（人工验收可用性）
+- **通过标准**：全链路 200 且图片字节正确；中文短词/子串搜索命中；category 过滤生效
+- **回退方案**：N/A（验收不改代码）
+
+### 实施顺序与风险
+- 顺序：18.1 → 18.2 → 18.3 → 18.4 → 18.5 → 18.6 → 18.7 → 18.8 → 18.9（每步独立可验、可回退）
+- 风险 1：pymupdf dict-mode 对**纯矢量图**可能给不出 image 字节（block["image"] 为空）→ 兜底：对含 type=1 但无字节、且页面积占比大的块，用 `page.get_pixmap(clip=block_bbox)` 渲染裁剪（实现时注意只兜底不主用）
+- 风险 2：图片描述走多模态 AI 有耗时 → 描述生成放后台任务异步做（先落盘图片+占位 caption，描述好了再更新 FTS），不阻塞 MD 写入
+- 风险 3：trigram 索引体积约为 unicode61 的 3-5 倍 → 当前文档量（百级）无压力；量级上来再评估
+- 风险 4：MD 内嵌图引用会让"编辑保存"（storage.update）可能误伤图片行 → 18.3 实现时图片引用行加注释标记（HTML 注释 `<!-- img:... -->`）供 update 保护
+
+---
