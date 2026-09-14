@@ -47,6 +47,8 @@ runyang-bridge-docs-system/
 
 > **2026-09-14 变更（阶段二十二）**：新增 `update.sh`（Linux）/ `update.bat`（Windows）一键更新脚本——部署到其它服务器后日常更新代码用。流程：防御性检查（工作区脏则中止）→ 备份 `.env` → `git pull --ff-only origin main` → 后端 `pip install --upgrade-strategy only-if-needed` → 前端 `npm install` → 重启后端（前端 vite dev HMR 自动生效）。**严格快进 + 不动 `.gitignore` 里的一切**（`.env` / 数据库 / 上传文件 / venv / node_modules / 日志 / 图片库），所以本地数据零风险。回滚命令 `git reset --hard HEAD@{1}`。`docs/部署指南.md` "版本更新"段同步加脚本入口。
 
+> **2026-09-14 变更（阶段二十二·完整版）**：用户反馈"上传更新会卡很久"——调研后**找到推送卡死的真正根因**：WorkBuddy 代理 + Git Credential Manager 的 Basic Auth 头被 GitHub fine-grained PAT 拒绝（不只是代理问题，GIT_TRACE 显示服务器返回真 `401 Unauthorized`）。**新增 `push.sh` / `push.bat` 一键推送脚本**：解法 = `env -u HTTPS_PROXY -u HTTP_PROXY` 取消代理 + `-c "url.https://x-access-token:${TOKEN}@github.com/heartsward/.insteadOf=..."` 让 git 用 fine-grained PAT 的正确认证格式 + `--force-with-lease` 处理之前 Git Data API 推送造成的 diverged 状态。**实测 push.sh 一键成功**（远端 main 从 `a339aed1` → `dba330d`，ahead 2 commit）。`GIT-COMMANDS.md` 同步加入完整命令速查（其它电脑下载 / 本机 push / push 卡顿排查）。脚本与文档清单从 7 个扩到 9 个真实脚本 + 1 个命令速查。
+
 ---
 
 ## 1. backend/ — FastAPI 后端
@@ -120,7 +122,7 @@ runyang-bridge-docs-system/
 - `backend/uploads/`、`backend/task_status/`
 - `requirements.txt` / `requirements-windows.txt`
 
-### 2.0 根目录脚本清单（**7 个真实脚本**）
+### 2.0 根目录脚本清单（**9 个真实脚本 + 1 个命令速查**）
 | 脚本 | 平台 | 用途 |
 |------|------|------|
 | `install-complete.bat` | Win | 首次部署：建 venv + 装前后端依赖 |
@@ -130,6 +132,9 @@ runyang-bridge-docs-system/
 | `stop-services.sh` | Linux/macOS | 同 stop-services.bat |
 | **`update.sh`** ⭐ | Linux/macOS | **一键更新代码并重启后端**（阶段二十二） |
 | **`update.bat`** ⭐ | Win | **一键更新代码并重启后端**（阶段二十二） |
+| **`push.sh`** ⭐ | Linux/macOS | **一键推送到 GitHub**（解决 `git push` 卡死问题，阶段二十二） |
+| **`push.bat`** ⭐ | Win | **一键推送到 GitHub**（同 push.sh） |
+| `GIT-COMMANDS.md` | 通用 | 完整 git 命令速查（其它电脑下载/本机 push/push 卡顿排查） |
 
 ---
 

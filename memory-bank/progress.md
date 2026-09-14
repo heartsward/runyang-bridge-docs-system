@@ -1034,4 +1034,39 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **验证**：`bash -n update.sh` 通过；chmod +x；Windows bat 语法检查（环境限制未实测双击，但语法遵循现有 start/stop-services.bat 风格）
 - **文档**：`docs/部署指南.md` "版本更新"段追加脚本入口（保持原有"方式二手动更新"作为兜底）
 - **memory-bank**：`@architecture.md` 1.9 节新增"2.0 根目录脚本清单"，明确 7 个真实脚本（避免之前 5 → 7 数字漂移）
+
+---
+
+### 2026-09-14（19:50）— 阶段二十二·完整版：诊断 + 解决推送卡死
+
+- **用户反馈**："上传更新会卡很久"
+- **诊断过程**（用户提示"用直连"启发）：
+  - **第一步**：`env -u HTTPS_PROXY git ls-remote` 直连可用，秒回 `a339aed1`
+  - **第二步**：`env -u HTTPS_PROXY timeout 30 git push origin main` → **SIGTERM 仍卡死**（30 秒超时）
+  - **关键证据**：`GIT_TRACE=1 GIT_CURL_VERBOSE=1 git push` trace 显示：
+    ```
+    Trying 20.205.243.166:443...
+    Established connection to github.com (20.205.243.166 port 443)
+    <= Recv header: HTTP/1.1 401 Unauthorized
+    <= Recv header: www-authenticate: Basic realm="GitHub"
+    ```
+  - **结论**：**不是代理问题，是 GitHub 真返回 401**。根因 = Git Credential Manager 把 `username=heartsward + password=github_pat_11...` 编码成 Basic Auth header 发出去，GitHub 对 fine-grained PAT 的 git 协议要求走 `Authorization: token <PAT>` 格式（即 URL 里的 `x-access-token:<PAT>` 前缀）
+- **解法**：
+  1. `env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy` 取消 WorkBuddy 代理
+  2. `-c "url.https://x-access-token:${TOKEN}@github.com/heartsward/.insteadOf=https://github.com/heartsward/"` 让 git 用 fine-grained PAT 的正确格式
+  3. diverged（之前 Git Data API 推的 commit）→ `--force-with-lease`（比 `--force` 安全）
+- **落地**：
+  - **新增 `push.sh`**（Linux）：Bash + GCM 拿 token + 探测 ahead/behind + 决定是否 --force-with-lease + 推送
+  - **新增 `push.bat`**（Windows）：cmd + powershell 调 git credential fill + powershell 调 git push
+  - **更新 `GIT-COMMANDS.md`**：完整命令速查（其它电脑下载 / 本机 push / push 卡顿排查）
+  - **`update.sh` 不动**（只 pull 不 push，与本次问题无关）
+- **验证**：
+  - `bash -n push.sh` 通过 + `chmod +x push.sh`
+  - **`./push.sh` 实测**：输出 `PUSHED_OK`，远端 main 从 `a339aed1` → `dba330d`（ahead 2 commit，其中 1 个是上一轮阶段二十一 d3a9885 与远端 a339aed1 内容相同）
+  - `git ls-remote` 验证：远端 main = `dba330d9562c890714676e719749016740f37c00` ✅
+- **方法论教训**：
+  - **诊断必须用 trace 拿真实证据**，不能靠"我觉得是代理"瞎猜。本次 trace 拿到 401 + `www-authenticate: Basic realm="GitHub"` 才锁死是 GitHub 认证拒绝而不是网络层
+  - **WorkBuddy 代理不是万恶之源**——取消它确实能直连，但直连后还有 401（因为问题在认证协议层不是网络层）
+  - **fine-grained PAT + git smart-HTTP + GCM** 三者结合踩坑：GCM 默认 Basic Auth 头 vs fine-grained PAT 要求的 `token` 头——只能靠 `url.x-access-token:` URL 前缀让 git 走正确路径
+  - **diverged 后用 `--force-with-lease` 而非 `--force`**：前者多一层"远端不是我以为的 SHA 则拒绝"的保护，本项目 Git Data API 推送历史造成的常规 diverged 完全可以覆盖
 - **提交**：本条随里程碑 commit 提交并推 GitHub

@@ -86,7 +86,27 @@ start-services.bat
 
 ## 📤 二、本机（开发电脑）上传更新到 GitHub
 
-### 标准 git push 流程（**适用于你的开发电脑 + 正常网络环境**）
+### ✅ 推荐：一键脚本 `push.sh` / `push.bat`
+
+仓库根目录提供 `push.sh`（Linux/macOS）和 `push.bat`（Windows），**解决本机 `git push` 卡很久的问题**：
+
+```bash
+# Linux/macOS
+./push.sh
+
+# Windows
+push.bat
+```
+
+**脚本做了什么**：
+1. 防御性检查工作区脏则中止
+2. 拿当前分支 + GCM 里的 token
+3. 看 ahead/behind：若 diverged → 用 `--force-with-lease` 覆盖
+4. **`env -u HTTPS_PROXY -u HTTP_PROXY`**：取消 WorkBuddy 代理
+5. **`-c "url.https://x-access-token:${TOKEN}@github.com/heartsward/.insteadOf=https://github.com/heartsward/"`**：让 git 用 fine-grained PAT 的正确认证格式
+6. `git push [--force-with-lease] origin <branch>`
+
+### 标准 git push 流程（**适用于普通网络环境**）
 
 ```bash
 cd D:\sdxtywzsk\runyang-bridge-docs-system
@@ -104,21 +124,26 @@ git -c core.quotepath=OFF commit -m "feat: 说明做了什么 - 范围"
 git push origin main
 ```
 
-### ⚠️ 本机 `git push` 卡死时的等价命令
+如果 `git push` 卡住超过 30 秒，立刻 `Ctrl+C` 然后改用 `push.sh` / `push.bat`。
 
-**根因**：本机 git push 受 WorkBuddy 代理（`HTTPS_PROXY=http://127.0.0.1:58123`）阻断——代理对 git smart-HTTP 的 `git-receive-pack` 返回 401，导致进程一直等响应、超时被杀（实测 `timeout 30 git push origin main` 30 秒后 exit 124 无任何输出）。
+### ⚠️ 推送卡顿的真实根因（本机）
 
-**等价推送命令（用 GitHub REST API，绕开代理对 git 协议的阻断）**：
+实测拿到铁证（`GIT_TRACE=1 git push`）：
+- 本机有 `HTTPS_PROXY=http://127.0.0.1:58123`（WorkBuddy 代理）
+- 取消代理后，git 真的连到 `github.com:20.205.243.166:443` 成功
+- 但**服务器返回 `HTTP/1.1 401 Unauthorized` + `www-authenticate: Basic realm="GitHub"`**
+- 根因：Git Credential Manager 默认走 Basic Auth 头（`username:password` base64），但 GitHub 对 fine-grained PAT 的 git 协议要求走 `x-access-token:<PAT>` 格式
+- 表现：30 秒超时被杀（exit 124），看起来像"卡死"
 
-```bash
-# 用之前已经写好的脚本（在 skill github-api-push-fallback 里）
-# 但你需要为每次推送改 BASE_SHA / LOCAL_COMMITS——这是个 50 行 Python 脚本
+**`push.sh` 的解法**：
+1. 取消代理环境变量
+2. 把 URL 改成 `https://x-access-token:TOKEN@github.com/...`（git 自动用这种 URL 时会把 PAT 作为 `Authorization: token <PAT>` 头送，符合 fine-grained PAT 规范）
 
-# 简化版（一次推送单个 commit）：
-python push_one_commit.py
-```
+### 备选方案（不推荐但可用）：Git Data API 推送
 
-更详细的脚本见 `C:\Users\cccly\.workbuddy\skills\github-api-push-fallback\SKILL.md` 和它的 `scripts/push_commits.py`。
+走 GitHub REST API（`git/blobs → git/trees → git/commits → git/refs force`），**保留干净历史**（但 SHA 会变，导致下次 push 需 `--force-with-lease`）。
+
+skill `github-api-push-fallback` 已写好完整流程：`C:\Users\cccly\.workbuddy\skills\github-api-push-fallback\`。
 
 ---
 
@@ -136,38 +161,36 @@ echo "exit=$?"
 #  exit=1   → push 失败但有报错
 ```
 
-### 2. 看代理配置（**本机卡死的最大嫌疑**）
+### 2. 看代理配置（**本机卡死的嫌疑之一**）
 ```bash
 env | grep -i proxy
-# 看到 HTTPS_PROXY=http://127.0.0.1:58123 之类的就是代理
-# WorkBuddy 环境的代理对 git smart-HTTP 协议返回 401
+# 看到 HTTPS_PROXY=http://127.0.0.1:58123 之类的就是 WorkBuddy 代理
+# 但取消它不一定能解决——见第 3 步
 ```
 
-### 3. 看 git 是否配了走代理
+### 3. 看 git push 实际拿到了什么 HTTP 响应
 ```bash
-git config --global --get-regexp 'http\.|https\.'
-git config --get-regexp 'http\.|https\.'
+env -u HTTPS_PROXY -u HTTP_PROXY \
+    GIT_TRACE=1 GIT_CURL_VERBOSE=1 \
+    git push origin main 2>&1 | grep -E "(Recv header|Send header|401|Unauthorized)" | head -20
+# 看到 "HTTP/1.1 401 Unauthorized" + "www-authenticate: Basic realm=GitHub"
+#  → 不是代理问题，是 GitHub 认证失败
+#  → 用 push.sh / push.bat 走 x-access-token URL 解决
 ```
 
-### 4. 看连通性
+### 4. 用直连 git ls-remote 测连通性
 ```bash
-# REST API（应该快）
-curl -s -o /dev/null -w "API: %{http_code} | %{time_total}s\n" \
-  -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/repos/heartsward/runyang-bridge-docs-system"
-
-# git 协议（用代理时可能卡）
-git ls-remote https://github.com/heartsward/runyang-bridge-docs-system.git HEAD
+env -u HTTPS_PROXY git ls-remote https://github.com/heartsward/runyang-bridge-docs-system.git HEAD
+# 应该秒回 SHA
 ```
 
-### 5. 看本地到底有几个 commit 没推
+### 5. 看本地到底有几个 commit 没推 + 是否 diverged
 ```bash
 git status -sb
-#  ahead N → 有 N 个 commit 没推
+#  ahead N behind M  → 有 N 个本地 commit、远端有 M 个新 commit
+#  ahead N           → 只本地有 N 个 commit
+#  behind N          → 远端有 N 个本地没有的（可能别人推过）
 ```
-
-### 6. 卡顿时立刻用的 GitHub MCP 替代推送
-WorkBuddy 已连接 `github` MCP，可以用它直接 push 文件（不依赖 git 协议），但**它不会保留你的 commit 历史**——只对单文件 / 少量文件改动好用。
 
 ---
 
@@ -178,10 +201,13 @@ WorkBuddy 已连接 `github` MCP，可以用它直接 push 文件（不依赖 gi
 | 其它电脑**下载/更新**代码（Linux） | `cd runyang-bridge-docs-system && ./update.sh` |
 | 其它电脑**下载/更新**代码（Windows） | `cd runyang-bridge-docs-system && update.bat` |
 | 本机**首次**克隆 | `git clone https://github.com/heartsward/runyang-bridge-docs-system.git` |
-| 本机**上传**更新（标准流程） | `git add . && git commit -m "..." && git push origin main` |
-| 本机**上传**更新（push 卡死时） | 用 `github-api-push-fallback` skill 走 Git Data API |
-| **排查** push 卡死 | `timeout 30 git push origin main` → 看 exit code 和 `env \| grep proxy` |
+| 本机**上传**更新（推荐） | `./push.sh` 或 `push.bat`（自动处理代理 + fine-grained PAT 认证） |
+| 本机**上传**更新（手动） | `git add . && git commit -m "..." && git push origin main` |
+| **排查** push 卡死 | `timeout 30 git push origin main` + `env -u HTTPS_PROXY GIT_TRACE=1 ...` |
 
 ---
 
-**一句话**：其它电脑用 `update.sh` / `update.bat` 一键更新；本机开发完用 `git push origin main` 上传；本机 push 卡死是因为 WorkBuddy 代理对 git 协议返回 401，必须用 GitHub REST API（Git Data API 走 `blobs→trees→commits→refs`）绕开。
+**一句话**：
+- 其它电脑用 `update.sh` / `update.bat` 一键更新
+- 本机用 `push.sh` / `push.bat` 一键推送（自动处理 WorkBuddy 代理 + fine-grained PAT 认证）
+- `git push` 卡死的真因不是代理，是 GitHub 拒绝 GCM 的 Basic Auth 头对 fine-grained PAT 的认证——`push.sh` 的解法是 `env -u HTTPS_PROXY` + `url.x-access-token:TOKEN@github.com/.insteadOf`
