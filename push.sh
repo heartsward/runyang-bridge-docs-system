@@ -70,6 +70,27 @@ env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
 
 RC=$?
 echo
+if [ $RC -ne 0 ]; then
+    # --force-with-lease 失败常见原因：origin/<branch> 引用陈旧（被本地 fetch 之外的动作改过，
+    # 如另一台机器 push 或 GitHub UI 改）。解决：先 fetch 刷新 origin ref，再 push。
+    echo
+    echo "WARN: push 失败，可能是 origin/${BRANCH} 引用陈旧（stale info）。"
+    echo "      自动 fetch 刷新 origin ref 后重试..."
+    echo
+    env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+        git -c credential.helper= \
+        -c "url.https://x-access-token:${TOKEN}@github.com/heartsward/.insteadOf=https://github.com/heartsward/" \
+        fetch origin "$BRANCH"
+
+    echo "重试 push..."
+    env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+        git -c credential.helper= \
+        -c "url.https://x-access-token:${TOKEN}@github.com/heartsward/.insteadOf=https://github.com/heartsward/" \
+        push $PUSH_FLAGS origin "$BRANCH"
+    RC=$?
+fi
+
+echo
 if [ $RC -eq 0 ]; then
     NEW_SHA=$(git rev-parse HEAD)
     echo "=========================================="
