@@ -77,10 +77,12 @@ if [ $RC -ne 0 ]; then
     echo "WARN: push 失败，可能是 origin/${BRANCH} 引用陈旧（stale info）。"
     echo "      自动 fetch 刷新 origin ref 后重试..."
     echo
+    # 用 --update-head-ok 让 fetch 更新 origin/main 引用本身
     env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
         git -c credential.helper= \
         -c "url.https://x-access-token:${TOKEN}@github.com/heartsward/.insteadOf=https://github.com/heartsward/" \
-        fetch origin "$BRANCH"
+        fetch --update-head-ok origin "$BRANCH"
+    echo "      origin/${BRANCH} -> $(git rev-parse origin/${BRANCH})"
 
     echo "重试 push..."
     env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
