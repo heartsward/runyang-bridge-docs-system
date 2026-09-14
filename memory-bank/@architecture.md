@@ -39,6 +39,10 @@ runyang-bridge-docs-system/
 >
 > **2026-09-13 变更（阶段十七）**：修复 `SettingsView.vue` `onMounted` 遗漏 `loadExtractionConfig()` 调用（阶段十三重构删旧 `loadAIConfig()` 时未补新调用）→ 设置页打开时 AI 配置从不拉取、停在默认值（误报"恢复默认"）。现 onMounted 内直接调 `loadExtractionConfig()`。后端配置一直安全，无需改动。
 
+> **2026-09-14 变更（阶段二十·20.7）**：修复"下载原文件扩展名被误识别"（如标题以日期 `2025.12` 结尾 → 存成 `.12`）。
+> 双因素根因：① `main.py` CORSMiddleware 未设 `expose_headers`，跨域 fetch（:5173→:8002）JS 读不到 `Content-Disposition`（读为 null）→ 前端回退用标题当文件名；② `file-download.ts` 旧正则解析 `filename*=utf-8''...` 只截到 `utf-8`。
+> 现：`main.py` CORS 加 `expose_headers=["Content-Disposition","Content-Length"]`（**改 main.py 后需手动重启后端**）；`file-download.ts` 重写 `parseFilenameFromDisposition`（RFC5987 优先 + 普通 filename + 新增 `sanitizeFilename`；header 缺失/解析失败时用后端 `file_type` 纠正扩展名兜底，markdown 强制 `.md`），`downloadWikiDocument` 增加 `fileType?` 参数；`DocumentView.vue` / `SearchView.vue` 三处调用透传 `file_type`。
+
 ---
 
 ## 1. backend/ — FastAPI 后端

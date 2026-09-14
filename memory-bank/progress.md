@@ -882,3 +882,25 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - v-html 注入的内容不受 scoped 选择器影响，markdown 内容样式要用 `:deep()` 穿透
   - markdown-it 配置 `html:true` 时后端注入的 `<mark>` 会原样透传（不解析、不转义属性），可在渲染后统一补索引
   - 对比高亮数量前先确认是**同一篇文档**（doc id 会变，208 vs 133 是不同文档）
+
+---
+
+### 2026-09-14（10:51 - 11:30）— 阶段二十·20.7：修复下载原文件扩展名误识别（2025.12 → .12）
+- **用户反馈**：下载"NVR总表-...2025.12"原文件时，保存下来的扩展名被识别成 `.12`（标题末尾是日期 2025.12，真实文件是 .xlsx），要求修复"这类"错误
+- **根因（双因素，均已实测复现）**：
+  1. **CORS 未暴露 header**：后端 `Content-Disposition: attachment; filename*=utf-8''...2025_12.xlsx` 是对的，但 `main.py` 的 CORSMiddleware 没设 `expose_headers` → 跨域 fetch（前端 :5173 → 后端 :8002）读不到 `content-disposition`（`access-control-expose-headers: None`）→ 前端拿到 `null` → 回退用 **title**（`...2025.12`）→ 浏览器按 title 的 `.12` 存
+  2. **前端 RFC5987 解析 bug**：旧正则 `/filename\*?=['"]?([^'"\r\n]*)['"]?/i` 解析 `filename*=utf-8''...` 时只捕获到 `utf-8`（`''` 双撇号把值截断），即使 header 可读也会存成名为 `utf-8` 的文件
+- **代码变更**：
+  - `backend/app/main.py`：CORSMiddleware 加 `expose_headers=["Content-Disposition", "Content-Length"]`
+  - `frontend/src/utils/file-download.ts`：重写 `parseFilenameFromDisposition`——优先 RFC5987 `filename*=charset'lang'value`（取 `''` 后的值 + decodeURIComponent），回退 `filename="..."`/`filename=...`；新增 `sanitizeFilename`（去目录/清非法字符）；**兜底逻辑升级**：header 缺失/解析失败时用后端已知 `file_type` 纠正扩展名（不再盲目拿标题当文件名），`downloadWikiDocument` 加可选 `fileType` 参数
+  - `DocumentView.vue` / `SearchView.vue`：4 处调用透传 `file_type`（搜索结果 `result.file_type` / 预览 `previewDocumentData?.file_type` / 列表 `doc.file_type`）
+- **验证**：
+  - CORS：跨域响应头 `access-control-expose-headers: Content-Disposition, Content-Length`，浏览器 JS 能读到 ✅
+  - 浏览器真实跨域 E2E（与用户浏览器一致环境）：`parsedFilename = NVR总表-润扬大桥监控平台NVR账号密码明细表2025_12.xlsx`，`ext = xlsx` ✅（修复前 `.12`）
+  - 单测解析函数：RFC5987 中文 / header 缺失+fileType 兜底 / 普通 filename / markdown 兜底 全过
+  - `vue-tsc`：`file-download.ts` 0 error，我的改动行 0 新增 error（DocumentView/SearchView 剩余为存量错误）
+- **教训**：
+  - 跨域 `fetch` 读自定义/响应头必须在后端 CORS 配 `expose_headers`，否则 JS 侧 `headers.get()` 返回 null（即使响应本身有该头）
+  - RFC5987 `filename*=charset'lang'value` 解析要按三段式取 `''` 后的值，不能用宽松的 `['"]?([^'"\r\n]*)`
+  - 下载文件名兜底要带上后端已知 `file_type`，标题不可信（可能以日期/版本号结尾）
+- **提交**：本地待提交（4 代码文件 + memory-bank）

@@ -138,7 +138,7 @@
                     <n-dropdown
                       trigger="click"
                       :options="downloadMenuOptions"
-                      @select="(key: string) => downloadDocument(result.id, key, result.title)"
+                      @select="(key: string) => downloadDocument(result.id, key, result.title, result.file_type)"
                     >
                       <n-button
                         size="small"
@@ -211,7 +211,7 @@
             <n-dropdown
               trigger="click"
               :options="downloadMenuOptions"
-              @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title)"
+              @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title, previewDocumentData?.file_type)"
             >
               <n-button
                 size="small"
@@ -348,7 +348,7 @@
                   <n-dropdown
                     trigger="click"
                     :options="downloadMenuOptions"
-                    @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title)"
+                    @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title, previewDocumentData?.file_type)"
                   >
                     <n-button type="primary">
                       <template #icon>
@@ -1020,13 +1020,14 @@ const downloadMenuOptions = [
   { label: '下载 Markdown（AI 编辑版）', key: 'markdown' },
 ]
 
-const downloadDocument = async (id: number | undefined, type: 'original' | 'markdown' = 'original', title?: string) => {
+const downloadDocument = async (id: number | undefined, type: 'original' | 'markdown' = 'original', title?: string, fileType?: string) => {
   if (!id) {
     message.error('文档ID无效')
     return
   }
   try {
-    await downloadWikiDocument(id, type, title || `document_${id}`)
+    // 20.7：透传 file_type，header 缺失时兜底纠正扩展名（避免标题日期尾巴带偏，如 2025.12 → .12）
+    await downloadWikiDocument(id, type, title || `document_${id}`, fileType)
     message.success(type === 'markdown' ? 'Markdown 已下载' : '原文件已下载')
   } catch (error: any) {
     console.error('下载失败:', error)

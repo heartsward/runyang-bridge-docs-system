@@ -2001,3 +2001,16 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **不能改什么**：后端 preview 端点；编辑/下载/复制/原文件模式/导航卡片 UI；`markdown-renderer.ts`
 - **怎么验**：E2E 打开 doc 71 预览 → 渲染出 h1/table（不再是 pre 文本墙）；多词导航 119/89 依旧；编辑按钮依旧；vue-tsc 0 新增 error
 - **回退方案**：git checkout SearchView.vue
+
+#### 20.7 修复下载原文件扩展名误识别（如 `2025.12` → `.12`）
+- **背景**：下载"NVR总表-...2025.12"原文件时，保存下来的扩展名是 `.12`（标题末尾是日期 2025.12，真实文件是 .xlsx）
+- **根因（双因素）**：
+  1. 后端 `Content-Disposition: attachment; filename*=utf-8''...2025_12.xlsx` 是对的，但 `main.py` 的 CORSMiddleware **没设 `expose_headers`** → 跨域 fetch（前端 :5173 → 后端 :8002）读不到 `content-disposition` → 前端 `parseFilenameFromDisposition` 拿到 `null` → 回退用 **title**（`...2025.12`）→ 浏览器按 title 的 `.12` 存
+  2. 前端 `parseFilenameFromDisposition` 正则 `/filename\*?=['"]?([^'"\r\n]*)['"]?/i` 解析 RFC 5987（`filename*=utf-8''...`）时只捕获到 `utf-8`（`''` 双撇号把值截断了），即使 header 可读也会存成名为 `utf-8` 的文件
+- **做什么**：
+  1. `main.py` CORSMiddleware 加 `expose_headers=["Content-Disposition", "Content-Length"]`
+  2. `file-download.ts` 重写 `parseFilenameFromDisposition`：优先解析 RFC 5987 `filename*=charset''value`（取 `''` 之后的值 + decodeURIComponent），回退 `filename="..."` / `filename=...`；markdown 兜底逻辑保留
+- **能改什么**：`backend/app/main.py`（CORS 块）、`frontend/src/utils/file-download.ts`
+- **不能改什么**：下载端点逻辑（后端 filename 本就正确）、其他 CORS 字段
+- **怎么验**：跨域请求响应头含 `access-control-expose-headers: Content-Disposition`；下载 doc 6 保存文件名为 `...2025_12.xlsx`（非 `.12`）；纯 ASCII 文件名/RFC5987 中文文件名均正确
+- **回退方案**：git checkout main.py file-download.ts

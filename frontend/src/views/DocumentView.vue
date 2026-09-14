@@ -1309,7 +1309,8 @@ const downloadMenuOptions = [
 const downloadDocument = async (doc: Document, type: 'original' | 'markdown' = 'original') => {
   try {
     // 阶段十六：统一走共享下载工具（三个下载点同一逻辑/同一端点）
-    await downloadWikiDocument(doc.id, type, doc.title)
+    // 20.7：透传 file_type，header 缺失时兜底纠正扩展名（避免标题日期尾巴带偏，如 2025.12 → .12）
+    await downloadWikiDocument(doc.id, type, doc.title, (doc as any).file_type)
     message.success(type === 'markdown' ? 'Markdown 已下载' : '原文件已下载')
   } catch (error: any) {
     console.error('下载文档失败:', error)

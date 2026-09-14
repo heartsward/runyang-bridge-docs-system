@@ -187,6 +187,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 让跨域 fetch 能读取这些响应头（下载时前端据此还原真实文件名，
+    # 否则 JS 读不到 Content-Disposition 会回退用标题 → 扩展名被标题里的日期（如 2025.12）带偏）
+    expose_headers=["Content-Disposition", "Content-Length"],
 )
 
 @app.get("/")
