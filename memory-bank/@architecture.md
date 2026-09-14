@@ -43,6 +43,8 @@ runyang-bridge-docs-system/
 > 双因素根因：① `main.py` CORSMiddleware 未设 `expose_headers`，跨域 fetch（:5173→:8002）JS 读不到 `Content-Disposition`（读为 null）→ 前端回退用标题当文件名；② `file-download.ts` 旧正则解析 `filename*=utf-8''...` 只截到 `utf-8`。
 > 现：`main.py` CORS 加 `expose_headers=["Content-Disposition","Content-Length"]`（**改 main.py 后需手动重启后端**）；`file-download.ts` 重写 `parseFilenameFromDisposition`（RFC5987 优先 + 普通 filename + 新增 `sanitizeFilename`；header 缺失/解析失败时用后端 `file_type` 纠正扩展名兜底，markdown 强制 `.md`），`downloadWikiDocument` 增加 `fileType?` 参数；`DocumentView.vue` / `SearchView.vue` 三处调用透传 `file_type`。
 
+> **2026-09-14 变更（阶段二十一）**：补齐 `.env` CORS auto 模式全套配置——部署到其它服务器时 `.env` 若被精简（只剩 `CORS_AUTO_DETECT=true` 一行），其他字段依赖 `Settings` 默认值回退到"只放行 localhost"，其他电脑无法 LAN 访问。**零代码改动**，只在 `backend/.env` 把 `CORS_MODE=auto` / `CORS_AUTO_DETECT=true` / `CORS_INCLUDE_LOCALHOST=true` / `CORS_FRONTEND_PORT=5173` 全部显式写齐。**用户必须重启后端进程**（`Settings` 单例 import 时只读一次 `.env`），重启后日志应出现 `[CORS] 检测到本机IP：[...]` 且最终配置源数 ≥ 3。若仍只有 2 个源（说明 `_detect_local_ips()` 在该服务器网络隔离下拿不到 LAN IP），可取消 `CORS_CUSTOM_ORIGINS` 注释手动指定 `http://<服务器IP>:5173` 兜底。
+
 ---
 
 ## 1. backend/ — FastAPI 后端

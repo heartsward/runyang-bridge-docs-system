@@ -5,16 +5,20 @@
 
 ---
 
-## 当前状态：阶段零~十二全部完成
+## 当前状态：阶段零~二十·20.10 全部完成，阶段二十一进行中
 
-**最后更新**：2026-09-12 18:10
+**最后更新**：2026-09-14 16:08
 
 - 初始 9 项 P0/P1/P2 问题清零；内容提取器重构（extraction 模块）
 - AI 引擎统一到 llama.cpp + Qwen3-VL 单接口；旧 AI 配置清理
-- AI Wiki 系统全链路落地（MD 副本 + FTS5 + FastMCP 6 tools + 前端编辑/下载）
+- AI Wiki 系统全链路落地（MD 副本 + FTS5 + FastMCP 12 tools + 前端编辑/下载）
 - **Android 客户端与移动端 API 整体移除（2026-09-12，阶段十一）**：数据查询与利用改由 AI 工作台经 AI Wiki MCP（`/mcp`）接入
 - **start-services.bat 启动修复（2026-09-12，阶段十二）**：venv 缺失自动创建+装依赖、managed runtime 回退、补 fastmcp 依赖
-- 待用户指定下一个具体任务
+- **阶段十三~十七**：AI 配置热生效 / 测试连接增强 / 后台 worker 修复 / 三处下载统一 / 设置页配置加载
+- **阶段十八**：PDF/图片提取+文类+图片检索+三路中文检索+MCP 图片工具（参考 OpenKB）
+- **阶段十九**：anydoc 替换 LibreOffice（参考 firecrawl/anydoc）
+- **阶段二十·20.1~20.10**：多词联合搜索、Markdown 预览、智能搜索分词、MCP 资产工具、停止脚本安全化等
+- **阶段二十一进行中（2026-09-14 16:08）**：补齐 `backend/.env` CORS auto 模式全套配置（修复"部署到其它服务器后 LAN 访问 CORS 被拒"）
 
 ---
 
@@ -978,4 +982,32 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - `docs/AI-Wiki-MCP调用文档.md` 12 工具与线上 `tools/list` 返回 12 个逐一核对一致
   - 核心文档 grep 幽灵引用（`start-production|restart-services|database_integrated_server|check-config-changes|requirements.txt|start-simple`）→ 全部清零
 - **决策**：bat 沙箱内无法端到端执行，以"逻辑等价验证 + 用户双击"兜底；深度过时文档不逐行重写、加横幅降级处理
+
+---
+
+### 2026-09-14（16:08）— 阶段二十一：补齐 `.env` CORS auto 模式配置（部署到其它服务器 LAN 访问被拒修复）
+
+- **用户报告**：项目部署到其它服务器后，日志显示 `[CORS] 最终配置：2 个源`（仅 `127.0.0.1:5173` + `localhost:5173`），其他电脑无法跨网段访问
+- **根因（环境配置，非代码 bug）**：
+  - `backend/.env` 原本**只写了一行** `CORS_AUTO_DETECT=true`，其余 `CORS_MODE` / `CORS_INCLUDE_LOCALHOST` / `CORS_FRONTEND_PORT` 全部依赖 `Settings` 字段默认值
+  - 在本机开发环境 `.env` 已配置齐全时一切正常；但部署到服务器后，`.env` 可能被精简（或者**用户从其它分支 / 早期版本复制过来**），导致只有 `CORS_AUTO_DETECT=true` 一行被读到
+  - **更隐蔽的诱因**：之前 P0-1 收紧 CORS 默认值（`CORS_AUTO_DETECT` 默认 `False`、`CORS_INCLUDE_HTTPS` 默认 `False`、`CORS_EXTRA_PORTS=""`），用户必须**显式开启**才能 LAN 访问
+  - 在本机这套配置能跑通是因为 `.env` 一直是同一份；一旦服务器 `.env` 不完整，立即回退到"只放行 localhost"
+- **修复（最小改动，零代码）**：
+  - **不改 `config.py` / `main.py`**——黑名单边界（不动 CORS 中间件注册、不动 `BACKEND_CORS_ORIGINS` property 逻辑、不动 `_detect_local_ips()`）
+  - **只改 `backend/.env`**：把 auto 模式需要的环境变量全部显式写齐
+    - `CORS_MODE=auto`
+    - `CORS_AUTO_DETECT=true`
+    - `CORS_INCLUDE_LOCALHOST=true`
+    - `CORS_FRONTEND_PORT=5173`
+  - 加注释说明"若 `_detect_local_ips()` 仍拿不到 LAN IP（UDP 探测失败 + hostname 无 LAN IP），可取消 `CORS_CUSTOM_ORIGINS` 注释手动指定"
+- **必须的后续动作**：
+  - **用户必须重启后端进程**——`Settings` 单例在 import 时只读一次 `.env`，热改不生效；本次和阶段十三的 `Settings.reload()`（仅在配置保存接口里调用）不冲突
+  - 重启后日志应出现 `[CORS] 检测到本机IP：['192.168.x.x']`，最终配置源数 ≥ 3
+  - 若仍只有 2 个源 → `_detect_local_ips()` 在该服务器网络隔离下拿不到 LAN IP → 改 `CORS_CUSTOM_ORIGINS=http://服务器IP:5173` 手动兜底
+- **教训**：
+  - **pydantic-settings 字段默认值 ≠ `.env` 文件值**：默认值仅在 `.env` 没写时生效；一旦只写了字段子集，"半配置"风险极高，部署到新环境极易踩
+  - **CORS 这种"必须靠环境变量才能跑通"的安全开关**，默认值应"宁严勿宽"（当前默认 `False` 是对的），但**必须在文档/注释里把"用户怎么开"写明白**，否则用户部署就抓瞎
+  - 后续若再遇到 LAN 访问问题，先 `cat backend/.env | grep -i CORS` 看完整配置、再看后端启动日志的 `[CORS]` 三行（模式 / 检测 / 最终），比直接改代码快
+- **零代码改动验证**：`git diff backend/app/` 应为空；只有 `backend/.env` 一处变化
 - **提交**：本条随里程碑 commit 提交并推 GitHub
