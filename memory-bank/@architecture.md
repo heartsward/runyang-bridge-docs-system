@@ -45,6 +45,8 @@ runyang-bridge-docs-system/
 
 > **2026-09-14 变更（阶段二十一）**：补齐 `.env` CORS auto 模式全套配置——部署到其它服务器时 `.env` 若被精简（只剩 `CORS_AUTO_DETECT=true` 一行），其他字段依赖 `Settings` 默认值回退到"只放行 localhost"，其他电脑无法 LAN 访问。**零代码改动**，只在 `backend/.env` 把 `CORS_MODE=auto` / `CORS_AUTO_DETECT=true` / `CORS_INCLUDE_LOCALHOST=true` / `CORS_FRONTEND_PORT=5173` 全部显式写齐。**用户必须重启后端进程**（`Settings` 单例 import 时只读一次 `.env`），重启后日志应出现 `[CORS] 检测到本机IP：[...]` 且最终配置源数 ≥ 3。若仍只有 2 个源（说明 `_detect_local_ips()` 在该服务器网络隔离下拿不到 LAN IP），可取消 `CORS_CUSTOM_ORIGINS` 注释手动指定 `http://<服务器IP>:5173` 兜底。
 
+> **2026-09-14 变更（阶段二十二）**：新增 `update.sh`（Linux）/ `update.bat`（Windows）一键更新脚本——部署到其它服务器后日常更新代码用。流程：防御性检查（工作区脏则中止）→ 备份 `.env` → `git pull --ff-only origin main` → 后端 `pip install --upgrade-strategy only-if-needed` → 前端 `npm install` → 重启后端（前端 vite dev HMR 自动生效）。**严格快进 + 不动 `.gitignore` 里的一切**（`.env` / 数据库 / 上传文件 / venv / node_modules / 日志 / 图片库），所以本地数据零风险。回滚命令 `git reset --hard HEAD@{1}`。`docs/部署指南.md` "版本更新"段同步加脚本入口。
+
 ---
 
 ## 1. backend/ — FastAPI 后端
@@ -117,6 +119,17 @@ runyang-bridge-docs-system/
 - `backend/database_integrated_server.py`（开发者文档中提及，作为另一入口）
 - `backend/uploads/`、`backend/task_status/`
 - `requirements.txt` / `requirements-windows.txt`
+
+### 2.0 根目录脚本清单（**7 个真实脚本**）
+| 脚本 | 平台 | 用途 |
+|------|------|------|
+| `install-complete.bat` | Win | 首次部署：建 venv + 装前后端依赖 |
+| `start-services.bat` | Win | 启动后端 :8002 + 前端 :5173（按端口定位 PID，安全） |
+| `stop-services.bat` | Win | 按端口 8002/5173 精确定位 PID 停止（不误杀其他进程） |
+| `start-services.sh` | Linux/macOS | 同 start-services.bat |
+| `stop-services.sh` | Linux/macOS | 同 stop-services.bat |
+| **`update.sh`** ⭐ | Linux/macOS | **一键更新代码并重启后端**（阶段二十二） |
+| **`update.bat`** ⭐ | Win | **一键更新代码并重启后端**（阶段二十二） |
 
 ---
 

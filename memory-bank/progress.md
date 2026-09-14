@@ -1010,4 +1010,28 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - **CORS 这种"必须靠环境变量才能跑通"的安全开关**，默认值应"宁严勿宽"（当前默认 `False` 是对的），但**必须在文档/注释里把"用户怎么开"写明白**，否则用户部署就抓瞎
   - 后续若再遇到 LAN 访问问题，先 `cat backend/.env | grep -i CORS` 看完整配置、再看后端启动日志的 `[CORS]` 三行（模式 / 检测 / 最终），比直接改代码快
 - **零代码改动验证**：`git diff backend/app/` 应为空；只有 `backend/.env` 一处变化
+
+---
+
+### 2026-09-14（19:35）— 阶段二十二：新增 update.sh / update.bat 一键更新脚本
+
+- **用户诉求**：项目部署到其它服务器后，日常更新代码的命令不清楚
+- **方案**：不污染现有 5 个脚本（install-complete / start / stop × 2 平台），新增第 6、7 个：`update.sh`（Linux）+ `update.bat`（Windows），部署到其它服务器的用户只需要 `./update.sh` 或 `update.bat`
+- **设计原则**（黑名单边界）：
+  - `git pull --ff-only`：严格快进，避免意外 merge/rebase
+  - **不动 `.gitignore` 里的一切**：`.env` / `*.db` / `uploads/` / `wiki/images/` / `venv/` / `node_modules/` / `logs/` / `task_status/` 全在 `.gitignore` 里
+  - 防御性检查：工作区脏（有未提交改动）则中止并提示，避免覆盖本地修改
+  - 重启后端：Settings 单例 import 时只读一次 .env，必须重启才能加载新代码；前端 vite dev server HMR 自动生效
+- **脚本流程**：
+  1. 防御性检查 `git diff --quiet HEAD` / `git diff --cached --quiet HEAD`
+  2. 备份 `backend/.env` 到 `.env.update.bak.<时间戳>`（防御性兜底，失败时可手动 cp 恢复）
+  3. `git pull --ff-only origin main`（失败时提示远端拒绝 fast-forward / 网络问题，并提示 .env 备份位置）
+  4. `pip install -r requirements*.txt --upgrade-strategy only-if-needed`（仅补缺，不全量重装）
+  5. `npm install`（仅补缺）
+  6. 自动 `./stop-services.sh` + `./start-services.sh`（Windows 用 .bat 等价）
+  7. 打印新 HEAD SHA + 日志路径 + 回滚命令
+- **回滚**：`git reset --hard HEAD@{1}` 回到 pull 前的代码（reflog 保留，本地旧 commit 可找回）
+- **验证**：`bash -n update.sh` 通过；chmod +x；Windows bat 语法检查（环境限制未实测双击，但语法遵循现有 start/stop-services.bat 风格）
+- **文档**：`docs/部署指南.md` "版本更新"段追加脚本入口（保持原有"方式二手动更新"作为兜底）
+- **memory-bank**：`@architecture.md` 1.9 节新增"2.0 根目录脚本清单"，明确 7 个真实脚本（避免之前 5 → 7 数字漂移）
 - **提交**：本条随里程碑 commit 提交并推 GitHub
