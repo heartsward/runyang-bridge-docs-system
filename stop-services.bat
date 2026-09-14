@@ -1,54 +1,47 @@
 @echo off
-setlocal
+chcp 65001 >nul
+setlocal enabledelayedexpansion
 
 title Stop Services - Runyang Bridge System
 
 echo.
 echo ==========================================
-echo   Stopping Services...
+echo   Stopping Services (port-based)...
 echo ==========================================
 echo.
+echo 只停止本项目占用的端口（8002 后端 / 5173 前端），
+echo 不会触碰机器上其他 Python / Node.js 进程（如 IDE）。
+echo.
 
-echo [Step 1/2] Stopping backend services...
-echo Looking for Python processes...
+set "STOPPED=0"
 
-REM Stop Python processes
-for /f "tokens=2" %%i in ('tasklist /fi "imagename eq python.exe" /fo table 2^>nul ^| find "python.exe"') do (
-    echo Stopping Python process %%i...
-    taskkill /pid %%i /f >nul 2>&1
+for %%P in (8002 5173) do (
+    for /f "tokens=5" %%A in ('netstat -ano ^| findstr ":%%P" ^| findstr "LISTENING"') do (
+        echo [Port %%P] stopping PID %%A ...
+        taskkill /pid %%A /f >nul 2>&1
+        if !errorlevel!==0 (
+            echo   OK
+            set /a STOPPED+=1
+        ) else (
+            echo   already exited (ignored)
+        )
+    )
 )
-
-REM Also try to stop python3.exe processes
-for /f "tokens=2" %%i in ('tasklist /fi "imagename eq python3.exe" /fo table 2^>nul ^| find "python3.exe"') do (
-    echo Stopping Python3 process %%i...
-    taskkill /pid %%i /f >nul 2>&1
-)
-
-echo SUCCESS: Backend services stopped
 
 echo.
-echo [Step 2/2] Stopping frontend services...
-echo Looking for Node.js processes...
-
-REM Stop Node.js processes
-for /f "tokens=2" %%i in ('tasklist /fi "imagename eq node.exe" /fo table 2^>nul ^| find "node.exe"') do (
-    echo Stopping Node.js process %%i...
-    taskkill /pid %%i /f >nul 2>&1
+if %STOPPED%==0 (
+    echo Note: nothing listening on 8002/5173, services not running.
+) else (
+    echo Stopped %STOPPED% service process(es).
 )
-
-echo SUCCESS: Frontend services stopped
 
 echo.
 echo ==========================================
-echo   ALL SERVICES STOPPED SUCCESSFULLY
+echo   DONE
 echo ==========================================
 echo.
-echo Info:
-echo - All Python and Node.js processes terminated
-echo - Ports 8002 and 5173 are now free
-echo - Use start-simple.bat to restart services
+echo Verify ports freed: netstat -ano ^| findstr ":8002 :5173"
+echo Restart:            start-services.bat
 echo.
-
-echo Press any key to exit...
 pause >nul
 endlocal

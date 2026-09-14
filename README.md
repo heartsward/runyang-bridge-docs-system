@@ -44,10 +44,11 @@ start-services.bat
 git clone https://github.com/heartsward/runyang-bridge-docs-system.git
 cd runyang-bridge-docs-system
 
-# 2. 安装后端依赖
+# 2. 安装后端依赖（依赖清单跨平台通用，Windows/Linux 同一份）
 cd backend
-pip install -r requirements-windows.txt  # Windows
-pip install -r requirements.txt          # Linux/macOS
+python -m venv venv                       # 建议用虚拟环境
+# Windows: venv\Scripts\activate   Linux/macOS: source venv/bin/activate
+pip install -r requirements-windows.txt
 
 # 3. 安装前端依赖
 cd ../frontend
@@ -117,7 +118,11 @@ npm run dev
 
 ### 🤖 AI Wiki 与 MCP 数据服务
 - **AI Wiki**: 文档自动提取 Markdown 副本 + 元数据（标题/标签）+ FTS5 全文索引
-- **MCP 服务**: 内置 MCP server（`/mcp`），供 WorkBuddy 等 AI 工作台进行数据查询和利用
+- **MCP 服务**: 内置 MCP server（`http://localhost:8002/mcp`），供 WorkBuddy 等 AI 工作台直接查询，**12 个工具**覆盖：
+  - 知识库检索（search_kb / get_doc / get_doc_content / list_backlinks / list_tags / generate_report）
+  - 文档图片（get_doc_images / search_images / list_categories）
+  - **设备资产**（search_assets 查地址/账号密码、get_asset 单台全字段、list_assets 清单）
+  - 详见 [docs/AI-Wiki-MCP调用文档.md](docs/AI-Wiki-MCP调用文档.md)
 - **响应式设计**: Web 界面适配移动设备
 
 ---
@@ -192,7 +197,11 @@ runyang-bridge-docs-system/
 ├── docs/                      # 项目文档
 ├── logs/                      # 应用日志
 ├── backups/                   # 数据备份
-├── start-services.bat         # Windows 启动脚本
+├── install-complete.bat       # Windows 一键安装（建 venv + 装依赖）
+├── start-services.bat         # Windows 启动（开发/生产模式可选）
+├── stop-services.bat          # Windows 停止（按端口精确停止，不误杀其他进程）
+├── start-services.sh          # Linux/macOS 启动
+├── stop-services.sh           # Linux/macOS 停止（按端口精确停止）
 └── README.md                  # 项目说明
 ```
 

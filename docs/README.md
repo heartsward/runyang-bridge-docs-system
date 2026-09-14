@@ -27,6 +27,9 @@
 - **[开发者文档](./开发者文档.md)** - 开发环境和代码规范
 - **[API接口文档](./API接口文档.md)** - 完整的API接口说明
 - **[版本更新日志](./版本更新日志.md)** - 系统更新历史和规划
+- **[AI-Wiki-MCP调用文档](./AI-Wiki-MCP调用文档.md)** - ⭐ AI 工作台接入 MCP 的权威参考（12 个工具：知识库/图片/设备资产）
+- **[AI-Wiki部署与使用指南](./AI-Wiki部署与使用指南.md)** - AI Wiki 与 MCP 部署、API、配置
+- **[生产环境脚本说明](./生产环境脚本说明.md)** - 安装/启动/停止脚本使用说明
 
 ### 🎯 功能特性
 
@@ -38,15 +41,16 @@
 - **批量操作**: 支持批量上传和管理
 
 #### 🔍 智能搜索
-- **全文搜索**: 搜索文档完整内容
-- **权重排序**: 内容>标题>描述的智能排序
-- **高亮显示**: 搜索结果关键词高亮
-- **搜索建议**: 智能搜索推荐
+- **全文搜索**: 搜索文档完整内容（含多词联合搜索）
+- **权重排序**: 命中词数加权排序
+- **高亮显示**: 搜索结果关键词高亮（多词分别着色 + 逐词导航）
+- **Markdown 预览**: 预览页与文档管理一致的 Markdown 渲染
 - **统计分析**: 搜索行为数据分析
 
 #### 🏗️ 资产管理
 - **设备信息**: 服务器、网络、存储、安全设备管理
 - **状态监控**: 设备运行状态和维护记录
+- **MCP 直查**: 通过 AI Wiki MCP 直接查询设备地址/账号密码/全部信息（见 AI-Wiki-MCP调用文档）
 - **智能提取**: 从文档自动提取设备信息
 - **数据导出**: Excel/CSV格式导出
 - **统计分析**: 资产分布和使用统计
@@ -109,22 +113,22 @@ FastAPI + Python 3.8+
 #### 一键启动
 ```bash
 # Windows用户
-start-production.bat
+start-services.bat        # 首次先跑 install-complete.bat
 
 # Linux/macOS用户
-./start-production.sh
+./start-services.sh
 ```
 
 #### 手动启动
 ```bash
-# 1. 安装依赖
-cd backend && pip install -r requirements.txt
+# 1. 安装依赖（依赖清单跨平台通用）
+cd backend && python -m venv venv && venv/bin/pip install -r requirements-windows.txt
 cd ../frontend && npm install
 
-# 2. 启动后端
-cd ../backend && python database_integrated_server.py
+# 2. 启动后端（FastAPI 入口 app.main:app，端口 8002）
+cd backend && venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8002
 
-# 3. 启动前端 (新终端)
+# 3. 启动前端 (新终端, 端口 5173)
 cd frontend && npm run dev
 ```
 

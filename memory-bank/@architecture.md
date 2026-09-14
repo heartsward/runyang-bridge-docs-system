@@ -24,7 +24,7 @@ runyang-bridge-docs-system/
 ```
 
 > **2026-09-12 变更**：`android/` 目录及后端移动端 API（mobile 端点/schema/JWT 函数）已整体移除（阶段十一）。
-> 数据查询与利用改由 AI 工作台（如 WorkBuddy）通过 **AI Wiki MCP**（`http://<host>:8002/mcp`，6 个 tools）接入。
+> 数据查询与利用改由 AI 工作台（如 WorkBuddy）通过 **AI Wiki MCP**（`http://<host>:8002/mcp`，**12 个 tools**：KB 8 + 图像 2 + 资产 2，见 `docs/AI-Wiki-MCP调用文档.md`）接入。
 >
 > **2026-09-12 变更（阶段十五）**：修复 `main.py` 挂载 MCP 时用 `app.router.lifespan_context = mcp_app.lifespan` **整体覆盖**主应用 lifespan 导致后台提取 worker 永不启动（上传卡 pending）的 P0 回归。
 > 现改为：模块级 `mcp_lifespan`（默认空），MCP 挂载成功块里 `mcp_lifespan = mcp_app.lifespan`；主 `lifespan` 内 `async with mcp_lifespan(app)` 执行原 3 步（bcrypt/默认用户/后台 worker）。**改 `main.py` 后需手动重启后端**（本机 8002 无 supervisor 自动重生）。

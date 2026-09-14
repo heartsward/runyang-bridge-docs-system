@@ -2041,3 +2041,27 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **怎么验**：重启后端 → tools/list 12 个；`search_assets(收费网堡垒机)` 单台→直接全字段含密码；`search_assets(防火墙)` 多台→摘要列表+hint；`search_assets(不存在xyz)` → total 0；`list_assets()` 精简列表；`get_asset(57)` 不变；`search_kb` 回归
 - **回退方案**：git checkout mcp_server.py
 - **状态**：✅ 完成（MCP 实测 7 项全过：单台命中直接全字段含密码、多台摘要无密码+hint、0 命中、list_assets 81 台、get_asset 不变、search_kb 回归）
+
+#### 20.10 里程碑体检：脚本修复 + Linux 脚本补齐 + 文档对齐
+- **背景**：用户要求检查环境安装/运行/停止脚本是否可用、README 与 AI Wiki MCP 调用文档是否完整，修改后提交形成里程碑
+- **盘点发现的问题**：
+  1. `stop-services.bat` 按进程名杀**全机器**所有 python.exe/node.exe（会误杀 IDE 等无关进程）→ 改按端口 8002/5173 精确定位 PID
+  2. `stop-services.bat` 末尾提示"Use start-simple.bat"——该文件不存在
+  3. README/部署文档引用 `start-services.sh`/`stop-services.sh`（Linux），仓库里**不存在**（只有 .bat）
+  4. `docs/AI-Wiki部署与使用指南.md` 仍写"6 个 tools"，实际 12 个（20.8/20.9 加了资产域）
+  5. `docs/生产环境脚本说明.md` 整篇描述 `start-production*.bat/sh`、`stop-production.*`、`restart-services.sh`——**全部不存在**（幽灵文档）
+  6. `docs/部署指南.md`/`版本升级指南.md`/`开发者文档.md` 同样引用幽灵脚本
+- **做什么**：
+  1. 重写 `stop-services.bat`：按端口（8002/5173）找 PID 精确停止 + 明确提示"不会动其他 Python/Node 进程"；实测验证
+  2. 新增 `stop-services.sh`（Linux 对应版，端口定位，pgrep 兜底）
+  3. 新增 `start-services.sh`（Linux 开发模式启动，与 .bat 行为对齐）
+  4. 重写 `docs/AI-Wiki部署与使用指南.md` 的 tools 章节为 12 个（含资产域 search_assets/get_asset/list_assets 用法与返回格式说明、WorkBuddy 调用示例）
+  5. 新增 `docs/AI-Wiki-MCP调用文档.md`：完整 12 工具参数/返回/示例/鉴权说明（调用方主文档）
+  6. 重写 `docs/生产环境脚本说明.md`：只描述真实存在的 3 个脚本 + 端口定位停止原理 + 故障排除（删除幽灵脚本章节）
+  7. 修 `README.md`（Linux 脚本说明、MCP 简介补资产工具）、`docs/部署指南.md`/`版本升级指南.md`/`开发者文档.md` 的幽灵脚本引用
+  8. `docs/版本更新日志.md` 记里程碑
+- **能改什么**：上述脚本 + 文档；不动后端/前端代码逻辑
+- **不能改什么**：`install-complete.bat`/`start-services.bat` 核心逻辑（已实测可用，仅修 stop）；memory-bank 历史进度条目（历史不改写）
+- **怎么验**：stop-services.bat 实测（停 8002+5173，IDE 进程不受影响，端口释放）→ 再启动恢复；sh 脚本 bash -n 语法检查；文档中不再出现幽灵脚本名（grep 验证）；MCP 文档 12 工具与 tools/list 实测一致
+- **回退方案**：git checkout 涉及文件
+- **状态**：✅ 完成（stop-services.bat 按端口重写 + 2 个 Linux 脚本补齐并 bash -n 通过；bat 端口取 PID 逻辑经 bash 等价命令验证——沙箱内 cmd 无法执行 bat 属环境限制，双击运行不受影响；docs/AI-Wiki-MCP调用文档.md 12 工具与线上 tools/list 一致；核心文档幽灵引用 grep 清零；6 个深度过时文档加时效横幅）

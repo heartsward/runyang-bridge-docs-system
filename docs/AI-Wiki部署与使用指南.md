@@ -11,7 +11,7 @@
 │  · 文档上传/预览/搜索    │◀───────▶│  · 调 search_kb / get_doc_content / │
 │  · 提取内容为 MD 副本    │  MCP    │    list_backlinks / list_tags /     │
 │  · SQLite FTS5 索引       │ /mcp/   │    generate_report                  │
-│  · FastMCP 暴露 6 tools  │         │                                      │
+│  · FastMCP 暴露 12 tools │         │                                      │
 └──────────────────────────┘         └──────────────────────────────────────┘
 ```
 
@@ -77,16 +77,22 @@ related: []
 }
 ```
 
-**暴露的 6 个 tools**：
+**暴露的 12 个 tools**（完整参数/返回/示例见 [AI-Wiki-MCP调用文档.md](AI-Wiki-MCP调用文档.md)）：
 
-| Tool | 输入 | 输出 |
-|------|------|------|
-| `search_kb` | `query, top_k, tag, doc_type` | 文档列表（含 snippet） |
-| `get_doc` | `doc_id` | 文档元数据 + tags |
-| `get_doc_content` | `doc_id, max_chars` | MD 副本完整内容 |
-| `list_backlinks` | `doc_id` | 引用此文档的其他文档列表 |
-| `list_tags` | `prefix` | 标签 + 文档数 |
-| `generate_report` | `topic, tag, max_docs` | Markdown 报告骨架 |
+| 域 | Tool | 输入 | 输出 |
+|----|------|------|------|
+| 知识库 | `search_kb` | `query, top_k, tag, doc_type, category` | 文档列表（含 snippet） |
+| 知识库 | `get_doc` | `doc_id` | 文档元数据 + tags |
+| 知识库 | `get_doc_content` | `doc_id, max_chars` | MD 副本完整内容 |
+| 知识库 | `list_backlinks` | `doc_id` | 引用此文档的其他文档列表 |
+| 知识库 | `list_tags` | `prefix` | 标签 + 文档数 |
+| 知识库 | `generate_report` | `topic, tag, max_docs` | Markdown 报告骨架 |
+| 图片 | `get_doc_images` | `doc_id` | 文档图片列表（含 url） |
+| 图片 | `search_images` | `query, top_k, doc_id?` | 图片检索结果（含 url） |
+| 图片 | `list_categories` | 无 | 业务分类 + 文档数 |
+| **资产** | `search_assets` | `query, top_k, asset_type?, network_location?, status?` | **命中 1 台直接全字段（含账号密码）；多台返回摘要 + hint** |
+| **资产** | `get_asset` | `asset_id` | 单台设备全部字段（含账号密码） |
+| **资产** | `list_assets` | `asset_type?, network_location?, status?, limit` | 设备轻量清单（不含密码） |
 
 ## 配置开关（`backend/.env`）
 
@@ -127,16 +133,24 @@ curl -X POST http://localhost:8002/api/v1/wiki/rebuild \
 - 中文搜索效果依赖 FTS5 unicode61 分词（够用但非最优）
 - 大批量重建索引较慢（SQLite 单线程）
 - 暂未实现向量检索（需要语义召回时再加）
+- 资产查询为结构化 LIKE 模糊匹配（当前百台量级毫秒级，资产到数千台再评估加 FTS5）
 
 ## WorkBuddy 调用示例
 
 配置完 MCP 后，可以直接对 WorkBuddy 说：
 
 ```
+# 知识库
 "搜索所有关于网络安全的文档"
 "找一下提到防火墙的资料"
 "生成一份关于网络拓扑的报告"
 "列出所有标签"
+
+# 设备资产（直接问地址/账号密码/设备信息）
+"收费网堡垒机的地址、用户名和密码是多少"
+"172.16.8.106 这台设备的信息是什么"
+"收费网有哪些设备"
+"asset 41 的全部信息"
 ```
 
-WorkBuddy 会自动调用 `search_kb` / `get_doc_content` / `generate_report` 等 tool。
+WorkBuddy 会自动调用 `search_kb` / `get_doc_content` / `generate_report`（知识库）、`search_assets` / `get_asset` / `list_assets`（设备资产）等 tool。

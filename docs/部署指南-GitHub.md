@@ -1,5 +1,9 @@
 # GitHub部署指南
 
+> ⚠️ **文档时效提示（2026-09-14 里程碑体检）**：本文撰写于早期架构阶段，其中提到的 `backend/database_integrated_server.py` 入口与 `start-production*` / `restart-services` 等脚本**已不存在**。
+> 当前真实后端入口为 **`uvicorn app.main:app`（端口 8002，FastAPI）**；服务脚本请用仓库根目录的 **`start-services.*` / `stop-services.*` / `install-complete.bat`**。
+> 权威参考：[README](../README.md)、[生产环境脚本说明](生产环境脚本说明.md)、[AI-Wiki-MCP调用文档](AI-Wiki-MCP调用文档.md)。下文涉及上述文件处请按此口径理解。
+
 ## 📦 将项目上传到GitHub
 
 ### 1. 创建GitHub仓库

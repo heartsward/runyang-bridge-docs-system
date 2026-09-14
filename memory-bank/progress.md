@@ -949,4 +949,33 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   6. `get_asset(57)` 39 字段不变 ✅
   7. `search_kb` 回归正常 ✅
 - **效果**：典型"查某设备账号密码"从 2 轮工具调用 → **1 轮**；"有哪些设备"类从 search_assets 拉全字段 → list_assets 轻量一轮
-- **提交**：待提交（mcp_server.py + memory-bank）
+- **提交**：随 20.10 里程碑一并提交
+
+---
+
+### 2026-09-14（14:40 - 16:30）— 阶段二十·20.10：环境脚本体检 + 文档对齐（里程碑提交）
+- **用户指令**："检查测试项目的环境安装脚本、运行/结束脚本是否正常，说明文档和 AI Wiki MCP 调用文档是否完整清楚；如有修改，提交 GitHub 形成里程碑"
+- **体检发现的 6 类问题**：
+  1. `stop-services.bat` 原逻辑按**进程名全杀** python.exe/node.exe（会误杀 IDE 等无关进程，本机 node 进程 6 个）
+  2. `findstr /c:":8002.*LISTENING"` 中 `/c:` 强制字面匹配，`.*` 不是通配 → 原逻辑**静默无效**
+  3. Linux 端只有启动无停止脚本，且启动脚本依赖不存在的 `requirements.txt`（实际只有 `requirements-windows.txt`，跨平台通用）
+  4. 文档大量引用**幽灵脚本/入口**：`start-production*`、`restart-services.sh`、`check-config-changes.*`、`start-simple.bat`、`backend/database_integrated_server.py`（均不存在；真实入口 `uvicorn app.main:app` 端口 8002）
+  5. MCP 文档口径过期："6 个工具" vs 实际 **12 个**（KB 8 + 图像 2 + 资产 2）
+  6. 缺一份面向调用方的 MCP 调用权威文档
+- **变更（8 项）**：
+  - `stop-services.bat` 重写：按端口 8002/5173 取 PID 精确 `taskkill`（`netstat | findstr ":8002" | findstr "LISTENING"` 取第 5 列）；明确不动其他 Python/Node 进程；CRLF
+  - 新增 `stop-services.sh`（端口优先 lsof→ss→fuser，TERM 后 KILL）、`start-services.sh`（nohup + 日志 + PID 文件，venv/node_modules 自检，依赖文件优先级 requirements.txt > requirements-windows.txt）；均 `bash -n` 通过 + `chmod +x`
+  - 新增 `docs/AI-Wiki-MCP调用文档.md`：连接配置、12 工具参数/返回逐项说明、资产域自适应返回 JSON 示例 + 字段释义、典型问法→工具映射表、鉴权与已知限制
+  - `docs/AI-Wiki部署与使用指南.md`：6→12 工具，架构/工具表补资产域，WorkBuddy 调用示例补资产问法
+  - `docs/生产环境脚本说明.md` 全量重写（仅 5 个真实脚本 + 端口停止原理 + 真实端点含 /mcp）
+  - `README.md`：依赖安装改 `requirements-windows.txt`（跨平台通用）+ venv；MCP 段列 12 工具并链接新文档；目录树列 5 脚本
+  - `docs/README.md`、`docs/部署指南.md`、`docs/开发者文档.md`、`docs/版本升级指南.md`：幽灵引用全部替换为真实脚本/入口/依赖文件
+  - 6 个深度过时文档（部署指南-GitHub、系统架构文档、配置指南-CORS/域名/网络/综合）头部加**时效声明横幅**（2026-09-14 里程碑体检）
+  - `docs/版本更新日志.md` 顶部新增本里程碑条目
+- **验证**：
+  - 5 个真实脚本逐一核对存在性/语法（bat CRLF、sh `bash -n`）
+  - bat 端口取 PID 逻辑用 bash 等价命令验证（`:8002`+LISTENING → PID 190668，与权威值一致）；沙箱内 `cmd //C` 无法执行 bat（环境限制，双击运行不受影响）
+  - `docs/AI-Wiki-MCP调用文档.md` 12 工具与线上 `tools/list` 返回 12 个逐一核对一致
+  - 核心文档 grep 幽灵引用（`start-production|restart-services|database_integrated_server|check-config-changes|requirements.txt|start-simple`）→ 全部清零
+- **决策**：bat 沙箱内无法端到端执行，以"逻辑等价验证 + 用户双击"兜底；深度过时文档不逐行重写、加横幅降级处理
+- **提交**：本条随里程碑 commit 提交并推 GitHub
