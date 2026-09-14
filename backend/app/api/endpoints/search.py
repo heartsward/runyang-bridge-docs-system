@@ -21,14 +21,16 @@ import time
 
 router = APIRouter()
 
-# 多词切分：空白 + 中英文标点（阶段二十·20.2）
-_TERM_SPLIT_RE = re.compile(r'[\s，。、；：！？,.;:!?()（）\[\]【】"\'""''《》<>／/\\|]+')
+# 多词切分：仅按空白（阶段二十·20.5）
+# 标点（含 . / 等）属于词的一部分——"172.16.8.106" 是一个完整 IP，不能拆开
+_TERM_SPLIT_RE = re.compile(r'\s+')
 
 
 def tokenize_query(q: str) -> List[str]:
-    """把用户查询切分为搜索词（阶段二十·20.2）
+    """把用户查询切分为搜索词（阶段二十·20.2 / 20.5）
 
-    - 空白与中英文标点均为分隔符（"交换机 配置"→["交换机","配置"]）
+    - 仅空白为分隔符（"交换机 配置"→["交换机","配置"]）
+    - 其余符号（标点/IP/URL 等）视为词的一部分
     - 去重保序；每词截断到 30 字符（防止超长词拖慢正则）
     - 无分隔符时返回单元素列表 → 调用方保持"整体串匹配"的旧语义
     """
@@ -436,10 +438,16 @@ async def preview_document(
             document_structure = format_result.get('structure', {})
         
         
-        # 如果有高亮关键词，添加高亮标记
+        # 如果有高亮关键词，添加高亮标记（阶段二十·20.5：按空格分词后多词高亮，
+        # 每个 <mark> 带 data-term 属性供前端按词分组导航）
         if highlight:
             search_service = SearchService()
-            content = search_service.highlight_text(content, highlight)
+            hl_terms = tokenize_query(highlight)
+            if len(hl_terms) == 1:
+                # 单词：保持原有整体串匹配语义
+                content = search_service.highlight_text(content, highlight.strip())
+            else:
+                content = search_service.highlight_terms(content, hl_terms)
         
         # 记录文档查看统计（仅限已登录用户）
         if current_user:

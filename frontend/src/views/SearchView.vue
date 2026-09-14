@@ -194,6 +194,20 @@
               </template>
               复制内容
             </n-button>
+            <!-- 编辑（与文档管理一致：仅超管，编辑 MD 副本，保存自动重建索引） -->
+            <n-button
+              v-if="currentUser?.is_superuser && previewMode === 'extracted'"
+              size="small"
+              type="primary"
+              style="background-color: #18a058; border-color: #18a058; color: white;"
+              @click="togglePreviewEdit"
+              :loading="savingPreviewEdit"
+            >
+              <template #icon>
+                <n-icon :component="PencilOutline" />
+              </template>
+              {{ previewEditMode ? '退出编辑' : '编辑' }}
+            </n-button>
             <n-dropdown
               trigger="click"
               :options="downloadMenuOptions"
@@ -236,27 +250,70 @@
           </n-radio-group>
         </n-space>
         
-        <!-- 搜索高亮导航（仅在提取内容模式下显示） -->
-        <n-space align="center" style="margin-bottom: 16px;" v-if="previewMode === 'extracted' && searchQuery && highlightedCount > 0">
-          <n-tag type="warning" size="small">
-            🔍 "{{ searchQuery }}" 共 {{ highlightedCount }} 处
-          </n-tag>
-          <n-button-group size="tiny">
-            <n-button @click="scrollToHighlightInPreview(-1)" :disabled="currentHighlightIndex <= 0">
-              ↑
+        <!-- 编辑模式操作栏 -->
+        <n-space align="center" style="margin-bottom: 16px;" v-if="previewEditMode">
+          <n-text depth="3" style="font-size: 12px;">正在编辑 Markdown 副本，保存后自动重建索引</n-text>
+          <n-space>
+            <n-button size="small" @click="cancelPreviewEdit">取消</n-button>
+            <n-button size="small" type="primary" @click="savePreviewEdit" :loading="savingPreviewEdit">
+              保存
             </n-button>
-            <n-button @click="scrollToHighlightInPreview(1)" :disabled="currentHighlightIndex >= highlightedCount - 1">
-              ↓  
-            </n-button>
-          </n-button-group>
-          <n-text depth="3" style="font-size: 11px;">
-            {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
-          </n-text>
+          </n-space>
         </n-space>
+
+        <!-- 搜索高亮导航（多词分别导航，仅在提取内容模式下显示） -->
+        <div style="margin-bottom: 16px;" v-if="!previewEditMode && previewMode === 'extracted' && searchQuery && highlightedCount > 0">
+          <n-space vertical size="small" style="width: 100%;">
+            <n-space align="center">
+              <n-tag type="warning" size="small">
+                🔍 共 {{ highlightedCount }} 处
+              </n-tag>
+              <n-text depth="3" style="font-size: 11px;">点击词切换导航目标</n-text>
+            </n-space>
+            <!-- 每个词独立导航（多词用空格分隔） -->
+            <n-space align="center" size="small" wrap>
+              <div
+                v-for="group in termGroups"
+                :key="group.term"
+                class="term-nav-item"
+                :class="{ 'term-nav-active': activeNavTerm === group.term }"
+                :style="{ borderColor: getTermColor(group.term) }"
+                @click="selectNavTerm(group.term)"
+              >
+                <span class="term-nav-label" :style="{ color: getTermColor(group.term) }">
+                  {{ group.term }}
+                </span>
+                <span class="term-nav-count">{{ group.count }}处</span>
+                <n-button-group size="tiny">
+                  <n-button
+                    @click.stop="scrollToHighlightInPreview(group.term, -1)"
+                    :disabled="getTermCursor(group.term) <= 0"
+                  >↑</n-button>
+                  <n-button
+                    @click.stop="scrollToHighlightInPreview(group.term, 1)"
+                    :disabled="getTermCursor(group.term) >= group.count - 1"
+                  >↓</n-button>
+                </n-button-group>
+                <span class="term-nav-pos">
+                  {{ getTermCursor(group.term) + 1 }} / {{ group.count }}
+                </span>
+              </div>
+            </n-space>
+          </n-space>
+        </div>
         
+        <!-- 编辑模式：textarea 直接编辑 Markdown 副本 -->
+        <n-input
+          v-if="previewEditMode"
+          v-model:value="previewEditContent"
+          type="textarea"
+          :autosize="{ minRows: 15, maxRows: 30 }"
+          placeholder="编辑 Markdown 内容..."
+          style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
+        />
         <!-- 提取内容模式 -->
-        <n-scrollbar 
-          v-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
+        <n-scrollbar
+          v-else-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
           style="max-height: 60vh;"
         >
           <pre v-html="sanitizeDocumentHtml(previewContent)" class="preview-content"></pre>
@@ -316,7 +373,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NLayout,
@@ -349,16 +406,21 @@ import {
   NDescriptionsItem,
   NSpin,
   NAlert,
+  NRadioButton,
   useMessage
 } from 'naive-ui'
 import {
   SearchOutline,
   DocumentTextOutline,
   CopyOutline,
-  DownloadOutline
+  DownloadOutline,
+  PencilOutline
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { apiService } from '@/services/api'
+import { authService } from '@/services'
+import { wikiService } from '@/services/wiki'
+import type { User } from '@/types/api'
 import { downloadWikiDocument } from '@/utils/file-download'
 
 interface DocumentSearchResult {
@@ -421,9 +483,21 @@ const previewContent = ref('')
 const previewDocumentData = ref<PreviewData | null>(null)
 const previewMode = ref<'extracted' | 'original'>('extracted')
 
-// 搜索高亮导航相关
-const highlightedCount = ref(0)
+// 搜索高亮导航相关（阶段二十·20.5：多词分别导航）
+// termGroups: 按查询顺序 [{ term, count, indexes: 全局 mark 索引[] }]
+const termGroups = ref<Array<{ term: string; count: number; indexes: number[] }>>([])
 const currentHighlightIndex = ref(0)
+// 每个词当前导航到的位置（term → 该词 indexes 中的下标）
+const termCursor = ref<Record<string, number>>({})
+
+// 编辑模式相关（与文档管理 W4 一致：仅超管可编辑 MD 副本）
+const currentUser = ref<User | null>(null)
+const previewEditMode = ref(false)
+const previewEditContent = ref('')
+const savingPreviewEdit = ref(false)
+
+// 总高亮数（所有词命中数之和）
+const highlightedCount = computed(() => termGroups.value.reduce((sum, g) => sum + g.count, 0))
 
 // 搜索结果
 const documentResults = ref<DocumentSearchResult[]>([])
@@ -598,6 +672,8 @@ const previewDocument = async (doc: DocumentSearchResult) => {
   showPreviewModal.value = true
   previewContent.value = ''
   previewMode.value = 'extracted' // 重置预览模式
+  previewEditMode.value = false   // 重置编辑模式
+  previewEditContent.value = ''
   
   await loadPreviewContent(doc.id)
 }
@@ -619,7 +695,7 @@ const loadPreviewContent = async (documentId: number) => {
     previewDocumentData.value = response
     previewContent.value = response.content
     
-    // 处理高亮：统计高亮数量并添加索引
+    // 处理高亮：按词分组统计（阶段二十·20.5）
     updatePreviewHighlightCount()
     
     // 调试：检查PDF切换功能相关数据
@@ -638,63 +714,141 @@ const loadPreviewContent = async (documentId: number) => {
   }
 }
 
-// 统计预览内容中的高亮数量
+// 从查询串按空白分词（与后端 tokenize_query 一致，仅空格分隔）
+const splitQueryTerms = (q: string): string[] => {
+  const seen = new Set<string>()
+  const terms: string[] = []
+  for (const p of (q || '').trim().split(/\s+/)) {
+    const t = p.slice(0, 30)
+    if (t && !seen.has(t)) {
+      seen.add(t)
+      terms.push(t)
+    }
+  }
+  return terms
+}
+
+// 统计预览内容中的高亮，并按词分组（阶段二十·20.5 多词分别导航）
 const updatePreviewHighlightCount = () => {
   if (!previewContent.value) {
-    highlightedCount.value = 0
+    termGroups.value = []
     currentHighlightIndex.value = 0
     return
   }
-  
-  // 统计<mark>标签数量
-  const markMatches = previewContent.value.match(/<mark[^>]*>/g)
-  highlightedCount.value = markMatches ? markMatches.length : 0
-  currentHighlightIndex.value = 0
-  
-  // 为现有的mark标签添加索引（如果还没有的话）
-  if (highlightedCount.value > 0 && !previewContent.value.includes('data-highlight-index')) {
-    addPreviewHighlightIndexes()
-  }
-  
-  // 自动跳转到第一个高亮位置
-  if (highlightedCount.value > 0) {
-    setTimeout(() => scrollToHighlightInPreview(0), 100)
-  }
-}
 
-// 为预览中的高亮添加索引
-const addPreviewHighlightIndexes = () => {
+  let content = previewContent.value
+
+  // 为 <mark> 添加全局索引 + 词归属标记 + 分词色 class（data-term 由后端注入，缺失时回退整个查询串）
   let highlightIndex = 0
-  const contentWithIndexes = previewContent.value.replace(/<mark>/g, () => {
-    return `<mark data-highlight-index="${highlightIndex++}">`
+  const termOrder = splitQueryTerms(searchQuery.value)
+  content = content.replace(/<mark([^>]*)>/g, (_full, attrs: string) => {
+    let dataTerm = ''
+    const m = attrs.match(/data-term="([^"]*)"/)
+    if (m) {
+      // 后端用 html.escape 转义过属性值，这里还原（仅 &quot; &amp; 两种可能）
+      dataTerm = m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+    } else if (termOrder.length === 1) {
+      dataTerm = termOrder[0].toLowerCase()
+    }
+    const dataHighlightTerm = dataTerm
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+    // 多词时按词序着色（单词不加 class，保持默认黄）
+    const colorIdx = termOrder.findIndex(t => t.toLowerCase() === dataTerm)
+    const colorClass = termOrder.length > 1 && colorIdx >= 0
+      ? ` class="hl-term-${colorIdx % 8}"`
+      : ''
+    return `<mark${attrs}${colorClass} data-highlight-term="${dataHighlightTerm}" data-highlight-index="${highlightIndex++}">`
   })
-  
-  previewContent.value = contentWithIndexes
+  previewContent.value = content
+
+  // 按查询词顺序分组（命中的词才有组；顺序与用户输入一致）
+  const indexByTerm: Record<string, number[]> = {}
+  const markRegex = /<mark([^>]*)>/g
+  let mm: RegExpExecArray | null
+  while ((mm = markRegex.exec(content)) !== null) {
+    const attrs = mm[1]
+    const termMatch = attrs.match(/data-highlight-term="([^"]*)"/)
+    const idxMatch = attrs.match(/data-highlight-index="(\d+)"/)
+    if (!termMatch || !idxMatch) continue
+    const term = termMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+    const idx = parseInt(idxMatch[1], 10)
+    ;(indexByTerm[term] = indexByTerm[term] || []).push(idx)
+  }
+
+  const groups: Array<{ term: string; count: number; indexes: number[] }> = []
+  for (const t of termOrder) {
+    const key = t.toLowerCase()
+    const indexes = indexByTerm[key]
+    if (indexes && indexes.length > 0) {
+      indexes.sort((a, b) => a - b)
+      groups.push({ term: t, count: indexes.length, indexes })
+    }
+  }
+  // 兜底：后端未带 data-term 且多词时（不应发生），把全部 mark 归第一词
+  if (groups.length === 0 && highlightIndex > 0) {
+    groups.push({ term: termOrder[0] || searchQuery.value, count: highlightIndex, indexes: Array.from({ length: highlightIndex }, (_, i) => i) })
+  }
+
+  termGroups.value = groups
+  termCursor.value = {}
+  groups.forEach(g => { termCursor.value[g.term] = 0 })
+  activeNavTerm.value = groups.length > 0 ? groups[0].term : ''
+  currentHighlightIndex.value = 0
+
+  // 自动跳转到第一词的首个高亮位置
+  if (groups.length > 0) {
+    setTimeout(() => scrollToHighlightInPreview(groups[0].term, 0), 150)
+  }
 }
 
-// 在预览中滚动到指定高亮位置
-const scrollToHighlightInPreview = (direction: number) => {
-  if (highlightedCount.value === 0) return
-  
-  // 计算新的索引
-  let newIndex = currentHighlightIndex.value + direction
-  if (newIndex < 0) newIndex = 0
-  if (newIndex >= highlightedCount.value) newIndex = highlightedCount.value - 1
-  
-  currentHighlightIndex.value = newIndex
-  
+// 当前导航目标词（点击词卡片切换）
+const activeNavTerm = ref('')
+
+// 每个词的当前光标位置（1 基显示）
+const getTermCursor = (term: string): number => {
+  return termCursor.value[term] ?? 0
+}
+
+// 选中导航目标词（仅更新选中态，不滚动）
+const selectNavTerm = (term: string) => {
+  activeNavTerm.value = term
+}
+
+// 多词颜色：按查询顺序取色，单词保持默认黄色
+const TERM_COLORS = ['#f5a623', '#4a90d9', '#7ed321', '#bd10e0', '#e51400', '#50e3c2', '#b8261b', '#fbc531']
+const getTermColor = (term: string): string => {
+  if (termGroups.value.length <= 1) return '#f5a623'
+  const i = termGroups.value.findIndex(g => g.term === term)
+  return TERM_COLORS[i >= 0 ? i % TERM_COLORS.length : 0]
+}
+
+// 在预览中滚动到指定词的第 N 处高亮（direction: 相对偏移，0 = 当前位置）
+const scrollToHighlightInPreview = (term: string, direction: number) => {
+  const group = termGroups.value.find(g => g.term === term)
+  if (!group || group.count === 0) return
+
+  activeNavTerm.value = term
+
+  // 计算该词内的新光标位置
+  let newCursor = (termCursor.value[term] ?? 0) + direction
+  if (newCursor < 0) newCursor = 0
+  if (newCursor >= group.count) newCursor = group.count - 1
+  termCursor.value[term] = newCursor
+
+  const globalIndex = group.indexes[newCursor]
+  currentHighlightIndex.value = globalIndex
+
   // 查找对应的高亮元素并滚动到视图
   setTimeout(() => {
-    const targetMark = document.querySelector(`.preview-content mark[data-highlight-index="${newIndex}"]`)
+    const targetMark = document.querySelector(`.preview-content mark[data-highlight-index="${globalIndex}"]`)
     if (targetMark) {
       // 移除之前的活跃高亮样式
       document.querySelectorAll('.preview-content mark.active-highlight').forEach(el => {
         el.classList.remove('active-highlight')
       })
-      
       // 添加当前高亮样式
       targetMark.classList.add('active-highlight')
-      
       // 滚动到视图
       targetMark.scrollIntoView({
         behavior: 'smooth',
@@ -702,6 +856,60 @@ const scrollToHighlightInPreview = (direction: number) => {
       })
     }
   }, 100)
+}
+
+// ===== 编辑模式（与文档管理 W4 一致：MD 副本编辑，保存自动重建索引） =====
+
+// 加载当前用户（判断是否超管）
+const loadCurrentUser = async () => {
+  try {
+    currentUser.value = await authService.getCurrentUser()
+  } catch (error) {
+    console.error('获取用户信息失败:', error)
+  }
+}
+
+const togglePreviewEdit = async () => {
+  if (previewEditMode.value) {
+    cancelPreviewEdit()
+    return
+  }
+  if (!previewDocumentData.value) return
+  try {
+    const { content } = await wikiService.getMarkdown(previewDocumentData.value.document_id)
+    previewEditContent.value = content
+    previewEditMode.value = true
+  } catch (e: any) {
+    message.error('加载 MD 副本失败：' + (e?.response?.data?.detail || e?.message || '未知错误'))
+  }
+}
+
+const cancelPreviewEdit = () => {
+  previewEditMode.value = false
+  previewEditContent.value = ''
+}
+
+const savePreviewEdit = async () => {
+  if (!previewDocumentData.value) return
+  savingPreviewEdit.value = true
+  try {
+    const result = await wikiService.saveMarkdown(
+      previewDocumentData.value.document_id,
+      previewEditContent.value
+    )
+    if (result.success) {
+      message.success('已保存并重建索引')
+      cancelPreviewEdit()
+      // 重新加载预览（内容已更新）
+      await loadPreviewContent(previewDocumentData.value.document_id)
+    } else {
+      message.error('保存失败')
+    }
+  } catch (e: any) {
+    message.error('保存失败：' + (e?.response?.data?.detail || e?.message || '未知错误'))
+  } finally {
+    savingPreviewEdit.value = false
+  }
 }
 
 // 获取文件URL用于预览
@@ -777,10 +985,20 @@ const clearSearch = () => {
   totalResults.value = 0
 }
 
+// 组件挂载：加载当前用户（编辑按钮需超管判断）
+onMounted(() => {
+  loadCurrentUser()
+})
+
 // 监听预览模式变化
 watch(previewMode, async (newMode) => {
   if (!previewDocumentData.value) return
-  
+
+  // 切换模式时退出编辑
+  if (previewEditMode.value) {
+    cancelPreviewEdit()
+  }
+
   previewLoading.value = true
   
   try {
@@ -881,6 +1099,59 @@ watch(previewMode, async (newMode) => {
 .preview-content :deep(mark.active-highlight) {
   background-color: #ffeb3b;
   box-shadow: 0 0 0 2px #f57f17;
+}
+
+/* 多词分别导航：每个词独立色相（与导航卡片边框色一致） */
+.preview-content :deep(mark.hl-term-0) { background-color: #ffe0b2; color: #e65100; }
+.preview-content :deep(mark.hl-term-1) { background-color: #bbdefb; color: #0d47a1; }
+.preview-content :deep(mark.hl-term-2) { background-color: #c8e6c9; color: #1b5e20; }
+.preview-content :deep(mark.hl-term-3) { background-color: #e1bee7; color: #4a148c; }
+.preview-content :deep(mark.hl-term-4) { background-color: #ffcdd2; color: #b71c1c; }
+.preview-content :deep(mark.hl-term-5) { background-color: #b2dfdb; color: #004d40; }
+.preview-content :deep(mark.hl-term-6) { background-color: #d1c4e9; color: #311b92; }
+.preview-content :deep(mark.hl-term-7) { background-color: #fff9c4; color: #f57f17; }
+
+/* 多词导航卡片 */
+.term-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1.5px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  user-select: none;
+}
+
+.term-nav-item:hover {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.term-nav-active {
+  box-shadow: 0 0 0 2px rgba(24, 160, 88, 0.35);
+}
+
+.term-nav-label {
+  font-weight: 600;
+  font-size: 12px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-nav-count {
+  font-size: 11px;
+  color: #999;
+}
+
+.term-nav-pos {
+  font-size: 11px;
+  color: #666;
+  min-width: 40px;
+  text-align: right;
 }
 
 /* 搜索结果高亮样式 */

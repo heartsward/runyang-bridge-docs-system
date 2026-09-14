@@ -839,3 +839,26 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - 大段代码替换用 Python 脚本做**行范围替换**（断言首尾行）比 Edit 工具的长字符串匹配可靠（长文本里空白不一致会反复失败）
   - 后端 8002 被旧 task 占用时，`taskkill /F /IM python.exe` 杀不干净（沙箱下部分进程杀不掉），用 `netstat -ano | grep :8002` 找 PID 再 `taskkill /F /PID <pid>` 精确杀
   - "搜索不慢"≠"不需要优化"——用户感知快是因为数据量小（43 篇），优化价值在**功能缺失（多词）+ 规模余量**，方案沟通时先用实测基准数据对齐预期
+
+---
+
+### 2026-09-14（15:24 - 16:10）— 阶段二十·20.5：分词口径 + 预览编辑 + 多词分别导航（用户追加三点）
+- **用户反馈三点**：① 分词只认空格（`172.16.8.106` 被拆成多词是 bug，应是 1 个 IP）② 搜索预览界面加编辑按钮（与文档管理 W4 一致，直接改 md）③ 多词进预览要逐词高亮 + 自动跳转 + 每词分别上下导航
+- **代码变更**：
+  - `search.py`：`_TERM_SPLIT_RE` 由"空白+中英文标点"改为 `\s+`（**仅空格**），`172.16.8.106` 不再被拆；preview 端点高亮分支改为先 `tokenize_query`，单词走原 `highlight_text`、多词走新 `highlight_terms`
+  - `search_service.py`：新增 `highlight_terms(text, terms)` + `_find_all_occurrences`——长词优先、大小写不敏感、**重叠区间去重**（"核心交换机"不被"交换机"拆掉），命中注入 `<mark data-term="词">`（属性值 html.escape）
+  - `SearchView.vue`：
+    - 预览工具栏加"编辑"按钮（仅超管 + 提取模式），编辑态 textarea + 取消/保存，走 `wikiService.getMarkdown/saveMarkdown`（保存自动重建索引），`onMounted` 拉 `authService.getCurrentUser()`，错误带 `detail`
+    - `updatePreviewHighlightCount` 重写：给 mark 补 `data-highlight-term`（还原后端转义）+ 全局 `data-highlight-index` + 分词色 class（`hl-term-0..7`）；`termGroups` 按查询词顺序分组、`termCursor` 每词独立光标
+    - 导航 UI 改为**每词一张卡片**（词名着色 + N处 + ↑↓ + n/N），点击切换导航目标；`scrollToHighlightInPreview(term, dir)` 按词内索引跳转；进预览自动跳第一词第 1 处；多词不同色、单词保持原黄
+  - `xss-protection.ts`：`sanitizeDocumentHtml` 的 `ALLOWED_ATTR` 放行 `data-term`/`data-highlight-index`/`data-highlight-term`（否则 DOMPurify 会把导航属性剥掉）
+- **验证**（系统 Chrome + 工作区 playwright-core E2E）：
+  - 单词"172.16.8.106"：`term_total=1`、`matched_terms=['172.16.8.106']`，不再拆词 ✓
+  - 多词"收费网 华为"（doc 71，2/2 命中）：208 处 mark 分两组（119+89），边框橙/蓝，首词 ↓×2→3/119、次词 ↓→2/89，active 卡片=华为，自动跳转 ✓
+  - 编辑按钮：超管可见 → textarea 加载 46382 字符 MD → 取消恢复 ✓
+  - `vue-tsc --noEmit`：本次改动文件 0 新增 error（EnhancedSearchView/AssetView 等为存量错误）；后端 venv 单测分词/重叠/大小写/IP 全过
+- **教训**：
+  - 后端高亮要带 `data-term` 且**属性值 html.escape**，前端解析时还原 `&quot;`/`&amp;`——否则词里含引号会破坏 mark 标签
+  - 多词区分色用 **class（hl-term-N）而非 inline style**，inline style 会被 DOMPurify 的 FORBID_ATTR 剥掉
+  - 老文档（如 doc 9）无 MD 副本时点编辑会 404 提示"加载 MD 副本失败"——属数据问题非功能 bug；要全覆盖需跑 wiki 全量重建（`/wiki/rebuild`）
+  - E2E 断言前先核实数据：doc 9 正文其实没有那个 IP（只高亮 1 词是正确行为），别把"数据没命中"误判成"高亮 bug"

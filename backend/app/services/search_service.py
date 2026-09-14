@@ -8,6 +8,7 @@
 import os
 import re
 import json
+import html as html_lib
 import subprocess
 import tempfile
 from typing import List, Dict, Any, Optional
@@ -209,6 +210,51 @@ class SearchService:
             return pattern.sub(lambda m: f"<mark>{m.group()}</mark>", text)
         except Exception:
             return text
+
+    def highlight_terms(self, text: str, terms: List[str]) -> str:
+        """多词联合高亮：每个命中词注入 <mark data-term="词">（阶段二十·20.5）
+
+        - 长词优先，避免短词先吞掉长词（"交换机" 不会拆掉 "核心交换机"）
+        - 大小写不敏感；重叠区间去重
+        - mark 带 data-term 属性，供前端按词分组做分别导航
+        """
+        if not text or not terms:
+            return text
+        unique_terms = list(dict.fromkeys(t for t in terms if t))
+        if not unique_terms:
+            return text
+        # 长词优先 + 按位置去重，避免重叠高亮
+        ordered = sorted(unique_terms, key=len, reverse=True)
+        patterns = [(t, re.compile(re.escape(t), re.IGNORECASE)) for t in ordered]
+        taken: List[tuple] = []
+        out: List[str] = []
+        pos = 0
+        for start, end in self._find_all_occurrences(text, patterns):
+            if any(not (end <= s or start >= e) for s, e in taken):
+                continue
+            taken.append((start, end))
+        # 重新按位置输出：一次性替换
+        taken.sort()
+        for start, end in taken:
+            out.append(text[pos:start])
+            matched_text = text[start:end]
+            # 属性值做 HTML 转义（词里可能含引号等），浏览器解析 v-html 时自动还原
+            term_attr = html_lib.escape(matched_text.lower(), quote=True)
+            out.append(f'<mark data-term="{term_attr}">{matched_text}</mark>')
+            pos = end
+        out.append(text[pos:])
+        return ''.join(out)
+
+    @staticmethod
+    def _find_all_occurrences(text: str, patterns: list) -> List[tuple]:
+        """返回 [(start, end), ...]，按起点排序"""
+        found: List[tuple] = []
+        for term, pattern in patterns:
+            for m in pattern.finditer(text):
+                if m.group():
+                    found.append((m.start(), m.end()))
+        found.sort()
+        return found
     
     def get_file_info(self, file_path: str) -> Dict[str, Any]:
         """获取文件信息"""

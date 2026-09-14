@@ -1926,7 +1926,66 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **回退方案**：N/A（验收不改代码）
 
 ### 实施顺序与风险
-- 顺序：20.1 → 20.2 → 20.3 → 20.4
+- 顺序：20.1 → 20.2 → 20.3 → 20.4 → 20.5
 - 风险 1：多词语义变化（"交换机配置"单串 → 用户加空格变两词）→ 不加空格时行为 100% 不变，只有显式空格/标点才触发多词模式
 - 风险 2：`/search/suggestions` 被其他前端位置引用 → 20.1 实施时全仓 grep 确认（已知仅 SearchView 两处）
 - 风险 3：多词打分细节（命中词权重）主观 → 用"命中词数为主、score 为辅"的保守排序，不引入新算法
+
+---
+
+### 步骤 20.5 — 分词口径修正 + 预览编辑 + 多词分别导航（2026-09-14，用户追加三点）
+
+> 用户反馈三点：① 分词只认空格（`172.16.8.106` 被拆成多词是 bug，应是 1 个 IP）② 搜索预览界面要能像文档管理一样直接编辑 md ③ 多词进入预览要高亮并自动跳转，且每个词可分别上下跳转。
+
+#### 20.5.1 分词改为仅按空格
+- **做什么**：`search.py` 的 `_TERM_SPLIT_RE` 由"空白+中英文标点"改为 `\s+`（仅空白），`tokenize_query` 注释同步
+- **能改什么**：`search.py`（`_TERM_SPLIT_RE` + `tokenize_query` docstring）
+- **不能改什么**：`search_terms_in_text`、打分、排序逻辑
+- **怎么验**：`tokenize_query('172.16.8.106')==['172.16.8.106']`；`tokenize_query('交换机 配置')==['交换机','配置']`
+- **回退方案**：git checkout search.py
+- **状态**：✅ 完成（venv 单测通过）
+
+#### 20.5.2 预览端点多词高亮（data-term）
+- **做什么**：
+  1. `search_service.py` 新增 `highlight_terms(text, terms)`：长词优先、大小写不敏感、重叠区间去重，每个命中注入 `<mark data-term="词">`（属性值 html.escape）
+  2. `/search/preview` 端点：`highlight` 参数先 `tokenize_query`；单词走原 `highlight_text`（整体串），多词走 `highlight_terms`
+- **能改什么**：`search_service.py`、`search.py`（仅 preview 高亮分支）
+- **不能改什么**：`highlight_text`（DocumentView 仍在用）、格式化逻辑、查看统计
+- **怎么验**：`highlight_terms('核心交换机配置...', ['核心交换机','配置'])` 长词不拆短词；IP 原样高亮；`/search/preview/{id}?highlight="a b"` 返回带 `data-term` 的 mark
+- **回退方案**：git checkout search_service.py search.py
+- **状态**：✅ 完成（venv 单测 + API 实测通过）
+
+#### 20.5.3 SearchView 预览加编辑（与文档管理 W4 一致）
+- **做什么**：
+  1. `SearchView.vue` 预览工具栏加"编辑"按钮（`v-if="currentUser?.is_superuser && previewMode==='extracted'"`），图标 PencilOutline
+  2. 编辑态：`<n-input type="textarea">` 替换预览内容区；上方"正在编辑 Markdown 副本"提示 + 取消/保存
+  3. `togglePreviewEdit`→`wikiService.getMarkdown`；`savePreviewEdit`→`wikiService.saveMarkdown`（后端自动重建索引）→重新 `loadPreviewContent`
+  4. `onMounted` 调 `authService.getCurrentUser()`；`previewDocument` 重置编辑态；切模式退出编辑
+  5. 错误提示带 `e?.response?.data?.detail`（无 MD 副本时提示清晰）
+- **能改什么**：`SearchView.vue`、`xss-protection.ts`（`ALLOWED_ATTR` 加 `data-term`/`data-highlight-index`/`data-highlight-term`）
+- **不能改什么**：`wiki.py`（后端编辑端点已存在）、DocumentView 逻辑、下载入口
+- **怎么验**：超管登录→搜索→预览→编辑按钮可见→点击出 textarea 加载 MD→取消恢复；非 MD 副本文档点编辑提示"加载 MD 副本失败"（不白屏）
+- **回退方案**：git checkout SearchView.vue xss-protection.ts
+- **状态**：✅ 完成（E2E：doc 71 编辑加载 46KB MD，取消正常恢复）
+
+#### 20.5.4 多词分别导航
+- **做什么**：
+  1. `updatePreviewHighlightCount` 重写：给每个 `<mark>` 补 `data-highlight-term`（还原后端转义）+ 全局 `data-highlight-index` + 分词色 class（`hl-term-0..7`）
+  2. `termGroups` 按查询词顺序分组 `{term,count,indexes}`；`termCursor` 每词独立光标
+  3. 导航 UI：每词一张卡片（词名着色 + N处 + ↑↓ + n/N），点击切换导航目标（`activeNavTerm`）
+  4. `scrollToHighlightInPreview(term, dir)` 按词内 indexes 跳转；进入预览自动跳第一词第 1 处
+  5. 多词不同色（橙/蓝/绿…）；单词保持原黄色；CSS 加 `.hl-term-*` 与 `.term-nav-*` 样式
+- **能改什么**：`SearchView.vue`
+- **不能改什么**：后端返回结构、单词高亮外观
+- **怎么验**：`收费网 华为`（doc 71，2/2 命中）→ 预览 208 处 mark 分两组（119+89）；两词各自 ↑↓ 独立、颜色不同、自动跳到第一词；E2E 截图核对
+- **回退方案**：git checkout SearchView.vue
+- **状态**：✅ 完成（E2E 全绿）
+
+### 20.5 验收汇总（2026-09-14）
+- E2E（系统 Chrome + 工作区 playwright-core，`/search`）：
+  - 多词"收费网 华为"：navCards=2（119处/89处），边框橙/蓝，mark class hl-term-0×119 + hl-term-1×89，首词 ↓×2→3/119，次词 ↓→2/89，active 卡片=华为 ✅
+  - 编辑按钮：超管可见 → textarea 加载 46382 字符 MD → 取消恢复 ✅
+  - 单词"172.16.8.106"：`term_total=1`、`matched_terms=['172.16.8.106']`（不再拆词）✅
+- `vue-tsc --noEmit`：SearchView.vue / xss-protection 改动 0 新增 error（EnhancedSearchView 等为存量错误，与本次无关）
+- 后端 venv 单测：分词/重叠去重/大小写/IP 全过
+- 遗留观察：部分老文档（如 doc 9）无 MD 副本，点编辑会提示"加载 MD 副本失败"——属数据问题，非功能 bug；如需全覆盖可后续跑 wiki 全量重建

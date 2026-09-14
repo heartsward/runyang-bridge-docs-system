@@ -113,7 +113,9 @@ export function sanitizeDocumentHtml(html: string): string {
     ALLOWED_ATTR: [
       'href', 'title', 'src', 'alt', 'width', 'height',
       'class', 'colspan', 'rowspan',
-      'target', 'rel'
+      'target', 'rel',
+      // 搜索高亮导航（阶段二十·20.5）：按词分组 + 索引
+      'data-term', 'data-highlight-index', 'data-highlight-term'
     ],
     // 确保链接安全
     ADD_ATTR: { 'a': { 'rel': 'noopener noreferrer', 'target': '_blank' } },

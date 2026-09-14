@@ -55,7 +55,7 @@ runyang-bridge-docs-system/
   | `documents.py` | 文档 CRUD、获取内容 |
   | `assets.py` | 资产 CRUD、批量、导出、文件提取 |
   | `categories.py` | 文档分类管理 |
-  | `search.py` | 全文搜索（阶段二十起支持**多词联合搜索**：`tokenize_query` 空格/标点分词 + 命中词数加权；`/search/suggestions` 端点已删除） |
+  | `search.py` | 全文搜索（阶段二十起支持**多词联合搜索**：`tokenize_query` **仅按空格**分词（IP/URL 等含标点串视为一个词）+ 命中词数加权；`/search/suggestions` 端点已删除；`/search/preview` 多词时调 `search_service.highlight_terms` 注入带 `data-term` 的 `<mark>`） |
   | `upload.py` / `upload_multiple.py` / `file_upload.py` | 单文件 / 多文件上传 |
   | `tasks.py` | 后台任务状态 |
   | `settings.py` | 用户/系统设置 |
@@ -82,7 +82,7 @@ runyang-bridge-docs-system/
 - `user.py` / `document.py` / `asset.py` / `category.py` / `system_config.py` / `voice.py`
 
 ### 1.6 `backend/app/services/` — 业务逻辑服务
-- `search_service.py` — 文档内容提取（PDF/Docx/Excel/TXT）+ 搜索
+- `search_service.py` — 文档内容提取（PDF/Docx/Excel/TXT）+ 搜索（`highlight_text` 单词高亮 / `highlight_terms` 多词高亮带 `data-term`，长词优先+重叠去重 / `search_terms_in_text` 多词单次遍历匹配）
 - `content_extractor.py` / `enhanced_asset_extractor.py` / `asset_extractor.py` — 资产/内容提取
 - `document_analyzer.py` / `document_formatter.py` — 文档分析与格式化
 - `file_manager.py` — 文件读写
