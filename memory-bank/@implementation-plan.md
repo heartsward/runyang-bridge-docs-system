@@ -1989,3 +1989,15 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - `vue-tsc --noEmit`：SearchView.vue / xss-protection 改动 0 新增 error（EnhancedSearchView 等为存量错误，与本次无关）
 - 后端 venv 单测：分词/重叠去重/大小写/IP 全过
 - 遗留观察：部分老文档（如 doc 9）无 MD 副本，点编辑会提示"加载 MD 副本失败"——属数据问题，非功能 bug；如需全覆盖可后续跑 wiki 全量重建
+
+#### 20.6 搜索预览改 Markdown 渲染（对齐文档管理）
+- **背景**：搜索预览用 `<pre v-html>` 直接吐文本（等宽字体纯文本墙），文档管理预览是 markdown-it 渲染 + `.markdown-content` 样式。用户要求两者观感一致、功能不变
+- **做什么**：
+  1. `SearchView.vue` 模板：`<pre class="preview-content">` → `<div class="markdown-content" v-html="previewHtml">`
+  2. 新增 `previewHtml` ref；`updatePreviewHighlightCount` 改为：先 `renderMarkdown(previewContent)`（markdown-it，html:true 透传后端 `<mark data-term>`），再在渲染后的 HTML 上补 `data-highlight-term`/`data-highlight-index`/`hl-term-N` class 并分组（mark 属性是纯 ASCII，不会被 markdown-it 转义）
+  3. 滚动选择器 `.preview-content mark[...]` → `.markdown-content mark[...]`
+  4. 样式：新增全局（`:global`）`.markdown-content` 完整规则（从 DocumentView 复制：标题/表格/列表/code/quote/mark/hl-term 八色）；删除旧的 `.preview-content` 样式
+- **能改什么**：`SearchView.vue`（模板内容区 + script 高亮函数 + style）
+- **不能改什么**：后端 preview 端点；编辑/下载/复制/原文件模式/导航卡片 UI；`markdown-renderer.ts`
+- **怎么验**：E2E 打开 doc 71 预览 → 渲染出 h1/table（不再是 pre 文本墙）；多词导航 119/89 依旧；编辑按钮依旧；vue-tsc 0 新增 error
+- **回退方案**：git checkout SearchView.vue

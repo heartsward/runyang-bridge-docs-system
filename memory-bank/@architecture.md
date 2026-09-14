@@ -126,7 +126,7 @@ Vite 配置：根目录 `vite.config.ts`。
 | `LoginView.vue` | `/login` | 仅游客 | 登录 |
 | `RegisterView.vue` | `/register` | 仅游客 | 注册 |
 | `DocumentView.vue` | `/documents` | 需登录 | 文档管理 |
-| `SearchView.vue` | `/search` | 需登录 | 搜索（旧版） |
+| `SearchView.vue` | `/search` | 需登录 | 搜索（阶段二十起：多词联合搜索 + 预览 Markdown 渲染对齐文档管理 + 多词分别导航 + 超管预览内编辑） |
 | `EnhancedSearchView.vue` | (按路由) | 需登录 | 增强搜索（新版） |
 | `AssetView.vue` | `/assets` | 需登录 | 资产管理 |
 | `CategoryView.vue` | `/categories` | 需登录 | 分类管理 |

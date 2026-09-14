@@ -311,12 +311,12 @@
           placeholder="编辑 Markdown 内容..."
           style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
         />
-        <!-- 提取内容模式 -->
+        <!-- 提取内容模式（20.6：markdown-it 渲染，观感对齐文档管理预览；previewHtml 已含高亮注入+sanitize） -->
         <n-scrollbar
           v-else-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
           style="max-height: 60vh;"
         >
-          <pre v-html="sanitizeDocumentHtml(previewContent)" class="preview-content"></pre>
+          <div v-html="displayPreviewHtml" class="markdown-content"></div>
         </n-scrollbar>
         
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
@@ -373,7 +373,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NLayout,
@@ -421,7 +421,8 @@ import { apiService } from '@/services/api'
 import { authService } from '@/services'
 import { wikiService } from '@/services/wiki'
 import type { User } from '@/types/api'
-import { downloadWikiDocument } from '@/utils/file-download'
+import { downloadWikiDocument, hydrateWikiImages } from '@/utils/file-download'
+import { renderMarkdown } from '@/utils/markdown-renderer'
 
 interface DocumentSearchResult {
   id: number
@@ -504,6 +505,17 @@ const documentResults = ref<DocumentSearchResult[]>([])
 
 // XSS防护
 const { sanitizeHighlightHtml, sanitizeDocumentHtml } = useSafeHtml()
+
+// 20.6：Markdown 渲染后的 HTML（markdown-it 渲染 + 高亮注入 + sanitize + 图片水合）
+// previewHtml = 最终 v-html 展示内容；previewBaseHtml = 水合前的基线
+const previewHtml = ref('')
+const previewBaseHtml = ref('')
+// 图片水合（对齐文档管理：MD 内嵌 images/{docId}/xxx 时带 token 拉 blob URL）
+const previewHydratedHtml = ref('')
+let _revokePreviewImages: (() => void) | null = null
+let _previewToken = 0
+
+const displayPreviewHtml = computed(() => previewHydratedHtml.value || previewHtml.value)
 
 const searchResults = computed<SearchResult[]>(() => {
   return documentResults.value
@@ -728,20 +740,33 @@ const splitQueryTerms = (q: string): string[] => {
   return terms
 }
 
-// 统计预览内容中的高亮，并按词分组（阶段二十·20.5 多词分别导航）
+// 统计预览内容中的高亮，并按词分组（20.5 多词分别导航 / 20.6 Markdown 渲染）
 const updatePreviewHighlightCount = () => {
+  // 释放上一次图片 blob URL，重置水合结果
+  if (_revokePreviewImages) { _revokePreviewImages(); _revokePreviewImages = null }
+  previewHydratedHtml.value = ''
+
   if (!previewContent.value) {
     termGroups.value = []
+    previewHtml.value = ''
     currentHighlightIndex.value = 0
     return
   }
 
-  let content = previewContent.value
+  const termOrder = splitQueryTerms(searchQuery.value)
+
+  // 20.6：markdown-it 渲染为语义 HTML（与文档管理一致；后端注入的 <mark data-term> 经 html:true 原样透传）
+  let html: string
+  try {
+    html = renderMarkdown(previewContent.value)
+  } catch (e) {
+    console.error('Markdown render failed:', e)
+    html = `<pre>${previewContent.value}</pre>`
+  }
 
   // 为 <mark> 添加全局索引 + 词归属标记 + 分词色 class（data-term 由后端注入，缺失时回退整个查询串）
   let highlightIndex = 0
-  const termOrder = splitQueryTerms(searchQuery.value)
-  content = content.replace(/<mark([^>]*)>/g, (_full, attrs: string) => {
+  html = html.replace(/<mark([^>]*)>/g, (_full, attrs: string) => {
     let dataTerm = ''
     const m = attrs.match(/data-term="([^"]*)"/)
     if (m) {
@@ -760,13 +785,16 @@ const updatePreviewHighlightCount = () => {
       : ''
     return `<mark${attrs}${colorClass} data-highlight-term="${dataHighlightTerm}" data-highlight-index="${highlightIndex++}">`
   })
-  previewContent.value = content
+
+  // sanitize（mark/data-*/class 已在 xss-protection 白名单放行）
+  html = sanitizeDocumentHtml(html)
+  previewHtml.value = html
 
   // 按查询词顺序分组（命中的词才有组；顺序与用户输入一致）
   const indexByTerm: Record<string, number[]> = {}
   const markRegex = /<mark([^>]*)>/g
   let mm: RegExpExecArray | null
-  while ((mm = markRegex.exec(content)) !== null) {
+  while ((mm = markRegex.exec(html)) !== null) {
     const attrs = mm[1]
     const termMatch = attrs.match(/data-highlight-term="([^"]*)"/)
     const idxMatch = attrs.match(/data-highlight-index="(\d+)"/)
@@ -800,7 +828,35 @@ const updatePreviewHighlightCount = () => {
   if (groups.length > 0) {
     setTimeout(() => scrollToHighlightInPreview(groups[0].term, 0), 150)
   }
+
+  // 图片水合（20.6：MD 内嵌 images/{docId}/xxx 时带 token 拉 blob URL，对齐文档管理）
+  hydratePreviewImages()
 }
+
+// 图片水合：把渲染后 HTML 里的相对图片路径替换为带 token 的 blob URL（对齐 DocumentView 18.8）
+const hydratePreviewImages = async () => {
+  const docId = previewDocumentData.value?.document_id
+  if (!docId) return
+  if (!previewHtml.value || !previewHtml.value.includes('images/')) return
+  const token = ++_previewToken
+  try {
+    const { html, revoke } = await hydrateWikiImages(previewHtml.value, docId)
+    // 内容可能已切换（预览了另一篇 / 已退出），丢弃过期结果
+    if (token !== _previewToken) {
+      revoke()
+      return
+    }
+    previewHydratedHtml.value = html
+    _revokePreviewImages = revoke
+  } catch (e) {
+    console.warn('图片水合失败:', e)
+  }
+}
+
+// 组件卸载：释放图片 blob URL
+onBeforeUnmount(() => {
+  if (_revokePreviewImages) { _revokePreviewImages(); _revokePreviewImages = null }
+})
 
 // 当前导航目标词（点击词卡片切换）
 const activeNavTerm = ref('')
@@ -841,10 +897,10 @@ const scrollToHighlightInPreview = (term: string, direction: number) => {
 
   // 查找对应的高亮元素并滚动到视图
   setTimeout(() => {
-    const targetMark = document.querySelector(`.preview-content mark[data-highlight-index="${globalIndex}"]`)
+    const targetMark = document.querySelector(`.markdown-content mark[data-highlight-index="${globalIndex}"]`)
     if (targetMark) {
       // 移除之前的活跃高亮样式
-      document.querySelectorAll('.preview-content mark.active-highlight').forEach(el => {
+      document.querySelectorAll('.markdown-content mark.active-highlight').forEach(el => {
         el.classList.remove('active-highlight')
       })
       // 添加当前高亮样式
@@ -1076,40 +1132,109 @@ watch(previewMode, async (newMode) => {
 
 /* 资产相关样式已移除 */
 
-.preview-content {
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  background-color: #f8f9fa;
-  padding: 16px;
-  border-radius: 4px;
+/* 20.6：搜索预览内容区（Markdown 渲染，观感对齐文档管理 .markdown-content）
+   .markdown-content 在模板内（scoped 生效），内部 v-html 注入内容用 :deep 穿透 */
+.markdown-content {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #24292e;
+  background-color: #ffffff;
+  padding: 24px;
+  border-radius: 6px;
+  border: 1px solid #e9ecef;
   margin: 0;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
-.preview-content :deep(mark) {
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4),
+.markdown-content :deep(h5),
+.markdown-content :deep(h6) {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 8px;
+}
+.markdown-content :deep(h1) { font-size: 2em; }
+.markdown-content :deep(h2) { font-size: 1.5em; }
+.markdown-content :deep(h3) { font-size: 1.25em; border-bottom: none; }
+.markdown-content :deep(h4) { font-size: 1em; border-bottom: none; }
+
+.markdown-content :deep(p) { margin: 0 0 16px 0; }
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) { margin: 0 0 16px 0; padding-left: 32px; }
+.markdown-content :deep(li) { margin: 4px 0; }
+
+.markdown-content :deep(table) {
+  border-collapse: collapse;
+  margin: 16px 0;
+  width: auto;
+  max-width: 100%;
+  font-size: 13px;
+}
+.markdown-content :deep(table th),
+.markdown-content :deep(table td) {
+  border: 1px solid #d0d7de;
+  padding: 6px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown-content :deep(table th) { background-color: #f6f8fa; font-weight: 600; }
+
+.markdown-content :deep(code) {
+  background-color: #f6f8fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+.markdown-content :deep(pre) {
+  background-color: #f6f8fa;
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+.markdown-content :deep(pre code) { background-color: transparent; padding: 0; }
+
+.markdown-content :deep(blockquote) {
+  border-left: 4px solid #d0d7de;
+  padding-left: 16px;
+  color: #57606a;
+  margin: 16px 0;
+}
+.markdown-content :deep(hr) { border: 0; border-top: 2px solid #eaecef; margin: 24px 0; }
+.markdown-content :deep(img) { max-width: 100%; }
+
+/* 高亮 */
+.markdown-content :deep(mark) {
   background-color: #fff3cd;
   color: #856404;
   padding: 2px 4px;
   border-radius: 2px;
   font-weight: 500;
+  transition: all 0.3s ease;
 }
-
-.preview-content :deep(mark.active-highlight) {
+.markdown-content :deep(mark.active-highlight) {
   background-color: #ffeb3b;
   box-shadow: 0 0 0 2px #f57f17;
 }
 
 /* 多词分别导航：每个词独立色相（与导航卡片边框色一致） */
-.preview-content :deep(mark.hl-term-0) { background-color: #ffe0b2; color: #e65100; }
-.preview-content :deep(mark.hl-term-1) { background-color: #bbdefb; color: #0d47a1; }
-.preview-content :deep(mark.hl-term-2) { background-color: #c8e6c9; color: #1b5e20; }
-.preview-content :deep(mark.hl-term-3) { background-color: #e1bee7; color: #4a148c; }
-.preview-content :deep(mark.hl-term-4) { background-color: #ffcdd2; color: #b71c1c; }
-.preview-content :deep(mark.hl-term-5) { background-color: #b2dfdb; color: #004d40; }
-.preview-content :deep(mark.hl-term-6) { background-color: #d1c4e9; color: #311b92; }
-.preview-content :deep(mark.hl-term-7) { background-color: #fff9c4; color: #f57f17; }
+.markdown-content :deep(mark.hl-term-0) { background-color: #ffe0b2; color: #e65100; }
+.markdown-content :deep(mark.hl-term-1) { background-color: #bbdefb; color: #0d47a1; }
+.markdown-content :deep(mark.hl-term-2) { background-color: #c8e6c9; color: #1b5e20; }
+.markdown-content :deep(mark.hl-term-3) { background-color: #e1bee7; color: #4a148c; }
+.markdown-content :deep(mark.hl-term-4) { background-color: #ffcdd2; color: #b71c1c; }
+.markdown-content :deep(mark.hl-term-5) { background-color: #b2dfdb; color: #004d40; }
+.markdown-content :deep(mark.hl-term-6) { background-color: #d1c4e9; color: #311b92; }
+.markdown-content :deep(mark.hl-term-7) { background-color: #fff9c4; color: #f57f17; }
 
 /* 多词导航卡片 */
 .term-nav-item {

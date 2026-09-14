@@ -862,3 +862,23 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - 多词区分色用 **class（hl-term-N）而非 inline style**，inline style 会被 DOMPurify 的 FORBID_ATTR 剥掉
   - 老文档（如 doc 9）无 MD 副本时点编辑会 404 提示"加载 MD 副本失败"——属数据问题非功能 bug；要全覆盖需跑 wiki 全量重建（`/wiki/rebuild`）
   - E2E 断言前先核实数据：doc 9 正文其实没有那个 IP（只高亮 1 词是正确行为），别把"数据没命中"误判成"高亮 bug"
+
+---
+
+### 2026-09-14（09:54 - 10:30）— 阶段二十·20.6：搜索预览改 Markdown 渲染（对齐文档管理）
+- **用户反馈**：智能搜索预览页和文档管理预览页观感不同（前者纯文本墙），要求"保持功能不变"改成文档管理那种 Markdown 渲染效果
+- **根因**：搜索预览用 `<pre v-html>` 套等宽字体直接吐文本，没走 markdown-it；文档管理预览是 markdown-it 渲染 + `.markdown-content` 样式体系
+- **代码变更**（仅 `SearchView.vue`）：
+  - 模板：`<pre class="preview-content">` → `<div class="markdown-content" v-html="displayPreviewHtml">`
+  - `updatePreviewHighlightCount` 重写：先 `renderMarkdown(previewContent)`（markdown-it，html:true 透传后端 `<mark data-term>`），再在渲染后 HTML 上补 `data-highlight-term`/`data-highlight-index`/`hl-term-N` class 并分组，最后 `sanitizeDocumentHtml`
+  - 图片水合接入（对齐文档管理 18.8）：`hydrateWikiImages` + `_previewToken` 防竞态 + `onBeforeUnmount` 释放 blob URL
+  - 样式：删 `.preview-content`，新增 `.markdown-content` 完整规则（标题/表格/列表/code/quote/mark/hl-term 八色，从 DocumentView 复制）；滚动选择器 `.preview-content` → `.markdown-content`
+- **验证**（E2E，doc 5 收费网 华为 2/2）：
+  - 渲染出 h2×8、table×8、260 行、p 正常，**pre=0**（不再是纯文本墙）；字体 sans-serif
+  - 高亮**零丢失**：backend raw marks=133 → after markdown-it=133 → 浏览器实测 133（之前 20.5 的 208 是另一篇 doc 71，不同文档数量本就不同，勿混比）
+  - 多词导航 82/51 处依旧、↑↓ 正常、自动跳转第一词；编辑按钮依旧
+  - `vue-tsc`：新引入 0 error（剩余 22 个为存量）
+- **教训**：
+  - v-html 注入的内容不受 scoped 选择器影响，markdown 内容样式要用 `:deep()` 穿透
+  - markdown-it 配置 `html:true` 时后端注入的 `<mark>` 会原样透传（不解析、不转义属性），可在渲染后统一补索引
+  - 对比高亮数量前先确认是**同一篇文档**（doc id 会变，208 vs 133 是不同文档）
