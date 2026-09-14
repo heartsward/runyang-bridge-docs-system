@@ -126,24 +126,27 @@ git push origin main
 
 如果 `git push` 卡住超过 30 秒，立刻 `Ctrl+C` 然后改用 `push.sh` / `push.bat`。
 
-### ⚠️ 推送卡顿的真实根因（本机）
+### ⚠️ 推送卡顿的真实根因（本机，2026-09-14 实测）
 
-实测拿到铁证（`GIT_TRACE=1 git push`）：
-- 本机有 `HTTPS_PROXY=http://127.0.0.1:58123`（WorkBuddy 代理）
-- 取消代理后，git 真的连到 `github.com:20.205.243.166:443` 成功
-- 但**服务器返回 `HTTP/1.1 401 Unauthorized` + `www-authenticate: Basic realm="GitHub"`**
-- 根因：Git Credential Manager 默认走 Basic Auth 头（`username:password` base64），但 GitHub 对 fine-grained PAT 的 git 协议要求走 `x-access-token:<PAT>` 格式
-- 表现：30 秒超时被杀（exit 124），看起来像"卡死"
+**根因就一个**：WorkBuddy 环境的 `HTTPS_PROXY=http://127.0.0.1:58123` 拦截 git smart-HTTP 推送。trace 看到的 401 是**代理返回的**（不是 GitHub 真返回的）。
 
-**`push.sh` 的解法**：
-1. 取消代理环境变量
-2. 把 URL 改成 `https://x-access-token:TOKEN@github.com/...`（git 自动用这种 URL 时会把 PAT 作为 `Authorization: token <PAT>` 头送，符合 fine-grained PAT 规范）
+**最简解法**（一行命令，绕过代理）：
 
-### 备选方案（不推荐但可用）：Git Data API 推送
+```bash
+env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+    git push --force-with-lease origin main
+```
 
-走 GitHub REST API（`git/blobs → git/trees → git/commits → git/refs force`），**保留干净历史**（但 SHA 会变，导致下次 push 需 `--force-with-lease`）。
+**stale info 错误**：本地 `origin/main` 引用陈旧 → 先 fetch 刷新：
 
-skill `github-api-push-fallback` 已写好完整流程：`C:\Users\cccly\.workbuddy\skills\github-api-push-fallback\`。
+```bash
+env -u HTTPS_PROXY git fetch --update-head-ok origin main
+env -u HTTPS_PROXY git push --force origin main
+```
+
+### 备选方案：Git Data API 推送（仅当上面全部失败时用）
+
+走 GitHub REST API（`git/blobs → git/trees → git/commits → git/refs force`），保留干净历史但 SHA 会变。skill `github-api-push-fallback` 已写好流程：`C:\Users\cccly\.workbuddy\skills\github-api-push-fallback\`。
 
 ---
 
