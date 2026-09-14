@@ -100,7 +100,7 @@ runyang-bridge-docs-system/
   - `storage.py` — MD 副本 + frontmatter 读写
   - `metadata.py` — AI 元数据生成（title/tags/**doc_category**）+ **图片描述**（`IMAGE_DESCRIBE_PROMPT`/`describe_image_via_ai`，阶段十八）
   - `index.py` — FTS5 三路索引（unicode61 + trigram + LIKE 兜底）+ **图片索引**（`wiki_images`/`images_fts`，阶段十八）+ `search`/`get_doc`/`search_images`/`list_categories`
-  - `mcp_server.py` — **11 个 MCP tools**（文档域 search_kb/get_doc/get_doc_content/list_backlinks/list_tags/generate_report + 图片域 get_doc_images/search_images/list_categories + **资产域 search_assets/get_asset**，阶段二十·20.8：`search_assets` 按名称/IP/型号等 14 字段模糊搜索、返回含 username/password 全部字段；`get_asset` 按 ID 取单台全字段）
+  - `mcp_server.py` — **12 个 MCP tools**（文档域 search_kb/get_doc/get_doc_content/list_backlinks/list_tags/generate_report + 图片域 get_doc_images/search_images/list_categories + **资产域 search_assets/get_asset/list_assets**，阶段二十·20.8/20.9：`search_assets` 14 字段模糊搜索，**返回按命中数自适应**——命中 1 台直接全字段含 username/password（一轮作答），多台返回 7 列摘要+hint（不含密码）；`get_asset` 按 ID 取全字段；`list_assets` 轻量清单不含账号密码）
   - `image_extractor.py` — ⭐ **PDF/图片提取器（阶段十八）**：dict-mode 提图 + 裁剪兜底 + 独立图片登记 + 图引用插入
   - 图片落盘目录：`backend/wiki/images/{doc_id}/`
 
@@ -181,7 +181,11 @@ Vite 配置：根目录 `vite.config.ts`。
 - **11 个 tools**（阶段十八 +3、阶段二十·20.8 +2）：
   - 检索类：`search_kb`（含 `category` 过滤）/ `get_doc` / `get_doc_content` / `list_backlinks` / `list_tags` / `generate_report`
   - 图片类（阶段十八）：`get_doc_images(doc_id)` / `search_images(query, top_k, doc_id?)` / `list_categories()` —— 均返回带 `url` 字段（指向 `GET /wiki/images/{id}/{file}`，需 Bearer token）
-  - 资产类（阶段二十·20.8，数据源 `assets` 表，直接 SQLAlchemy 查询不走 FTS）：`search_assets(query, top_k, asset_type?, network_location?, status?)` 按名称/IP/主机名/序列号/型号/厂商/服务/应用/部门/位置/数据中心/MAC/标签/备注 14 字段 `ilike` 模糊搜索，返回**全部字段含 username/password**（与资产导出端点口径一致，库内明文）；`get_asset(asset_id)` 按 ID 取单台全字段，不存在返回 `{"error": ...}`
+  - 资产类（阶段二十·20.8/20.9，数据源 `assets` 表，直接 SQLAlchemy 查询不走 FTS）：
+    - `search_assets(query, top_k, asset_type?, network_location?, status?)`：14 字段 `ilike` 模糊搜索。**20.9 起返回按命中数自适应**（提速：单台命中免二次调用）——命中 1 台直接返回全字段 dict（含 username/password）；多台返回 `{"total","assets":[7列摘要],"hint"}`（摘要不含密码，防止一次吐多台设备密码）；0 台返回 `{"total":0,"assets":[]}`
+    - `get_asset(asset_id)`：按 ID 取单台全字段，不存在返回 `{"error": ...}`
+    - `list_assets(asset_type?, network_location?, status?, limit=200)`：轻量清单（id/name/ip/hostname/类型/状态/网络），**不含账号密码**，供"有哪些设备"类概览问题
+    - 密码口径：与资产导出端点一致（库内明文，确认具体哪台后才返回）
 - 接入方式：AI 工作台（WorkBuddy 等）配置 MCP server 指向 `/mcp` 即可
 - 数据源：`backend/wiki/{doc_id}.md`（MD 副本，含图片引用）+ SQLite FTS5 索引（`wiki/index.py`）+ 图片库（`wiki/images/{doc_id}/`，`wiki_images` 表登记 + AI 中文描述）
 - **图片 URL 注意**：MCP 返回的 `url` 用 `WIKI_PUBLIC_HOST` 拼（默认 127.0.0.1，局域网需改服务器 IP）；下载需 `Authorization: Bearer <token>`

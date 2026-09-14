@@ -927,3 +927,26 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - 密码原样返回：用户明确需求（查账号密码），且库内本就明文、Web 端导出也原样给；MCP 端点本身无鉴权（与既有 9 工具一致，部署在内网）
 - **提交**：待提交（mcp_server.py + memory-bank）
 - **注**：20.7 此前"本地待提交"已完成——`git push` 被本机代理对 git-receive-pack 返回 401 阻断，改用 GitHub Git Data API 重建提交推送，远端 main = `6270f84a`（20.7）/ `463e9a05`（20.6），7 文件逐字节校验一致；方法已存 skill `github-api-push-fallback`
+
+---
+
+### 2026-09-14（14:10 - 14:25）— 阶段二十·20.9：资产查询提速（减少 LLM 工具往返轮次）
+- **用户反馈**：资产查询"速度有点慢"。实测拆解（只读分析，未动代码先定位）：
+  - SQL 查询本身 **0.6ms**（81 台，LIKE 模糊搜；assets 表已有 name/ip/serial 索引）
+  - MCP 单轮调用 ~160ms，initialize 握手 ~175ms（一次性）
+  - **慢的 90% 在 LLM 每多一轮工具调用多 2~5s 推理往返**——此前"查名字→拿 ID→查详情"要两轮
+- **方案决策**：A（合并查询轮次）先做；B（DB 加速/FTS5）81 台量级无意义，资产到几千台再做；C（直读 DB 的技能）留作可选补充
+- **代码变更**（仍仅 `mcp_server.py`）：
+  - `search_assets` 返回策略改为**按命中数自适应**：命中 1 台 → 直接全字段 dict（含 username/password），一轮即可答"XX 设备地址/账号密码"；多台 → `{"total","assets":[7列摘要],"hint"}`（摘要 id/name/ip/hostname/类型/状态/网络，**不含密码**——防止一次把多台设备密码全吐给 LLM）；0 台 → `{"total":0,"assets":[]}`
+  - 新增 `list_assets(asset_type?, network_location?, status?, limit=200)` 轻量清单工具（同样不含账号密码）
+  - 工具总数 11 → 12
+- **验证**（MCP 真实调用 7 项全过）：
+  1. tools/list 12 个 ✅
+  2. `search_assets(收费网堡垒机)` 单台 → 直接全字段含 password（10.9.0.221/admin/Rybridge@2026.cn）✅
+  3. `search_assets(防火墙)` 多台 → total=10，摘要 7 列均无 password，hint 指引 get_asset ✅
+  4. 0 命中 → `{"total":0,"assets":[]}` ✅
+  5. `list_assets()` 81 台 / billing 过滤 34 台 ✅
+  6. `get_asset(57)` 39 字段不变 ✅
+  7. `search_kb` 回归正常 ✅
+- **效果**：典型"查某设备账号密码"从 2 轮工具调用 → **1 轮**；"有哪些设备"类从 search_assets 拉全字段 → list_assets 轻量一轮
+- **提交**：待提交（mcp_server.py + memory-bank）

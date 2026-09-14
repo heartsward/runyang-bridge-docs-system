@@ -10,8 +10,9 @@ FastMCP 暴露 11 个 tools 给 WorkBuddy：
 - generate_report：按标签/查询生成报告骨架
 - get_doc_images / search_images：文档图片检索（阶段十八）
 - list_categories：业务分类浏览（阶段十八）
-- search_assets：设备资产搜索（阶段二十·20.8，含账号密码）
+- search_assets：设备资产搜索（阶段二十·20.8；20.9 起命中唯一直接返回全字段含账号密码，一轮作答）
 - get_asset：单台设备全部信息（阶段二十·20.8）
+- list_assets：设备资产轻量清单（阶段二十·20.9，不含账号密码）
 
 Q1 决策：方案 A（HTTP transport via fastmcp.http_app()）
 - WorkBuddy 配置："url": "http://localhost:8002/mcp", "transport": "http"
@@ -250,26 +251,35 @@ def register_tools(mcp_instance):
         finally:
             db.close()
 
+    # 摘要字段：多台命中时只返回这几列（返回体小 → LLM 处理快）；
+    # 不含 username/password —— 账号密码只在"确认了具体哪台"后给
+    #（search_assets 唯一命中 / get_asset），避免一次把多台设备的密码全吐出来。
+    _SUMMARY_FIELDS = ("id", "name", "ip_address", "hostname",
+                       "asset_type", "status", "network_location")
+
+    def _asset_summary(a: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: a.get(k) for k in _SUMMARY_FIELDS}
+
     @mcp_instance.tool()
     def search_assets(query: str = "", top_k: int = 10,
                       asset_type: Optional[str] = None,
                       network_location: Optional[str] = None,
-                      status: Optional[str] = None) -> List[Dict[str, Any]]:
-        """搜索设备资产（含地址 / 账号密码 / 全部信息）。
+                      status: Optional[str] = None) -> Dict[str, Any]:
+        """搜索设备资产（查地址 / 账号密码 / 设备信息的主入口）。
 
         支持按设备名、IP、主机名、序列号、型号、厂商、服务名、应用、部门、
         位置、数据中心、MAC、标签、备注等任意字段模糊匹配（query 可空，
         空时按过滤条件列出资产）。
 
-        Args:
-            query: 搜索关键词（如设备名"核心交换机"、IP "172.16.8.106"）
-            top_k: 最多返回几条（默认 10）
-            asset_type: 按类型过滤（server/network/storage/security/database/application/other）
-            network_location: 按所处网络过滤（office 办公网/monitoring 监控网/billing 收费网/other）
-            status: 按状态过滤（active 在用/inactive 停用/maintenance 维护中/retired 已退役）
+        返回按命中数自适应（**为减少往返设计**）：
+        - 命中 1 台 → 直接返回该设备**全部字段**（含 username/password），
+          一次调用即可回答"XX 设备的地址/账号密码是多少"
+        - 命中 ≥2 台 → 返回 {"total", "assets": [摘要], "hint"}，摘要只含
+          id/name/ip_address/hostname/asset_type/status/network_location，
+          需要某台详情（含密码）时用 get_asset(id) 再取
+        - 命中 0 台 → {"total": 0, "assets": []}
 
-        Returns:
-            每条含全部字段：
+        全字段说明（唯一命中时返回）：
             - name 设备名 / asset_type 类型 / device_model 型号 / manufacturer 厂商
             - ip_address 地址 / mac_address / hostname 主机名 / port / network_location 所处网络
             - username 用户名 / password 密码 / ssh_key SSH密钥
@@ -279,8 +289,48 @@ def register_tools(mcp_instance):
             - purchase_date / warranty_expiry / last_maintenance / next_maintenance
             - notes 备注 / tags 标签 / source_file 来源文件 / source_document_id
             - id / created_at / updated_at
+
+        Args:
+            query: 搜索关键词（如设备名"核心交换机"、IP "172.16.8.106"）
+            top_k: 最多返回几条（默认 10）
+            asset_type: 按类型过滤（server/network/storage/security/database/application/other 及中文类型如"信息系统"）
+            network_location: 按所处网络过滤（office 办公网/monitoring 监控网/billing 收费网/other）
+            status: 按状态过滤（active 在用/inactive 停用/maintenance 维护中/retired 已退役）
         """
-        return _search_assets_impl(query, top_k, asset_type, network_location, status)
+        rows = _search_assets_impl(query, top_k, asset_type, network_location, status)
+        if len(rows) == 1:
+            return rows[0]
+        return {
+            "total": len(rows),
+            "assets": [_asset_summary(r) for r in rows],
+            "hint": "多台命中：以上为摘要。要某台的全部信息（含账号密码）请调 get_asset(asset_id)。"
+                    if rows else "无匹配设备。可换关键词（名称/IP/型号）或去掉 query 只用过滤条件。",
+        }
+
+    @mcp_instance.tool()
+    def list_assets(asset_type: Optional[str] = None,
+                    network_location: Optional[str] = None,
+                    status: Optional[str] = None,
+                    limit: int = 200) -> List[Dict[str, Any]]:
+        """列出设备资产清单（轻量，**不含账号密码**）。
+
+        用于"有哪些设备 / 收费网都有什么 / 安全设备列表"这类概览问题。
+        每台只返回摘要字段：id / name / ip_address / hostname /
+        asset_type / status / network_location。
+        查某台的账号密码请用 search_assets（精确到一台时直接给全字段）
+        或 get_asset(id)。
+
+        Args:
+            asset_type: 按类型过滤（可选）
+            network_location: 按所处网络过滤（office/monitoring/billing/other，可选）
+            status: 按状态过滤（active/inactive/maintenance/retired，可选）
+            limit: 最多返回多少台（默认 200）
+
+        Returns:
+            [{"id","name","ip_address","hostname","asset_type","status","network_location"}]
+        """
+        rows = _search_assets_impl("", limit, asset_type, network_location, status)
+        return [_asset_summary(r) for r in rows]
 
     @mcp_instance.tool()
     def get_asset(asset_id: int) -> Dict[str, Any]:

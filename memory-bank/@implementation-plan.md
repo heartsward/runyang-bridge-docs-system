@@ -2026,3 +2026,18 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **不能改什么**：现有 8 个工具、`crud/asset.py`、`assets.py` 端点、资产模型；不新增依赖
 - **怎么验**：重启后端 → 调 `/mcp` 工具列表含 `search_assets`/`get_asset`（共 10 个）→ 用真实资产名/IP 查询，返回含 username/password 且字段齐全 → 不存在的 ID 返回 error → 原有 8 工具不受影响（search_kb 抽查）
 - **回退方案**：git checkout mcp_server.py
+
+#### 20.9 资产查询提速：搜索命中唯一直接返回全字段 + 新增 list_assets
+- **背景**：用户反馈资产查询慢。实测拆解：SQL 查询仅 0.6ms（81 台），MCP 单轮 ~160ms；慢的 90% 在 LLM 每多一轮工具调用就多 2~5s 推理往返（"查名字→拿 ID→查详情"两轮）。治本 = 减少工具调用轮次
+- **做什么**（仍只改 `mcp_server.py`）：
+  1. `search_assets` 返回策略改为**按命中数自适应**：
+     - 命中 1 台 → 直接返回**全字段 dict**（含 username/password），LLM 一轮即可答"XX 设备的地址/账号密码"
+     - 命中 ≥2 台 → 返回 `{"total", "assets":[精简摘要(id/name/ip_address/hostname/asset_type/status/network_location)], "hint": 提示用 get_asset(id) 取详情}`，返回体小、LLM 处理快
+     - 命中 0 台 → `{"total": 0, "assets": []}`
+  2. 新增轻量工具 `list_assets(asset_type?, network_location?, status?, limit=200)`：返回全部匹配资产的精简三列+（id/name/ip/类型/状态），供"有哪些设备"类问题，一轮完成
+  3. 模块 docstring 工具清单更新（11 → 12）
+- **能改什么**：`backend/app/services/wiki/mcp_server.py`
+- **不能改什么**：`get_asset`/`_asset_to_dict` 行为、现有文档/图片域工具、DB 结构（不加索引——81 台量级 0.6ms 无意义，资产到几千台再上 FTS5）
+- **怎么验**：重启后端 → tools/list 12 个；`search_assets(收费网堡垒机)` 单台→直接全字段含密码；`search_assets(防火墙)` 多台→摘要列表+hint；`search_assets(不存在xyz)` → total 0；`list_assets()` 精简列表；`get_asset(57)` 不变；`search_kb` 回归
+- **回退方案**：git checkout mcp_server.py
+- **状态**：✅ 完成（MCP 实测 7 项全过：单台命中直接全字段含密码、多台摘要无密码+hint、0 命中、list_assets 81 台、get_asset 不变、search_kb 回归）
