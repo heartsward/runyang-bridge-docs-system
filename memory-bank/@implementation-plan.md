@@ -2014,3 +2014,15 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **不能改什么**：下载端点逻辑（后端 filename 本就正确）、其他 CORS 字段
 - **怎么验**：跨域请求响应头含 `access-control-expose-headers: Content-Disposition`；下载 doc 6 保存文件名为 `...2025_12.xlsx`（非 `.12`）；纯 ASCII 文件名/RFC5987 中文文件名均正确
 - **回退方案**：git checkout main.py file-download.ts
+
+#### 20.8 AI Wiki MCP 增加设备资产搜索工具
+- **背景**：用户希望在 AI 工作台直接问"某设备地址/用户名/密码"或"某设备的全部信息"，MCP 现在只有文档/图片域工具（8 个），缺资产域
+- **做什么**（仅 `mcp_server.py` 加 2 个工具，复用 `app.models.asset.Asset` + `SessionLocal`）：
+  1. `search_assets(query, top_k=5, asset_type=None, network_location=None, status=None)`：对 name/hostname/ip_address/serial_number/device_model/manufacturer/service_name/application/department/location/datacenter/mac_address/tags/notes 做 `ilike %q%` 联合搜索（query 可空，空时仅按过滤条件列）；返回每条的**全部字段**（含 username/password——密码库内本就明文存储、导出端点也原样返回，口径一致）；datetime 转 `YYYY-MM-DD HH:MM:SS` 字符串；tags JSON 解析成 list
+  2. `get_asset(asset_id)`：按 ID 取单台设备全部字段；不存在返回 `{"error": ...}`
+  3. 工具 docstring 写明字段含义（ip_address=地址、username/password=账号密码），供 LLM 理解
+- **状态**：✅ 完成（MCP 实测：tools/list 11 个；搜"堡垒机"返回 2 条含账号密码；get_asset(1) 39 字段；不存在 ID 返回 error；search_kb 回归正常）
+- **能改什么**：`backend/app/services/wiki/mcp_server.py`（新增 2 个 tool + 模块级序列化辅助函数）
+- **不能改什么**：现有 8 个工具、`crud/asset.py`、`assets.py` 端点、资产模型；不新增依赖
+- **怎么验**：重启后端 → 调 `/mcp` 工具列表含 `search_assets`/`get_asset`（共 10 个）→ 用真实资产名/IP 查询，返回含 username/password 且字段齐全 → 不存在的 ID 返回 error → 原有 8 工具不受影响（search_kb 抽查）
+- **回退方案**：git checkout mcp_server.py

@@ -1,13 +1,17 @@
 """
 Wiki MCP Server（阶段十·W3）
 
-FastMCP 暴露 6 个 tools 给 WorkBuddy：
+FastMCP 暴露 11 个 tools 给 WorkBuddy：
 - search_kb：关键词检索
 - get_doc：取单文档元数据
 - get_doc_content：取 MD 副本内容（供 WorkBuddy 阅读）
 - list_backlinks：反向链接
 - list_tags：浏览标签
 - generate_report：按标签/查询生成报告骨架
+- get_doc_images / search_images：文档图片检索（阶段十八）
+- list_categories：业务分类浏览（阶段十八）
+- search_assets：设备资产搜索（阶段二十·20.8，含账号密码）
+- get_asset：单台设备全部信息（阶段二十·20.8）
 
 Q1 决策：方案 A（HTTP transport via fastmcp.http_app()）
 - WorkBuddy 配置："url": "http://localhost:8002/mcp", "transport": "http"
@@ -22,6 +26,32 @@ logger = logging.getLogger(__name__)
 
 # 创建全局实例（main.py 导入）
 mcp = None  # 在 main.py 里赋值
+
+
+def _asset_to_dict(asset) -> Dict[str, Any]:
+    """Asset ORM 对象 → 全部字段字典（阶段二十·20.8）
+
+    - datetime 转 "YYYY-MM-DD HH:MM:SS" 字符串（避免序列化问题）
+    - tags JSON 字符串解析为 list
+    - 含 username/password：与资产导出端点口径一致（库内明文存储，原样返回）
+    """
+    import json as _json
+    from datetime import datetime as _dt
+
+    out: Dict[str, Any] = {}
+    for col in asset.__table__.columns:
+        if col.name == "creator_id":
+            continue  # 无业务含义
+        v = getattr(asset, col.name)
+        if isinstance(v, _dt):
+            v = v.strftime("%Y-%m-%d %H:%M:%S")
+        out[col.name] = v
+    if isinstance(out.get("tags"), str):
+        try:
+            out["tags"] = _json.loads(out["tags"])
+        except Exception:
+            pass  # 非 JSON 格式则保留原字符串
+    return out
 
 
 def register_tools(mcp_instance):
@@ -166,6 +196,106 @@ def register_tools(mcp_instance):
             [{"doc_category": str, "doc_count": int}]
         """
         return idx.list_categories()
+
+    # ============ 设备资产域（阶段二十·20.8） ============
+    # 直接查 assets 表（与资产导出端点同一数据源、同一口径）。
+    # 密码为明文存储（库内本就不加密），按用户明确要求原样返回。
+
+    def _search_assets_impl(query: str, top_k: int, asset_type: Optional[str],
+                            network_location: Optional[str], status: Optional[str]):
+        from sqlalchemy import or_, desc as _desc
+        from app.models.asset import Asset
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            q = db.query(Asset)
+            if query:
+                term = f"%{query}%"
+                q = q.filter(or_(
+                    Asset.name.ilike(term),
+                    Asset.hostname.ilike(term),
+                    Asset.ip_address.ilike(term),
+                    Asset.mac_address.ilike(term),
+                    Asset.serial_number.ilike(term),
+                    Asset.device_model.ilike(term),
+                    Asset.manufacturer.ilike(term),
+                    Asset.service_name.ilike(term),
+                    Asset.application.ilike(term),
+                    Asset.department.ilike(term),
+                    Asset.location.ilike(term),
+                    Asset.datacenter.ilike(term),
+                    Asset.tags.ilike(term),
+                    Asset.notes.ilike(term),
+                ))
+            if asset_type:
+                q = q.filter(Asset.asset_type == asset_type)
+            if network_location:
+                q = q.filter(Asset.network_location == network_location)
+            if status:
+                q = q.filter(Asset.status == status)
+            rows = q.order_by(_desc(Asset.updated_at)).limit(top_k).all()
+            return [_asset_to_dict(a) for a in rows]
+        finally:
+            db.close()
+
+    def _get_asset_impl(asset_id: int):
+        from app.models.asset import Asset
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            a = db.query(Asset).filter(Asset.id == asset_id).first()
+            return _asset_to_dict(a) if a else None
+        finally:
+            db.close()
+
+    @mcp_instance.tool()
+    def search_assets(query: str = "", top_k: int = 10,
+                      asset_type: Optional[str] = None,
+                      network_location: Optional[str] = None,
+                      status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """搜索设备资产（含地址 / 账号密码 / 全部信息）。
+
+        支持按设备名、IP、主机名、序列号、型号、厂商、服务名、应用、部门、
+        位置、数据中心、MAC、标签、备注等任意字段模糊匹配（query 可空，
+        空时按过滤条件列出资产）。
+
+        Args:
+            query: 搜索关键词（如设备名"核心交换机"、IP "172.16.8.106"）
+            top_k: 最多返回几条（默认 10）
+            asset_type: 按类型过滤（server/network/storage/security/database/application/other）
+            network_location: 按所处网络过滤（office 办公网/monitoring 监控网/billing 收费网/other）
+            status: 按状态过滤（active 在用/inactive 停用/maintenance 维护中/retired 已退役）
+
+        Returns:
+            每条含全部字段：
+            - name 设备名 / asset_type 类型 / device_model 型号 / manufacturer 厂商
+            - ip_address 地址 / mac_address / hostname 主机名 / port / network_location 所处网络
+            - username 用户名 / password 密码 / ssh_key SSH密钥
+            - location 物理位置 / rack_position 机柜 / datacenter 数据中心
+            - os_version / cpu / memory / storage 配置
+            - status 状态 / department 部门 / service_name 服务 / application 应用 / purpose 用途
+            - purchase_date / warranty_expiry / last_maintenance / next_maintenance
+            - notes 备注 / tags 标签 / source_file 来源文件 / source_document_id
+            - id / created_at / updated_at
+        """
+        return _search_assets_impl(query, top_k, asset_type, network_location, status)
+
+    @mcp_instance.tool()
+    def get_asset(asset_id: int) -> Dict[str, Any]:
+        """按 ID 取单台设备的**全部信息**（字段含义见 search_assets 返回值说明）。
+
+        Args:
+            asset_id: 设备 ID（可先用 search_assets 按名称/IP 查到）
+
+        Returns:
+            单台设备全部字段（含 username / password）；不存在时返回 {"error": ...}
+        """
+        a = _get_asset_impl(asset_id)
+        if not a:
+            return {"error": f"设备不存在: asset_id={asset_id}"}
+        return a
 
     @mcp_instance.tool()
     def generate_report(topic: str = "", tag: Optional[str] = None,
