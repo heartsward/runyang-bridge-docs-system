@@ -123,9 +123,7 @@ class ApiService {
     this.setAuthHeader()
   }
 
-  // 阶段二十六·26.10：获取当前 token（iframe URL 拼接用）
-  // 浏览器原生 iframe 发请求不会带 axios 拦截器注入的 Authorization，
-  // converted-pdf 端点必须接受 ?token=xxx 查询参数
+  // 获取当前 token（供其它需要拼接 token 的场景使用；authService 也依赖此方法）
   getToken(): string | null {
     return this.token || localStorage.getItem('access_token')
   }

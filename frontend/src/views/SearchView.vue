@@ -341,50 +341,6 @@
             />
           </div>
 
-          <!-- 阶段二十四：Office 文档走 LibreOffice 转 PDF + iframe（独立进度通道） -->
-          <div v-else-if="isOfficeFile(previewDocumentData)" style="position: relative; height: 100%;">
-            <!-- 转 PDF 中 -->
-            <div v-if="previewConvertStatus !== 'ready' && previewConvertStatus !== 'error'" style="position: absolute; inset: 0; background: rgba(255,255,255,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; padding: 24px;">
-              <n-spin size="large" />
-              <div style="margin-top: 16px; font-size: 14px;">
-                {{
-                  previewConvertStatus === 'converting'
-                    ? `正在转换为 PDF（LibreOffice · 约 ${previewConvertElapsed}s · 首次可能较慢）`
-                    : '准备转换…'
-                }}
-              </div>
-              <n-text depth="3" style="margin-top: 8px; font-size: 12px;">
-                此进度与文件内容提取进度独立 · 仅影响本次浏览器预览
-              </n-text>
-            </div>
-
-            <!-- 转 PDF 失败 -->
-            <div v-if="previewConvertStatus === 'error'" style="padding: 24px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
-              <n-alert type="error" :show-icon="true" title="PDF 转换失败">
-                <n-text style="font-size: 13px;">{{ previewConvertError || 'LibreOffice 转换出错' }}</n-text>
-              </n-alert>
-              <div style="margin-top: 16px; text-align: center;">
-                <n-dropdown
-                  trigger="click"
-                  :options="downloadMenuOptions"
-                  @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title, previewDocumentData?.file_type)"
-                >
-                  <n-button type="primary">
-                    <template #icon><n-icon><DownloadOutline /></n-icon></template>
-                    下载文件
-                  </n-button>
-                </n-dropdown>
-              </div>
-            </div>
-
-<!-- 转 PDF 成功（26.10：浏览器原生 iframe 不带 axios 拦截器 token，必须拼 ?token=） -->
-          <iframe
-            v-show="previewConvertStatus === 'ready'"
-            :src="`/api/v1/documents/${previewDocumentData.document_id}/converted-pdf?token=${encodeURIComponent(apiService.getToken() || '')}`"
-            style="width: 100%; height: 100%; border: none; border-radius: 4px;"
-            title="Office 文档 PDF 预览"
-          />
-          </div>
 
           <!-- 其他文件类型显示下载信息 -->
           <div v-else class="file-download-info">
@@ -532,82 +488,6 @@ const previewContent = ref('')
 const previewDocumentData = ref<PreviewData | null>(null)
 const previewMode = ref<'extracted' | 'original'>('extracted')
 
-// 阶段二十四：PDF 预览转换进度状态（与"内容提取"完全独立）
-const previewConvertStatus = ref<'idle' | 'converting' | 'ready' | 'error'>('idle')
-const previewConvertError = ref<string>('')
-const previewConvertElapsed = ref<number>(0)
-let _convertStatusTimer: ReturnType<typeof setInterval> | null = null
-
-// 阶段二十六·26.5：轮询超时兜底（防 LibreOffice 未装/卡死时前端无限轮询刷日志）
-const POLL_IDLE_TIMEOUT_MS = 15_000
-const POLL_CONVERT_TIMEOUT_MS = 150_000
-let _pollStartedAt = 0
-let _firstConvertingAt = 0
-
-const pollPreviewConvertStatus = async (docId: number) => {
-  if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
-  _pollStartedAt = Date.now()
-  _firstConvertingAt = 0
-  previewConvertError.value = ''
-  _convertStatusTimer = setInterval(async () => {
-    const now = Date.now()
-    let stop = false
-    let finalStatus: string = previewConvertStatus.value
-    let errMsg = ''
-    try {
-      const r = await apiService.get(`/documents/${docId}/conversion-status`)
-      const status = r?.status || 'idle'
-      previewConvertStatus.value = status
-      previewConvertError.value = r?.error_msg || ''
-      // 转换中：用客户端计时让"约 Xs"真实递增（后端 converting 期间 elapsed_sec 恒为 0）
-      if (status === 'converting') {
-        if (!_firstConvertingAt) _firstConvertingAt = now
-        previewConvertElapsed.value = Math.max(r?.elapsed_sec || 0, Math.floor((now - _firstConvertingAt) / 1000))
-      } else {
-        previewConvertElapsed.value = r?.elapsed_sec || 0
-      }
-
-      if (status === 'ready' || status === 'error') {
-        stop = true
-      } else if (status === 'converting' && _firstConvertingAt && now - _firstConvertingAt > POLL_CONVERT_TIMEOUT_MS) {
-        stop = true
-        finalStatus = 'error'
-        errMsg = '转换超时（超过 2.5 分钟未完成），请重试或下载查看原文件'
-      } else if (status !== 'converting' && now - _pollStartedAt > POLL_IDLE_TIMEOUT_MS) {
-        // 一直 idle：转换从未启动（多为 LibreOffice 未安装 / soffice 路径不对）
-        stop = true
-        finalStatus = 'error'
-        errMsg = '转换未启动：请确认后端已安装 LibreOffice 并重启（参见 docs/环境安装-LibreOffice.md）'
-      }
-    } catch (e) {
-      if (now - _pollStartedAt > POLL_CONVERT_TIMEOUT_MS) {
-        stop = true
-        finalStatus = 'error'
-        errMsg = '无法查询转换状态，请重试或下载查看原文件'
-      }
-    }
-    if (stop) {
-      stopPreviewConvertPolling()
-      previewConvertStatus.value = finalStatus
-      previewConvertError.value = errMsg
-    }
-  }, 2000)
-}
-
-const stopPreviewConvertPolling = () => {
-  if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
-}
-
-watch([previewMode, previewDocumentData], ([mode, doc]) => {
-  if (mode === 'original' && doc && isOfficeFile(doc)) {
-    previewConvertStatus.value = 'converting'
-    pollPreviewConvertStatus(doc.document_id)
-  } else {
-    stopPreviewConvertPolling()
-    previewConvertStatus.value = 'idle'
-    previewConvertError.value = ''
-  }
-})
 
 // 搜索高亮导航相关（阶段二十·20.5：多词分别导航）
 // termGroups: 按查询顺序 [{ term, count, indexes: 全局 mark 索引[] }]
@@ -741,35 +621,12 @@ const isPDFFile = (document: any): boolean => {
   return document.file_type?.toLowerCase() === 'pdf'
 }
 
-// 阶段二十六·26.3：判断是否走 LibreOffice 转 PDF 预览（与后端 SUPPORTED_OFFICE_TYPES 对齐，20 种）
-const OFFICE_TYPES = [
-  // Word 3 种
-  'doc','docx','docm',
-  // Excel 4 种
-  'xls','xlsx','xlsm','xlsb',
-  // PowerPoint 7 种
-  'ppt','pptx','pptm',
-  'pps','ppsx','ppsm',
-  'pot',
-  // CSV / EPUB
-  'csv',
-  'epub',
-  // OpenDocument / RTF
-  'odt','ods','odp',
-  'rtf',
-]
-const isOfficeFile = (document: any): boolean => {
-  if (!document) return false
-  const ft = (document.file_type || '').toLowerCase()
-  return OFFICE_TYPES.includes(ft)
-}
-
 // 判断是否应该显示视图切换按钮
 // 阶段二十六·26.3：只对 4 类显示 — Office 文档（Word/Excel/PPT/CSV）、epub、PDF、图片
 // 文本类（.txt/.md）不显示切换按钮（提取内容模式即可）
 const shouldShowViewToggle = (document: any): boolean => {
   if (!document) return false
-  return isOfficeFile(document) || isPDFFile(document) || isImageFile(document.file_type)
+  return isPDFFile(document) || isImageFile(document.file_type)
 }
 
 

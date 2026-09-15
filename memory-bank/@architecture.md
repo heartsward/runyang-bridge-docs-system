@@ -76,6 +76,16 @@ runyang-bridge-docs-system/
 > - **26.7**：文档列表页加"PDF 转换"进度列（与"内容提取"指示并列）。后端新增批量端点 `GET /documents/conversion-status/batch?doc_ids=1,2,3`（一次拉本页全部转换状态，复用 `get_status`；非 Office 返回 `n/a`）；前端 `DocumentView.vue` 表格新增列：已完成(绿)/转换中·Xs(黄)/失败(红)/未转换(灰)/非Office(—)，有文档转换中时 3s 轮询、全到终态停止，`onBeforeUnmount` 清理定时器。
 > - 上传界面去重：删除 `<n-upload>` 内的 `<n-alert>` 格式框体（在上传点击区会误触发选文件，且与右侧文字重复），只保留按钮 + 下方一行 `n-text` 文字
 
+> **2026-09-15 变更（阶段二十六·26.11 — Office→PDF 预览功能整体回退）**：用户对 LibreOffice 弹窗、profile 污染、iframe 认证等一系列问题彻底失望，**决定回退整个 Office 转 PDF 在线预览功能**。LibreOffice 不再使用。
+> - 后端：删 `backend/app/services/preview_converter.py`（整文件 ~666 行）；`documents.py` 删 4 个端点（`/{id}/converted-pdf`、`/conversion-status/batch`、`/{id}/conversion-status`、`/{id}/convert`）共 188 行；`deps.py` 删 `get_user_for_iframe`（43 行）；`config.py` 删 `LIBREOFFICE_BIN_PATH` + `PREVIEW_CONVERT_TIMEOUT`（6 行）
+> - 前端：`DocumentView.vue` 删 ~250 行（Office 模板分支 + previewConvert 块 + pdfConvertStatus 块 + 表格"PDF 转换"列 + OFFICE_EXTENSIONS/isOfficeFile 死代码 + loadDocuments 末尾轮询调用）；`SearchView.vue` 删 ~150 行（同上结构）；`shouldShowViewToggle` **回退到 `isPDFFile || isImageFile`**（仅 PDF/图片 显示"原文件"切换，其它格式都只有"提取内容"模式）；`api.ts` 的 `getToken()` 保留（authService 依赖，与功能无关功能无关）
+> - 工具脚本：删 `scripts/batch_convert_previews.py`（258 行，预热 converted_pdfs 缓存专用）
+> - 文档：删 `docs/环境安装-LibreOffice.md`（~198 行）；`docs/系统架构文档.md`/`部署指南.md`/`部署指南-GitHub.md`/`开发者文档.md`/`用户操作手册.md` 中的 13 处 LibreOffice 提及全部改为 anydoc 描述
+> - 运行时：清空 `backend/cache/converted_pdfs/` + `task_status/preview_convert_*.json` + `cache/soffice_locks/`
+> - **保留**：`ALLOWED_EXTENSIONS` 22 种上传白名单（含 PPT 7 种）保留——用户可上传 Office，列表仍显示"已上传"，预览时 Office/文本类走"提取内容"模式，无"原文件"切换
+> - **保留**：上面阶段二十四 + 26.5/26.6/26.7 历史条目全部保留（作为过程记录，便于以后回查为什么做过这些改动；但当前代码已无对应实现，按 26.11 状态为准）
+> - **长期约束**：项目不引入 LibreOffice / soffice / 任何本地 Office 转 PDF 方案；Office 类预览一律走"提取内容"（用户查看 markdown）或下载原文件
+
 ---
 
 ## 1. backend/ — FastAPI 后端

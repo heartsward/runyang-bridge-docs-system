@@ -157,13 +157,6 @@ class Settings(BaseSettings):
     # 默认 127.0.0.1 仅本机可达，局域网内 AI 工作台访问需改成服务器 IP）
     WIKI_PUBLIC_HOST: str = "127.0.0.1"
 
-    # 阶段二十四：LibreOffice 预览转换器配置（仅用于"原文件"模式 PDF 预览，
-    # 内容提取链路继续走 anydoc，与 LibreOffice 完全解耦）
-    # 自定义 soffice 可执行文件路径（留空则按 LIBREOFFICE_BIN_PATH 表探测）
-    LIBREOFFICE_BIN_PATH: str = ""
-    # 单次转换超时（秒）；大 xlsx 可能 60s+；120s 默认够用
-    PREVIEW_CONVERT_TIMEOUT: int = 120
-    
     # 自定义配置
     ADMIN_EMAIL: str = "admin@runyang.com"
     ENABLE_NOTIFICATIONS: bool = False

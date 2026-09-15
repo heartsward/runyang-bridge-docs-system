@@ -1246,3 +1246,14 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - `loadDocuments` 后调 `loadPdfConvertStatus`；有文档 converting 时 `startPdfConvertPolling`(3s)，全到终态停止
   - `onBeforeUnmount` 清理转换/预览两个轮询定时器
 - 验证：批量端点 e2e 结构正确（doc1 png→n/a，doc2-4 pdf→n/a，doc5-6 xlsx→ready）；前端 build 0 error；服务已重启
+
+### 26.11 — Office→PDF 在线预览功能整体回退（用户对 LibreOffice 弹窗/认证/超时等问题彻底失望）
+用户决策：彻底删除 Office 转 PDF 预览，LibreOffice 不再用，预览切换按钮只对 PDF/图片显示
+- 后端（删 903 行）：preview_converter.py 整文件删；documents.py 删 4 端点（converted-pdf/conversion-status/batch/{id}/conversion-status/{id}/convert）共 188 行；deps.py 删 get_user_for_iframe（43 行）；config.py 删 LIBREOFFICE_BIN_PATH + PREVIEW_CONVERT_TIMEOUT（6 行）
+- 前端（删 ~400 行）：DocumentView.vue 删 Office 模板分支 + previewConvert/pdfConvertStatus 块 + 表格 PDF 转换列 + OFFICE_EXTENSIONS/isOfficeFile 死代码 + loadDocuments 末尾轮询（~250 行）；SearchView.vue 同上结构（~150 行）；shouldShowViewToggle 回退到 isPDFFile || isImageFile
+- 脚本（删 258 行）：scripts/batch_convert_previews.py
+- 文档：删 docs/环境安装-LibreOffice.md（~198 行）；docs 系统架构/部署/开发者/用户手册 13 处 LibreOffice 提及全部改为 anydoc 描述
+- 运行时：清 cache/converted_pdfs/* + task_status/preview_convert_*.json + cache/soffice_locks/*
+- 保留：ALLOWED_EXTENSIONS 22 种上传白名单（含 PPT 7 种）保留——Office 类可上传但预览时走"提取内容"或下载
+- 保留：@architecture.md 阶段二十四+26.5/26.6/26.7 历史条目（过程记录），新增 26.11 条目说明当前状态
+- 长期约束：项目不引入 LibreOffice / soffice；如未来需 Office 在线预览必须选 SaaS 路线

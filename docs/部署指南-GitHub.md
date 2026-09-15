@@ -34,7 +34,7 @@ git commit -m "feat: 初始化润扬大桥运维文档管理系统
 - 数据分析和AI智能建议
 - 跨平台一键启动脚本
 - 完整的系统文档
-- LibreOffice集成文档内容提取
+- 智能内容提取（anydoc 统一引擎）
 
 🚀 Generated with Claude Code"
 
@@ -111,7 +111,7 @@ VITE_API_BASE_URL=http://your-backend-server:8002
 ### 部署前检查
 - [ ] 已安装Python 3.8+
 - [ ] 已安装Node.js 16+
-- [ ] 已安装LibreOffice（用于文档内容提取）
+- [ ] 已安装 anydoc（pip install firecrawl-anydoc）
 - [ ] 已修改SECRET_KEY为安全的随机值
 - [ ] 已配置正确的API地址和CORS设置
 - [ ] 已设置防火墙规则（开放5173和8002端口）
@@ -121,7 +121,7 @@ VITE_API_BASE_URL=http://your-backend-server:8002
 - [ ] 后端API能正常访问 (http://localhost:8002)
 - [ ] 能正常登录系统（admin/admin123）
 - [ ] 能正常上传和搜索文档
-- [ ] LibreOffice文档提取功能正常工作
+- [ ] 文档内容提取功能正常（anydoc 自动接管所有格式）
 
 ## 🔄 版本更新管理
 
@@ -447,13 +447,11 @@ pm2 save
    kill -9 <PID>
    ```
 
-2. **LibreOffice未找到**
+2. **内容提取引擎 anydoc 未安装/加载**
    ```bash
-   # Ubuntu/Debian
-   sudo apt install libreoffice
-   
-   # 验证安装
-   libreoffice --version
+   pip install firecrawl-anydoc
+   pip list | grep firecrawl-anydoc
+   # 验证:能 import anydoc；后端启动日志可见 "anydoc 可用"
    ```
 
 3. **数据库连接失败**

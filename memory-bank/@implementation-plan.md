@@ -2400,3 +2400,14 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 风险 4：阶段二十四的批量预热脚本 `batch_convert_previews.py` 会自动适配新 SUPPORTED_OFFICE_TYPES（直接读后端白名单），不用改
 - 风险 5：`.json` 之前被我从 SUPPORTED_OFFICE_TYPES 移除（用户当时说不用），现在用户又决定用，但要求"按文本预览逻辑处理"——所以 .json **留在 TEXT_PREVIEW_TYPES**，**不进** SUPPORTED_OFFICE_TYPES（用户新需求里 .json 没有列入"office/epub"那组）
 
+
+---
+
+## 阶段二十六·26.11（功能回退 — 与上面 26.1/26.7 互逆）
+
+- **用户决策**：彻底删除 Office→PDF 在线预览功能（详见 `@architecture.md` 26.11 条目）
+- 已删：`preview_converter.py` 整文件、`/converted-pdf` + `/conversion-status/batch` + `/{id}/conversion-status` + `/{id}/convert` 4 个端点、`get_user_for_iframe` 依赖、`OFFICE_EXTENSIONS`/`OFFICE_TYPES` 常量、`isOfficeFile` 函数、表格"PDF 转换"列、`shouldShowViewToggle` 回退到 `isPDFFile || isImageFile`
+- `已删 `scripts/batch_convert_previews.py`、`docs/环境安装-LibreOffice.md`
+- `已清 cache/converted_pdfs/`、`task_status/preview_convert_*.json`、`cache/soffice_locks/`
+- **保留**：`ALLOWED_EXTENSIONS` 22 种上传白名单（含 PPT 7 种）保留
+- **约束**：项目不引入 LibreOffice / soffice；如未来需 Office 在线预览必须选 SaaS（OnlyOffice / Collabora Online）

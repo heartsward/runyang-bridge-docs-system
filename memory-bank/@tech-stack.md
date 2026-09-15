@@ -243,17 +243,11 @@ stop-services.bat
 - `PDF_ENGINE` / `OCR_ENGINE` / `MINERU_ENABLED` / `PADDLEOCR_LANG`: 本地引擎内部切换(保留)
 - ~~`AI_ALL_FORMATS_AI`~~:**阶段十九已移除**(anydoc 已是全格式首选引擎,"全格式 AI 规整"开关无意义)
 
-**LibreOffice(阶段二十四重新引入 — 仅作"PDF 预览转换器")**:
-- **角色边界**:仅用于"原文件"模式把 Office 格式转成 PDF 供 iframe 预览;**不参与内容提取**(anydoc 完全独立)
-- **可选依赖**:不强制安装;未装时降级为下载提示卡(不影响内容提取/智能搜索/MCP)
-- **soffice 路径探测顺序**(由 `backend/app/services/preview_converter.detect_soffice_path()`):
-  1. `.env` 中的 `LIBREOFFICE_BIN_PATH`(用户自定义)
-  2. 平台标准路径(Windows `C:\Program Files\LibreOffice\program\soffice.exe` / Linux `/usr/bin/soffice` / macOS `/Applications/LibreOffice.app/Contents/MacOS/soffice`)
-  3. `PATH` 中的 `soffice` / `libreoffice`
-- **缓存**:`backend/cache/converted_pdfs/{doc_id}.pdf`(按 doc_id + 源文件 mtime 比对)
-- **进度通道**:`task_status/preview_convert_{doc_id}.json`(独立文件,不与 `extract_{doc_id}_*.json` 序列混淆)
-- **⚠️ 严禁**:阶段十九刚清掉 LibreOffice 是为了"零系统依赖",阶段二十四是局部回滚 —— **禁止把 LibreOffice 重新用于内容提取链路**(会绕过 anydoc 的速度优势);只在 `preview_converter.py` 内使用
-- 安装说明见 `docs/环境安装-LibreOffice.md`(本阶段重写,反映新角色)
+**⚠️ LibreOffice 全面禁用（阶段二十六·26.11）**：
+- 用户决定回退整个 Office→PDF 预览功能后，**项目中不再使用 LibreOffice / soffice / 任何本地 Office 转 PDF 方案**
+- 删除了 `preview_converter.py`、`/converted-pdf` 端点、`OFFICE_EXTENSIONS` 判断、`shouldShowViewToggle` 对 Office 类的判断、`LIBREOFFICE_BIN_PATH` / `PREVIEW_CONVERT_TIMEOUT` 配置等
+- 文档处理走"提取内容"模式（anydoc 转 markdown）+ 用户下载原文件查看
+- **长期约束**：新功能禁止引入 LibreOffice 依赖；如未来真需要 Office 在线预览，必须选 SaaS 路线（如 OnlyOffice、Collabora Online）
 
 **MinerU 集成（阶段四规划）**：
 - MinerU 是 2026 年中文文档提取 SOTA（Apache-2.0 + 商业附加条款）
