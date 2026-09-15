@@ -383,6 +383,12 @@ class PreviewConverter:
             ]
             logger.debug(f"[PreviewConverter] soffice cmd: {' '.join(cmd)}")
 
+            # Windows:不弹出 cmd 控制台窗口（静默运行 LibreOffice 子进程）
+            # CREATE_NO_WINDOW = 0x08000000；仅 Windows 有效，其它平台忽略
+            creationflags = 0
+            if platform.system() == "Windows":
+                creationflags = subprocess.CREATE_NO_WINDOW
+
             try:
                 result = subprocess.run(
                     cmd,
@@ -391,6 +397,7 @@ class PreviewConverter:
                     timeout=timeout,
                     encoding="utf-8",
                     errors="replace",
+                    creationflags=creationflags,
                 )
             except subprocess.TimeoutExpired as e:
                 raise RuntimeError(f"soffice 转换超时 ({timeout}s)") from e

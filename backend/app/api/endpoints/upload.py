@@ -40,13 +40,33 @@ def allowed_file(filename: str) -> bool:
 
 def validate_file_content(file: UploadFile) -> bool:
     """验证文件内容（魔术字节检测） - 优化版本"""
-    # 文件魔术字节签名
+    # 文件魔术字节签名（阶段二十六·26.3：补齐 PPT 7 种 + .epub，与 ALLOWED_EXTENSIONS 22 种对齐）
+    # OLE2 复合文档头（旧版 Office：doc/xls/ppt/pot）
+    OLE2 = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
+    # ZIP 容器头（OOXML：docx/xlsx/pptx/potx 及派生宏版 + epub）
+    ZIP = [b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08']
     MAGIC_SIGNATURES = {
         'pdf': [b'%PDF'],
-        'doc': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
-        'docx': [b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'],
+        # Word
+        'doc': [OLE2],
+        'docx': ZIP,
+        'docm': ZIP,
+        # Excel
+        'xls': [OLE2],
         'xlsx': [b'PK\x03\x04'],
-        'xls': [b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'],
+        'xlsm': [b'PK\x03\x04'],
+        'xlsb': [OLE2],  # Excel 二进制工作簿：OLE2 复合文档容器
+        # PowerPoint（阶段二十六新增）
+        'ppt': [OLE2],
+        'pot': [OLE2],
+        'pptx': ZIP,
+        'pptm': ZIP,
+        'pps': [OLE2],
+        'ppsx': ZIP,
+        'ppsm': ZIP,
+        # EPUB（ZIP 容器，首条未压缩条目为 mimetype=application/epub+zip）
+        'epub': [b'PK\x03\x04'],
+        # 图片
         'jpg': [b'\xff\xd8\xff'],
         'jpeg': [b'\xff\xd8\xff'],
         'png': [b'\x89PNG\r\n\x1a\n'],

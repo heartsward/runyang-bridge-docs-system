@@ -1213,3 +1213,20 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 ### 风险 / 遗留
 - 历史已上传的 .json 文档：`document.content` 已是旧 TextExtractor 代码块格式，搜索/预览仍可用（markdown 渲染代码块），但新 .json 无法再上传
 - 上传说明里"Office/PDF/EPUB/图片 20 种" = 22 总种 − 文本 2 种（.txt/.md 无切换按钮）
+
+### 26.4 — 修复 PPT 上传被拒 + 上传界面去重（用户实测反馈）
+- **PPT 上传报"文件内容与扩展名不匹配"的真正根因**：`upload.py` 的 `validate_file_content()` 里有独立的**魔术字节白名单** `MAGIC_SIGNATURES`，只登记了 8 种（pdf/doc/docx/xlsx/xls/jpg/jpeg/png）。阶段二十六只扩了**扩展名白名单** `ALLOWED_EXTENSIONS`，**漏了这个内容校验** → `.ppt/.pptx/...` 和 `.epub` 走到"不在列表默认拒绝"。
+- **修复**：`MAGIC_SIGNATURES` 补齐 PPT 7 种 + `.epub` + `.docm/.xlsm/.xlsb`（22 种全覆盖）：
+  - OLE2 复合文档头 `D0CF11E0A1B11AE1`：.doc/.xls/.ppt/.pot/.pps/.xlsb
+  - ZIP 容器头 `PK\x03\x04` 等：.docx/.docm/.xlsx/.xlsm/.pptx/.pptm/.ppsx/.ppsm/.epub
+- **上传界面去重**：`DocumentView.vue` 删除 `<n-upload>` 内的 `<n-alert>` 格式框体（它在上传点击区里，点击会误触发选文件，且与右侧文字描述内容重复），只保留 `<n-upload>` + 按钮 + 下方一行 `n-text` 文字描述
+- 验证：构造 22 种合法文件头全部通过 `validate_file_content`；伪装（.pptx 头=OLE2）/可执行（MZ 伪装 .txt）/空文件全部正确拒绝
+
+### 26.5 — LibreOffice 静默运行 + 预览轮询兜底（用户部署到新机器实测反馈）
+用户三个表象：① 调 LibreOffice 弹出 cmd 窗口（非静默）；② Office 预览一直"转换中"卡住 + 后端日志无限刷 `GET /documents/{id}/conversion-status 200 OK`；③ 进度"约 0s"不动
+- **弹窗口**：`preview_converter._call_soffice()` 的 `subprocess.run` 没加 `CREATE_NO_WINDOW` → Windows 每次调 soffice 弹控制台。修复：Windows 下 `creationflags=subprocess.CREATE_NO_WINDOW`（0x08000000，仅 Windows 有效，跨平台兼容）
+- **卡住 + 刷日志（核心）**：前端 `pollPreviewConvertStatus` 只在 `ready`/`error` 才停；当 LibreOffice 未装/路径错时，`/converted-pdf` 直接 503、**不写状态文件** → `get_status` 恒返回 `idle` → `idle` 非终止态 → 前端每 2s 无限轮询。修复：加超时兜底（`idle` 持续 15s 未启动 → 报"转换未启动：请确认 LibreOffice 已装并重启"；`converting` 超 150s（宽于后端 120s 超时）→ 报"转换超时"；网络异常超 150s → 停）。日志最多刷 75 次即止
+- **进度 0s**：converting 期间后端 `elapsed_sec` 恒为 0 → 前端改用客户端计时（记录首次 `converting` 时间戳）真实递增
+- 两个视图（DocumentView / SearchView）同步改
+- 验证：本机 soffice 探测 OK（`C:\Program Files\LibreOffice\program\soffice.exe`）；`CREATE_NO_WINDOW` 可用；前端 build 0 error；服务已重启
+- **关键认知**：用户看到的"系统不在本机"实为 Office→PDF 转换在新机器失败（大概率 LibreOffice 未装）；doc 4 本身是 PDF（`file_type='pdf'`），走 iframe 直显、根本不触发 LibreOffice 转换

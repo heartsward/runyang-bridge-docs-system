@@ -538,20 +538,58 @@ const previewConvertError = ref<string>('')
 const previewConvertElapsed = ref<number>(0)
 let _convertStatusTimer: ReturnType<typeof setInterval> | null = null
 
+// 阶段二十六·26.5：轮询超时兜底（防 LibreOffice 未装/卡死时前端无限轮询刷日志）
+const POLL_IDLE_TIMEOUT_MS = 15_000
+const POLL_CONVERT_TIMEOUT_MS = 150_000
+let _pollStartedAt = 0
+let _firstConvertingAt = 0
+
 const pollPreviewConvertStatus = async (docId: number) => {
   if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+  _pollStartedAt = Date.now()
+  _firstConvertingAt = 0
+  previewConvertError.value = ''
   _convertStatusTimer = setInterval(async () => {
+    const now = Date.now()
+    let stop = false
+    let finalStatus: string = previewConvertStatus.value
+    let errMsg = ''
     try {
       const r = await apiService.get(`/documents/${docId}/conversion-status`)
       const status = r?.status || 'idle'
       previewConvertStatus.value = status
-      previewConvertElapsed.value = r?.elapsed_sec || 0
       previewConvertError.value = r?.error_msg || ''
+      // 转换中：用客户端计时让"约 Xs"真实递增（后端 converting 期间 elapsed_sec 恒为 0）
+      if (status === 'converting') {
+        if (!_firstConvertingAt) _firstConvertingAt = now
+        previewConvertElapsed.value = Math.max(r?.elapsed_sec || 0, Math.floor((now - _firstConvertingAt) / 1000))
+      } else {
+        previewConvertElapsed.value = r?.elapsed_sec || 0
+      }
+
       if (status === 'ready' || status === 'error') {
-        if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+        stop = true
+      } else if (status === 'converting' && _firstConvertingAt && now - _firstConvertingAt > POLL_CONVERT_TIMEOUT_MS) {
+        stop = true
+        finalStatus = 'error'
+        errMsg = '转换超时（超过 2.5 分钟未完成），请重试或下载查看原文件'
+      } else if (status !== 'converting' && now - _pollStartedAt > POLL_IDLE_TIMEOUT_MS) {
+        // 一直 idle：转换从未启动（多为 LibreOffice 未安装 / soffice 路径不对）
+        stop = true
+        finalStatus = 'error'
+        errMsg = '转换未启动：请确认后端已安装 LibreOffice 并重启（参见 docs/环境安装-LibreOffice.md）'
       }
     } catch (e) {
-      // 网络/认证错误静默继续
+      if (now - _pollStartedAt > POLL_CONVERT_TIMEOUT_MS) {
+        stop = true
+        finalStatus = 'error'
+        errMsg = '无法查询转换状态，请重试或下载查看原文件'
+      }
+    }
+    if (stop) {
+      stopPreviewConvertPolling()
+      previewConvertStatus.value = finalStatus
+      previewConvertError.value = errMsg
     }
   }, 2000)
 }

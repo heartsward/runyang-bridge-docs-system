@@ -163,51 +163,6 @@
           @update:file-list="handleFileChange"
           accept=".doc,.docx,.docm,.xls,.xlsx,.xlsm,.xlsb,.ppt,.pptx,.pptm,.pps,.ppsx,.ppsm,.pot,.epub,.csv,.pdf,.jpg,.jpeg,.png,.txt,.md"
         >
-        <n-alert type="info" style="margin-bottom: 12px;" :show-icon="true">
-          <template #header>支持的格式（22种，最大 10MB）</template>
-          <div style="font-size: 12px; line-height: 1.8;">
-            <n-text strong>Office/PDF/EPUB/图片（20种）</n-text>：会显示"原文件"切换按钮 — PDF/图片 直显；Office/EPUB/CSV 走 LibreOffice 转 PDF
-            <div style="margin-top: 4px;">
-              <n-text depth="3" style="font-size: 12px;">Word：</n-text>
-              <n-tag size="small" style="margin: 1px;">.doc</n-tag>
-              <n-tag size="small" style="margin: 1px;">.docx</n-tag>
-              <n-tag size="small" style="margin: 1px;">.docm</n-tag>
-            </div>
-            <div style="margin-top: 4px;">
-              <n-text depth="3" style="font-size: 12px;">Excel：</n-text>
-              <n-tag size="small" style="margin: 1px;">.xls</n-tag>
-              <n-tag size="small" style="margin: 1px;">.xlsx</n-tag>
-              <n-tag size="small" style="margin: 1px;">.xlsm</n-tag>
-              <n-tag size="small" style="margin: 1px;">.xlsb</n-tag>
-            </div>
-            <div style="margin-top: 4px;">
-              <n-text depth="3" style="font-size: 12px;">PowerPoint：</n-text>
-              <n-tag size="small" style="margin: 1px;">.ppt</n-tag>
-              <n-tag size="small" style="margin: 1px;">.pptx</n-tag>
-              <n-tag size="small" style="margin: 1px;">.pptm</n-tag>
-              <n-tag size="small" style="margin: 1px;">.pps</n-tag>
-              <n-tag size="small" style="margin: 1px;">.ppsx</n-tag>
-              <n-tag size="small" style="margin: 1px;">.ppsm</n-tag>
-              <n-tag size="small" style="margin: 1px;">.pot</n-tag>
-            </div>
-            <div style="margin-top: 4px;">
-              <n-text depth="3" style="font-size: 12px;">其他：</n-text>
-              <n-tag size="small" style="margin: 1px;">.csv</n-tag>
-              <n-tag size="small" style="margin: 1px;">.epub</n-tag>
-              <n-tag size="small" style="margin: 1px;">.pdf</n-tag>
-              <n-tag size="small" style="margin: 1px;">.jpg</n-tag>
-              <n-tag size="small" style="margin: 1px;">.jpeg</n-tag>
-              <n-tag size="small" style="margin: 1px;">.png</n-tag>
-            </div>
-            <div style="margin-top: 8px;">
-              <n-text strong>文本类（2种）</n-text>：无"原文件"切换按钮 — 直接"提取内容"查看（markdown 渲染）
-            </div>
-            <div style="margin-top: 4px;">
-              <n-tag size="small" style="margin: 1px;" type="info">.txt</n-tag>
-              <n-tag size="small" style="margin: 1px;" type="info">.md</n-tag>
-            </div>
-          </div>
-        </n-alert>
           <n-button>
             <template #icon>
               <n-icon>
@@ -661,21 +616,62 @@ const previewConvertError = ref<string>('')
 const previewConvertElapsed = ref<number>(0)
 let _convertStatusTimer: ReturnType<typeof setInterval> | null = null
 
+// 阶段二十六·26.5：轮询超时兜底（防 LibreOffice 未装/卡死时前端无限轮询刷日志）
+// idle 持续未启动 → 视为"转换没起来"（多为 LibreOffice 未装/路径不对）
+// converting 超时 → 视为"转换卡死"
+const POLL_IDLE_TIMEOUT_MS = 15_000
+const POLL_CONVERT_TIMEOUT_MS = 150_000
+let _pollStartedAt = 0
+let _firstConvertingAt = 0
+
 const pollPreviewConvertStatus = async (docId: number) => {
   if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+  _pollStartedAt = Date.now()
+  _firstConvertingAt = 0
+  previewConvertError.value = ''
   _convertStatusTimer = setInterval(async () => {
+    const now = Date.now()
+    let stop = false
+    let finalStatus: string = previewConvertStatus.value
+    let errMsg = ''
     try {
       const r = await apiService.get(`/documents/${docId}/conversion-status`)
       const status = r?.status || 'idle'
       previewConvertStatus.value = status
-      previewConvertElapsed.value = r?.elapsed_sec || 0
       previewConvertError.value = r?.error_msg || ''
-      // ready 或 error 停轮询
+      // 转换中：用客户端计时让"约 Xs"真实递增（后端 converting 期间 elapsed_sec 恒为 0）
+      if (status === 'converting') {
+        if (!_firstConvertingAt) _firstConvertingAt = now
+        previewConvertElapsed.value = Math.max(r?.elapsed_sec || 0, Math.floor((now - _firstConvertingAt) / 1000))
+      } else {
+        previewConvertElapsed.value = r?.elapsed_sec || 0
+      }
+
       if (status === 'ready' || status === 'error') {
-        if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+        stop = true
+      } else if (status === 'converting' && _firstConvertingAt && now - _firstConvertingAt > POLL_CONVERT_TIMEOUT_MS) {
+        // 转换卡死
+        stop = true
+        finalStatus = 'error'
+        errMsg = '转换超时（超过 2.5 分钟未完成），请重试或下载查看原文件'
+      } else if (status !== 'converting' && now - _pollStartedAt > POLL_IDLE_TIMEOUT_MS) {
+        // 一直 idle：转换从未启动（多为 LibreOffice 未安装 / soffice 路径不对）
+        stop = true
+        finalStatus = 'error'
+        errMsg = '转换未启动：请确认后端已安装 LibreOffice 并重启（参见 docs/环境安装-LibreOffice.md）'
       }
     } catch (e) {
-      // 网络/认证错误 — 静默继续轮询
+      // 网络/认证错误 — 静默继续，但超过总超时则停
+      if (now - _pollStartedAt > POLL_CONVERT_TIMEOUT_MS) {
+        stop = true
+        finalStatus = 'error'
+        errMsg = '无法查询转换状态，请重试或下载查看原文件'
+      }
+    }
+    if (stop) {
+      stopPreviewConvertPolling()
+      previewConvertStatus.value = finalStatus
+      previewConvertError.value = errMsg
     }
   }, 2000)
 }

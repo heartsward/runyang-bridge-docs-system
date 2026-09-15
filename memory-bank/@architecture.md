@@ -70,6 +70,9 @@ runyang-bridge-docs-system/
 > - `SUPPORTED_OFFICE_TYPES` 扩到 **20 种**（+PPT 7 种）；anydoc 已支持全部 PPT 格式（提取零改动）；LibreOffice 已实测支持 PPT 转 PDF（预览零改动）
 > - 前端 `DocumentView.vue`/`SearchView.vue`：`OFFICE_EXTENSIONS`/`OFFICE_TYPES` 扩 20 种；删 `isJsonFile` 及 JSON `<pre>` 分支；**`shouldShowViewToggle` 改为只对 4 类显示**（Office 含 PPT/CSV + epub → LibreOffice 转 PDF；PDF → iframe；图片 → `<img>`），文本类（.txt/.md）不显示切换按钮
 > - 上传界面说明文字重写：按 Word/Excel/PowerPoint/其他 + 文本类分组列全 22 种，`accept` 属性同步
+> - **26.5（部署到新机器实测）**：① LibreOffice 子进程加 `subprocess.CREATE_NO_WINDOW`（Windows 静默，不弹 cmd 窗口）；② 前端预览轮询加**超时兜底**——`idle` 持续 15s 未启动报"LibreOffice 未装/重启"、`converting` 超 150s 报"超时"，防止 LibreOffice 未装时 `/converted-pdf` 503 不写状态文件导致前端无限 2s 轮询刷日志；③ converting 期间进度改前端客户端计时真实递增。**长期约束：LibreOffice 是可选依赖，未装时 Office 预览必须优雅降级（报明确错误 + 下载入口），绝不能让前端无限轮询或弹控制台窗口。**
+> - **26.4 踩坑修复（用户实测 PPT 上传被拒）**：`upload.py` 的 `validate_file_content()` 内有**独立于扩展名白名单的魔术字节白名单** `MAGIC_SIGNATURES`，原先只登记 8 种，导致 `.ppt/.pptx/...` 与 `.epub` 虽过了 `ALLOWED_EXTENSIONS` 却在内容校验被"默认拒绝"。已补齐 22 种（OLE2 头：doc/xls/ppt/pot/pps/xlsb；ZIP 头：docx/docm/xlsx/xlsm/pptx/pptm/ppsx/ppsm/epub）。**教训：扩展上传格式必须同时改 `ALLOWED_EXTENSIONS`（扩展名）+ `MAGIC_SIGNATURES`（内容）+ 前端 `accept` 三处**。
+> - 上传界面去重：删除 `<n-upload>` 内的 `<n-alert>` 格式框体（在上传点击区会误触发选文件，且与右侧文字重复），只保留按钮 + 下方一行 `n-text` 文字
 
 ---
 
