@@ -462,23 +462,35 @@ class PreviewConverter:
                 startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 0  # SW_HIDE
 
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    encoding="utf-8",
-                    errors="replace",
-                    creationflags=creationflags,
-                    startupinfo=startupinfo,
-                )
-            except subprocess.TimeoutExpired as e:
-                raise RuntimeError(f"soffice 转换超时 ({timeout}s)") from e
+            # 阶段二十六·26.9：soffice 超时重试机制
+            # 现象：Windows 上 LibreOffice 偶尔因临时 profile 污染卡 60s+ 不退出（实测）。
+            # 解法：超时杀进程 + 用全新临时目录/profile 重试一次（99% 场景重试就成功）。
+            # 进程会在 with tmpdir 退出时被回收（tempfile 自身不杀进程，__exit__ 只删文件）
+            result = None
+            for attempt in range(1, 3):  # 最多 2 次：首次 + 重试
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        errors="replace",
+                        creationflags=creationflags,
+                        startupinfo=startupinfo,
+                    )
+                    break  # 成功跳出
+                except subprocess.TimeoutExpired as e:
+                    logger.warning(f"[PreviewConverter] soffice 转换超时 (attempt {attempt}/2, {timeout}s)")
+                    if attempt == 1:
+                        # 杀残留 soffice 进程（带 profile dir 关键词避免误杀别的）
+                        self._kill_stale_soffice(profile_dir)
+                        continue  # 重试
+                    raise RuntimeError(f"soffice 转换超时 ({timeout}s) 且重试仍失败") from e
 
-            if result.returncode != 0:
-                err = (result.stderr or result.stdout or "").strip()
-                raise RuntimeError(f"soffice 返回非零退出码 {result.returncode}: {err[:500]}")
+            if result is None or result.returncode != 0:
+                err = (result.stderr or result.stdout or "") if result else "无返回值"
+                raise RuntimeError(f"soffice 返回非零退出码 {result.returncode if result else 'N/A'}: {err[:500]}")
 
             # soffice 会生成与输入同名的 .pdf（连扩展名都换）
             src_stem = Path(file_path).stem
@@ -488,6 +500,33 @@ class PreviewConverter:
 
             # 立即读字节（__exit__ 会清理 tmpdir）
             return pdf_out.read_bytes()
+
+    def _kill_stale_soffice(self, profile_dir: str) -> None:
+        """杀残留 soffice 进程（profile_dir 路径作为关键词只杀相关的）。
+
+        Windows 上 LibreOffice 临时卡住时，其命令行会包含 UserInstallation 路径，
+        通过 wmic 找出与当前 profile_dir 同源的进程并杀掉，避免下一次重试也被锁。
+        """
+        try:
+            # 找 profile_dir 的目录名（如 lo_profile），用它定位同 profile 的 soffice 进程
+            profile_name = Path(profile_dir).name
+            cmd = ['wmic', 'process', 'where', f"name='soffice.exe'", 'get', 'ProcessId,CommandLine', '/format:csv']
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+            for line in out.splitlines():
+                if profile_name in line:
+                    # 抽出 PID
+                    parts = line.split(',')
+                    for p in parts:
+                        if p.strip().isdigit():
+                            pid = int(p.strip())
+                            if pid != os.getpid():
+                                try:
+                                    os.kill(pid, 9)  # SIGKILL 等价于 TerminateProcess
+                                    logger.warning(f"[PreviewConverter] 杀残留 soffice PID={pid}")
+                                except Exception:
+                                    pass
+        except Exception as e:
+            logger.warning(f"[PreviewConverter] 杀残留进程失败: {e}")
 
     # ---------- 异步 / 状态查询 ----------
     async def get_or_convert(
