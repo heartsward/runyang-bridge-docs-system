@@ -315,6 +315,22 @@
         </template>
         <template v-else>
           <n-button @click="showPreviewModal = false">关闭</n-button>
+          <!-- 阶段二十七：编辑 + 在线编辑（仅 Office 类文档显示） -->
+          <n-button
+            v-if="currentUser?.is_superuser"
+            type="info"
+            @click="editDocument(currentDocument!)"
+          >
+            编辑
+          </n-button>
+          <n-button
+            v-if="isOnlyOfficeSupported(currentDocument?.file_path)"
+            type="warning"
+            style="color: white; background-color: #f0a020;"
+            @click="openInOnlyOffice(currentDocument!)"
+          >
+            ✏ 在线编辑
+          </n-button>
           <n-dropdown
             v-if="currentDocument"
             trigger="click"

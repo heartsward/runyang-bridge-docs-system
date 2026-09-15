@@ -128,8 +128,10 @@ def get_onlyoffice_edit_url(
         f"[OnlyOffice] 签发编辑 URL doc={document_id} user={current_user.id} type={file_type}"
     )
 
+    # 同时返回 config dict（前端 SDK 直接用，不必再 base64 解码）
     return {
-        "url": url,
+        "url": url,  # SDK 入口 URL（用于显示或直接跳转）
+        "config": config,  # 关键：SDK 接受这种格式直接初始化
         "doc_id": document_id,
         "file_name": file_name,
         "file_type": file_type,
