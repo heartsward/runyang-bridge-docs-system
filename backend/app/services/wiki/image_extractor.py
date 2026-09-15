@@ -12,7 +12,6 @@ Wiki 图片提取器（阶段十八·18.1）
 命名：PDF 内嵌 p{页码}_img{序号}.png；独立图片 img{序号}.{ext}
 """
 import logging
-import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -199,60 +198,8 @@ def register_image_doc(doc_id: int, source_path) -> List[Dict[str, Any]]:
     }]
 
 
-_PAGE_HEADER_RE = re.compile(r"^##\s+第\s*(\d+)\s*页", re.MULTILINE)
-
-
-def insert_image_refs(markdown: str, images: List[Dict[str, Any]]) -> str:
-    """把提取出的图片引用按页码插入 Markdown（阶段十八·18.3）
-
-    策略：
-    - MD 以 "## 第 N 页" 分页（pymupdf 引擎）→ 每张图插到对应页的末尾
-    - AI 引擎的 MD（"## 第 X-Y 页" 分块，页码不精确）→ 统一追加到文末"图片清单"节
-    - 图片带 <!-- wiki-img --> 保护标记，storage.update 编辑时不误伤
-
-    Args:
-        markdown: 提取出的正文 MD
-        images: extract_pdf_images 的返回值（含 page/rel_path）
-    """
-    if not images or not markdown:
-        return markdown
-
-    # 按页码分组
-    by_page: Dict[int, List[Dict[str, Any]]] = {}
-    for img in images:
-        by_page.setdefault(img.get("page", 0), []).append(img)
-
-    # 判断 MD 是否有精确的 "## 第 N 页" 分页标记
-    markers = list(_PAGE_HEADER_RE.finditer(markdown))
-    if markers:
-        # 逐段重建：每段 = 页头 → 下一个页头；带图页在段末追加引用
-        seg_starts = [m.start() for m in markers] + [len(markdown)]
-        rebuilt = []
-        prev = 0
-        for i, m in enumerate(markers):
-            seg_end = seg_starts[i + 1]
-            rebuilt.append(markdown[prev:m.start()])
-            rebuilt.append(markdown[m.start():seg_end].rstrip())
-            imgs = by_page.get(int(m.group(1)))
-            if imgs:
-                refs = "\n".join(
-                    f"<!-- wiki-img -->\n![第{it['page']}页图{n + 1}]({it['rel_path']})"
-                    for n, it in enumerate(imgs)
-                )
-                rebuilt.append("\n\n" + refs + "\n")
-            prev = seg_end
-        rebuilt.append(markdown[prev:])
-        return "".join(rebuilt)
-
-    # 无精确分页 → 文末追加图片清单
-    lines = ["", "", "---", "", "## 图片清单", ""]
-    for it in images:
-        page = it.get("page", 0)
-        label = f"第{page}页" if page else "文档内"
-        lines.append(f"<!-- wiki-img -->")
-        lines.append(f"![{label}图片]({it['rel_path']})")
-        lines.append("")
-    return markdown.rstrip() + "\n" + "\n".join(lines)
+# 阶段二十三·23.1：删除 insert_image_refs（图片引用不再插入 Markdown）。
+# 落盘 + wiki_images 登记 + AI 描述仍由 extract_pdf_images / register_image_doc / describe_image_sync 提供。
 
 
 def describe_image_sync(image_path, fallback_caption: str = "") -> str:

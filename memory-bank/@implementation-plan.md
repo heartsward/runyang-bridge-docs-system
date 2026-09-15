@@ -2065,3 +2065,70 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **怎么验**：stop-services.bat 实测（停 8002+5173，IDE 进程不受影响，端口释放）→ 再启动恢复；sh 脚本 bash -n 语法检查；文档中不再出现幽灵脚本名（grep 验证）；MCP 文档 12 工具与 tools/list 实测一致
 - **回退方案**：git checkout 涉及文件
 - **状态**：✅ 完成（stop-services.bat 按端口重写 + 2 个 Linux 脚本补齐并 bash -n 通过；bat 端口取 PID 逻辑经 bash 等价命令验证——沙箱内 cmd 无法执行 bat 属环境限制，双击运行不受影响；docs/AI-Wiki-MCP调用文档.md 12 工具与线上 tools/list 一致；核心文档幽灵引用 grep 清零；6 个深度过时文档加时效横幅）
+
+---
+
+## 阶段二十三：预览去掉底部图片清单 + 原文件切换支持全格式（2026-09-15，用户提出）
+
+> 用户反馈两点：① 文档管理和智能搜索的预览里，提取出的图片会出现在最下方（PDF 内嵌图 → 行末 / AI 引擎输出 → 文末"## 图片清单"节），展示不需要，但图片正常提取到磁盘 + `wiki_images` 表 + AI 描述还得保留（图片检索还能用）；② "提取内容 | 原文件"切换按钮目前只对 PDF 和图片显示，其它格式（docx/xlsx/txt…）也想要这个切换，原文件模式对不支持的类型降级为下载提示卡是 OK 的。
+
+### 步骤 23.1 — 后端：提取流程不再把图片引用插进 Markdown
+
+- **做什么**：
+  1. `backend/app/services/content_extractor.py`：
+     - PDF 分支：去掉 `markdown = insert_image_refs(markdown, images)`（原 L91），只保留 `extract_pdf_images` + `idx.add_image`（图片落盘 + 登记 + AI 描述保留）
+     - 独立图片文档分支：去掉 `markdown = f"{markdown.strip()}\n\n{img_block}\n"`（原 L108-114），图片本体继续走 `register_image_doc` + `idx.add_image`；预览"提取内容"模式会显示空（用户用"原文件"模式查看图片本体即可）
+     - 同时删除已无用的 `from ... import insert_image_refs`
+  2. `backend/app/api/endpoints/wiki.py`：`/rebuild?reextract_images=true` 路径里 L104-111 那段"把新图引用追加进 MD 副本并重建该文档索引"删除（无图引用插入后这段是死代码），同步去掉 `insert_image_refs` 的 import
+  3. `backend/app/services/wiki/image_extractor.py`：`insert_image_refs` 函数本体删除（两个调用点都没了，按 KISS 不留死代码）
+  4. `_PAGE_HEADER_RE` 若仅被 `insert_image_refs` 用则一并删除；`insert_image_refs` 之外若还有引用则保留
+- **能改什么**：上述三个文件
+- **不能改什么**：
+  - `extract_pdf_images` / `register_image_doc` / `describe_image_sync` / `idx.add_image`（图片本体仍要提取、登记、描述）
+  - `wiki/storage.py` / `wiki/index.py` 的索引与 MD 副本读写
+  - `/wiki/doc/{id}/markdown` 编辑端点（超管编辑的 MD 副本不会自动带图引用，符合用户预期）
+- **怎么验**：
+  - `grep -rn "insert_image_refs" backend/` 应无任何匹配
+  - 重传一份含图的 PDF：新入库的 MD 副本末尾不应再出现 `## 图片清单` 或行末 `![...](images/...)`；`backend/wiki/images/{doc_id}/` 下图片文件仍在；`SELECT * FROM wiki_images WHERE doc_id=?` 行数正确；图片域 MCP `get_doc_images` / `search_images` 仍返回该文档的图片
+  - 独立图片（png/jpg）文档：MD 副本为空或仅有标题段，预览"提取内容"显示空、"原文件"显示 `<n-image>`
+  - `/rebuild?reextract_images=true` 调用：日志显示 `images_added` 计数仍然递增（说明落盘+登记没坏）
+- **回退方案**：git checkout content_extractor.py wiki.py image_extractor.py
+
+### 步骤 23.2 — 前端：原文件切换支持所有格式 + 切换按钮移到工具栏右侧
+
+- **做什么**：
+  1. `frontend/src/views/DocumentView.vue`：
+     - `shouldShowViewToggle` 由"PDF/图片 才显示"改为**始终返回 true**（L1783-1787）
+     - 工具栏重构：把 `<n-radio-group>` 从 `<n-space>` 首项移到末项，并用 `style="margin-left: auto;"` 推到右侧（"提取内容右边"对齐用户表述）；其它项（编辑按钮、搜索高亮导航）仍在左侧
+     - 兜底分支（`<div v-else-if="shouldShowViewToggle(...) && previewMode === 'original'" class="original-file-preview">`）：已对非 PDF/图片降级为下载提示卡，无需改
+  2. `frontend/src/views/SearchView.vue`：同样改 `shouldShowViewToggle` + 工具栏 toggle 推到右侧
+- **能改什么**：DocumentView.vue / SearchView.vue 模板 + 那个函数
+- **不能改什么**：
+  - 原文件预览的 PDF iframe / 图片 `<n-image>` / 下载提示卡分支（保持现状）
+  - 编辑按钮、超管权限、搜索高亮导航、下载入口
+  - `EnhancedSearchView.vue`（不在路由表中、未被使用）
+- **怎么验**：
+  - `/documents` 页：上传一个 .docx 文档 → 预览 → 工具栏右上角出现"提取内容 | 原文件"切换；点"原文件"显示文件元信息 + 下载按钮（不再报"此文件类型不支持在线预览"以外的错误）
+  - `/search` 页：搜到一份 .xlsx 文档 → 点预览 → 同样出现切换；点"原文件"显示下载提示卡
+  - PDF / 图片文档：原有切换行为不变
+  - `vue-tsc --noEmit` 0 新增 error
+- **回退方案**：git checkout DocumentView.vue SearchView.vue
+
+### 步骤 23.3 — 端到端验收 + 记忆库同步
+
+- **做什么**：
+  1. E2E：上传一份含图的 PDF + 一份 .docx + 一份 .png
+  2. PDF：预览提取内容模式无 `## 图片清单` 节、无 `![...](images/...)` 行内引用；切到原文件模式仍可 iframe 看 PDF；`search_images` / `get_doc_images` MCP 仍能查到该文档图片
+  3. .docx：提取内容模式显示 markdown 文本；切原文件模式显示下载提示卡
+  4. .png：提取内容模式为空（或仅文件标题）；切原文件模式显示图片本体
+  5. `vue-tsc --noEmit` 0 新增 error；后端重启 `/health` 200；MCP `/mcp` tools/list 仍 12 个
+  6. 记忆库：`@architecture.md`（23.x 摘要）、`progress.md`、每日日志（`D:\sdxtywzsk\.workbuddy\memory\2026-09-15.md`）
+- **通过标准**：预览不再出现图片清单/行末图引用；所有格式都能切到"原文件"模式；图片 MCP 工具仍可用
+- **回退方案**：N/A（验收不改代码）
+
+### 实施顺序与风险
+- 顺序：23.1 → 23.2 → 23.3
+- 风险 1：存量 MD 副本已有 `## 图片清单`/`![...](images/...)`，本阶段不主动清洗（避免破坏老数据），用户后续可走 `/rebuild?reextract_images=true` 触发新逻辑后**保留**原 MD 内容（仅落盘+登记新图，不重写 MD）。新上传/重新提取的文档才完全不带图引用
+- 风险 2：图片 doc 切到提取内容模式显示为空 → 已是当前唯一合理 UX（用户主动切"原文件"看图），接受
+- 风险 3：工具栏 toggle 移到右侧可能挤压搜索高亮导航宽度 → 用 `flex-wrap` 兜底（小窗口换行）
+

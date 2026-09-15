@@ -49,6 +49,8 @@ runyang-bridge-docs-system/
 
 > **2026-09-14 变更（阶段二十二·完整版）**：用户反馈"上传更新会卡很久"——调研后**找到推送卡死的真正根因**：WorkBuddy 代理 + Git Credential Manager 的 Basic Auth 头被 GitHub fine-grained PAT 拒绝（不只是代理问题，GIT_TRACE 显示服务器返回真 `401 Unauthorized`）。**新增 `push.sh` / `push.bat` 一键推送脚本**：解法 = `env -u HTTPS_PROXY -u HTTP_PROXY` 取消代理 + `-c "url.https://x-access-token:${TOKEN}@github.com/heartsward/.insteadOf=..."` 让 git 用 fine-grained PAT 的正确认证格式 + `--force-with-lease` 处理之前 Git Data API 推送造成的 diverged 状态。**实测 push.sh 一键成功**（远端 main 从 `a339aed1` → `dba330d`，ahead 2 commit）。`GIT-COMMANDS.md` 同步加入完整命令速查（其它电脑下载 / 本机 push / push 卡顿排查）。脚本与文档清单从 7 个扩到 9 个真实脚本 + 1 个命令速查。
 
+> **2026-09-15 变更（阶段二十三）**：① 预览去掉"提取的图片"展示但保留图片提取：`content_extractor.py` 提取流程不再调 `insert_image_refs`、独立图片文档不再把图引用拼到 MD；`wiki.py` `/rebuild?reextract_images=true` 路径不再写 MD；`image_extractor.py` 删除 `insert_image_refs` 函数 + `_PAGE_HEADER_RE` + 未用的 `import re`。图片本体仍走 `extract_pdf_images` / `register_image_doc` 落盘 + `idx.add_image` 入 `wiki_images` 表 + `describe_image_sync` AI 中文描述——图片域 MCP（`get_doc_images` / `search_images`）继续可用。② 预览工具栏右侧增加"提取内容/原文件"切换：所有格式都显示（之前仅 PDF/图片），非 PDF/图片切到"原文件"模式降级为下载提示卡；`DocumentView.vue` / `SearchView.vue` 的 `shouldShowViewToggle` 改为 `return true`，工具栏由 `n-space`（toggle 左）改为 flex 布局（toggle 右，`margin-left:auto`）。
+
 ---
 
 ## 1. backend/ — FastAPI 后端

@@ -196,43 +196,51 @@
       <div style="margin-top: 16px;">加载中...</div>
     </div>
     <div v-else>
-      <!-- 预览模式切换 (仅对OCR提取的图片和PDF显示) -->
-      <n-space align="center" style="margin-bottom: 16px;">
-        <n-radio-group v-if="shouldShowViewToggle(currentDocument)" v-model:value="previewMode" size="small">
+      <!-- 阶段二十三·23.2：工具栏 — 左侧放编辑/搜索辅助，右侧放"提取内容/原文件"切换（支持所有格式） -->
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
+        <n-space align="center" size="small">
+          <!-- W4：编辑模式切换（仅管理员可编辑 Markdown 副本） -->
+          <n-button
+            v-if="currentUser?.is_superuser && previewMode === 'extracted'"
+            size="small"
+            type="primary"
+            @click="togglePreviewEdit"
+            :loading="savingPreviewEdit"
+          >
+            <template #icon><n-icon><PencilOutline /></n-icon></template>
+            {{ previewEditMode ? '退出编辑' : '编辑' }}
+          </n-button>
+
+          <!-- 搜索高亮信息（仅在提取内容模式下显示） -->
+          <n-space v-if="previewMode === 'extracted' && searchKeyword && highlightedCount > 0" size="small">
+            <n-tag type="warning" size="small">
+              🔍 "{{ searchKeyword }}" 共 {{ highlightedCount }} 处
+            </n-tag>
+            <n-button-group size="tiny">
+              <n-button @click="scrollToHighlight(-1)" :disabled="currentHighlightIndex <= 0">
+                ↑
+              </n-button>
+              <n-button @click="scrollToHighlight(1)" :disabled="currentHighlightIndex >= highlightedCount - 1">
+                ↓
+              </n-button>
+            </n-button-group>
+            <n-text depth="3" style="font-size: 11px;">
+              {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
+            </n-text>
+          </n-space>
+        </n-space>
+
+        <!-- 23.2：切换按钮固定到工具栏右侧，所有格式都显示；非 PDF/图片降级为下载卡 -->
+        <n-radio-group
+          v-if="shouldShowViewToggle(currentDocument)"
+          v-model:value="previewMode"
+          size="small"
+          style="margin-left: auto;"
+        >
           <n-radio-button value="extracted">提取内容</n-radio-button>
           <n-radio-button value="original">原文件</n-radio-button>
         </n-radio-group>
-
-        <!-- W4：编辑模式切换（仅管理员可编辑 Markdown 副本） -->
-        <n-button
-          v-if="currentUser?.is_superuser && previewMode === 'extracted'"
-          size="small"
-          type="primary"
-          @click="togglePreviewEdit"
-          :loading="savingPreviewEdit"
-        >
-          <template #icon><n-icon><PencilOutline /></n-icon></template>
-          {{ previewEditMode ? '退出编辑' : '编辑' }}
-        </n-button>
-        
-        <!-- 搜索高亮信息（仅在提取内容模式下显示） -->
-        <n-space v-if="previewMode === 'extracted' && searchKeyword && highlightedCount > 0" size="small">
-          <n-tag type="warning" size="small">
-            🔍 "{{ searchKeyword }}" 共 {{ highlightedCount }} 处
-          </n-tag>
-          <n-button-group size="tiny">
-            <n-button @click="scrollToHighlight(-1)" :disabled="currentHighlightIndex <= 0">
-              ↑
-            </n-button>
-            <n-button @click="scrollToHighlight(1)" :disabled="currentHighlightIndex >= highlightedCount - 1">
-              ↓  
-            </n-button>
-          </n-button-group>
-          <n-text depth="3" style="font-size: 11px;">
-            {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
-          </n-text>
-        </n-space>
-      </n-space>
+      </div>
 
       <div class="preview-container">
         <!-- 提取内容模式（阶段 3E：后端发 Markdown → 前端 markdown-it 渲染为 HTML → DOMPurify sanitize） -->
@@ -1780,11 +1788,11 @@ const isImageFile = (document: Document | null): boolean => {
   return imageExtensions.some(ext => document.file_path.toLowerCase().endsWith(ext))
 }
 
-// 判断是否应该显示视图切换按钮 (仅对OCR提取的图片和PDF)
-const shouldShowViewToggle = (document: Document | null): boolean => {
-  if (!document) return false
-  // 只有图片和PDF文件显示切换按钮
-  return isPDFFile(document) || isImageFile(document)
+// 判断是否应该显示视图切换按钮
+// 阶段二十三·23.2：所有文档格式都显示"提取内容/原文件"切换（之前仅 PDF/图片支持）。
+// 非 PDF/图片切到"原文件"模式会降级为下载提示卡（见 original-file-preview 分支）。
+const shouldShowViewToggle = (_document: Document | null): boolean => {
+  return true
 }
 
 // 获取文件URL用于预览

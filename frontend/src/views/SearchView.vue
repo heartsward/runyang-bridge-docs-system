@@ -242,13 +242,16 @@
         
         <n-divider style="margin: 12px 0;" />
         
-        <!-- 预览模式切换 (仅对OCR提取的图片和PDF显示) -->
-        <n-space align="center" style="margin-bottom: 16px;" v-if="shouldShowViewToggle(previewDocumentData)">
+        <!-- 阶段二十三·23.2：所有格式都显示"提取内容/原文件"切换；右上角对齐 -->
+        <div
+          v-if="shouldShowViewToggle(previewDocumentData)"
+          style="display: flex; justify-content: flex-end; margin-bottom: 16px;"
+        >
           <n-radio-group v-model:value="previewMode" size="small">
             <n-radio-button value="extracted">提取内容</n-radio-button>
             <n-radio-button value="original">原文件</n-radio-button>
           </n-radio-group>
-        </n-space>
+        </div>
         
         <!-- 编辑模式操作栏 -->
         <n-space align="center" style="margin-bottom: 16px;" v-if="previewEditMode">
@@ -616,11 +619,11 @@ const isPDFFile = (document: any): boolean => {
   return document.file_type?.toLowerCase() === 'pdf'
 }
 
-// 判断是否应该显示视图切换按钮 (仅对OCR提取的图片和PDF)
-const shouldShowViewToggle = (document: any): boolean => {
-  if (!document) return false
-  // 只有图片和PDF文件显示切换按钮
-  return isPDFFile(document) || isImageFile(document.file_type)
+// 判断是否应该显示视图切换按钮
+// 阶段二十三·23.2：所有文档格式都显示"提取内容/原文件"切换（之前仅 PDF/图片支持）。
+// 非 PDF/图片切到"原文件"模式会降级为下载提示卡（见 original-file-preview 分支）。
+const shouldShowViewToggle = (_document: any): boolean => {
+  return true
 }
 
 

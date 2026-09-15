@@ -62,7 +62,7 @@ async def rebuild(
             from app.db.database import engine
             from app.services.wiki.image_extractor import (
                 extract_pdf_images, register_image_doc,
-                insert_image_refs, describe_image_sync, WIKI_DIR,
+                describe_image_sync, WIKI_DIR,
             )
 
             with engine.connect() as conn:
@@ -101,14 +101,7 @@ async def rebuild(
                             caption=caption, rel_path=img["rel_path"],
                             size=img.get("size", 0),
                         )
-                    # 把新图引用追加进 MD 副本并重建该文档索引
-                    storage = _storage()
-                    md = storage.read(doc_id)
-                    if md:
-                        new_md = insert_image_refs(md, new_imgs)
-                        if new_md != md:
-                            storage.update(doc_id, new_md)
-                            idx.index_doc(doc_id, str(storage.get_path(doc_id)))
+                    # 阶段二十三·23.1：MD 不再追加图引用，只更新图片库与索引（图片 MCP 检索可用）
                     result["images_added"] += len(new_imgs)
                     result["image_docs"] += 1
                 except Exception as e:

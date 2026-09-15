@@ -5,9 +5,9 @@
 
 ---
 
-## 当前状态：阶段零~二十·20.10 全部完成，阶段二十一进行中
+## 当前状态：阶段零~二十·22 全部完成，阶段二十三进行中
 
-**最后更新**：2026-09-14 16:08
+**最后更新**：2026-09-15 11:00
 
 - 初始 9 项 P0/P1/P2 问题清零；内容提取器重构（extraction 模块）
 - AI 引擎统一到 llama.cpp + Qwen3-VL 单接口；旧 AI 配置清理
@@ -18,7 +18,9 @@
 - **阶段十八**：PDF/图片提取+文类+图片检索+三路中文检索+MCP 图片工具（参考 OpenKB）
 - **阶段十九**：anydoc 替换 LibreOffice（参考 firecrawl/anydoc）
 - **阶段二十·20.1~20.10**：多词联合搜索、Markdown 预览、智能搜索分词、MCP 资产工具、停止脚本安全化等
-- **阶段二十一进行中（2026-09-14 16:08）**：补齐 `backend/.env` CORS auto 模式全套配置（修复"部署到其它服务器后 LAN 访问 CORS 被拒"）
+- **阶段二十一（2026-09-14）**：补齐 `backend/.env` CORS auto 模式全套配置
+- **阶段二十二（2026-09-14）**：update.sh / update.bat / push.sh / push.bat 一键运维脚本
+- **阶段二十三进行中（2026-09-15 11:00）**：① 预览去掉"提取的图片"展示（图片正常提取到磁盘 + wiki_images 表 + AI 描述，但不再嵌入 MD）② 预览工具栏右侧增加"提取内容/原文件"切换，所有格式都显示（之前仅 PDF/图片）
 
 ---
 
@@ -1070,3 +1072,42 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - **fine-grained PAT + git smart-HTTP + GCM** 三者结合踩坑：GCM 默认 Basic Auth 头 vs fine-grained PAT 要求的 `token` 头——只能靠 `url.x-access-token:` URL 前缀让 git 走正确路径
   - **diverged 后用 `--force-with-lease` 而非 `--force`**：前者多一层"远端不是我以为的 SHA 则拒绝"的保护，本项目 Git Data API 推送历史造成的常规 diverged 完全可以覆盖
 - **提交**：本条随里程碑 commit 提交并推 GitHub
+
+---
+
+### 2026-09-15 — 阶段二十三：预览去掉底部图片清单 + 原文件切换支持全格式
+
+**用户反馈两点**：
+1. 文档管理和智能搜索的预览里，提取出的图片会出现在最下方（PDF 行末引用 / AI 引擎输出文末"## 图片清单"节）——展示不需要，但图片正常提取到磁盘 + `wiki_images` 表 + AI 描述还得保留（图片检索还能用）
+2. "提取内容 | 原文件"切换按钮目前只对 PDF 和图片显示，其它格式（docx/xlsx/txt…）也想要这个切换
+
+**做了什么**：
+
+#### 23.1 后端：移除 `insert_image_refs` 与图片 MD 内嵌
+- **`backend/app/services/content_extractor.py`**：
+  - PDF 分支：去掉 `markdown = insert_image_refs(markdown, images)`，仅保留 `extract_pdf_images` + `idx.add_image` + `describe_image_sync`（图片落盘 + 登记 + AI 描述）
+  - 独立图片文档分支：去掉 `markdown = f"{markdown.strip()}\n\n{img_block}\n"`，MD 留空，前端切"原文件"模式看图
+  - 移除 `final_markdown` 包装层（已无意义），精简 return
+  - 从 import 中移除 `insert_image_refs`
+- **`backend/app/api/endpoints/wiki.py`**：`/rebuild?reextract_images=true` 路径里 L104-111 那段"把新图引用追加进 MD 副本并重建该文档索引"删除（无图引用插入后这段是死代码），同步去掉 `insert_image_refs` 的 import
+- **`backend/app/services/wiki/image_extractor.py`**：`insert_image_refs` 函数本体删除、`_PAGE_HEADER_RE` 删除、未用的 `import re` 删除（按 KISS 不留死代码）
+- **`extract_pdf_images` / `register_image_doc` / `describe_image_sync` / `list_doc_images` / `image_mime` 一行不动** —— 图片本体提取 + AI 描述 + `wiki_images` 表登记完全保留
+- **存量 MD 数据不动**：旧文档 MD 副本里仍有 `## 图片清单` 或行末图引用（属历史数据），本阶段不主动清洗；新上传/重提取才完全不带图引用
+
+#### 23.2 前端：原文件切换支持所有格式 + 切换按钮移到工具栏右侧
+- **`frontend/src/views/DocumentView.vue`**：
+  - `shouldShowViewToggle` 由 `isPDFFile(document) || isImageFile(document)` 改为 `return true`（所有格式都显示）
+  - 工具栏由 `n-space` 改为 `<div style="display: flex; ...">`，左侧放编辑按钮 + 搜索高亮导航，右侧（`margin-left: auto`）放"提取内容/原文件"切换
+  - 原文件预览的兜底分支（下载提示卡）不动，非 PDF/图片切到"原文件"显示下载按钮即可
+- **`frontend/src/views/SearchView.vue`**：同样改 `shouldShowViewToggle` + 切换按钮移到右侧（`justify-content: flex-end`）
+
+**验证**：
+- `vue-tsc --noEmit`：0 新增 error（与阶段二十基线一致）
+- 后端模块导入测试（venv）：`image_extractor` / `content_extractor` / `wiki endpoint` 全部正常导入；`assert not hasattr(ie, 'insert_image_refs')` 通过；其余 5 个图片相关函数（`extract_pdf_images` / `register_image_doc` / `describe_image_sync` / `list_doc_images` / `image_mime`）健在
+- `grep -rn "insert_image_refs\|insert_image_refs" backend/` 仅剩 `image_extractor.py` 注释一处，无任何代码引用
+- 模拟 PDF markdown 输入 → 确认新代码下 markdown 字符串保持原样，无 `images/` 引用、无 `## 图片清单` 节
+- 未做 E2E（后端未启动 + 无 playwright 任务）
+
+**遗留观察**：
+- 旧文档 MD 副本仍含图引用 —— 后续如需彻底清洗，可走 `/rebuild?reextract_images=true`（会落盘 + 登记新图，但不再重写 MD），老数据需要专门脚本清洗
+- 独立图片文档切到"提取内容"模式会显示空 —— 已是当前唯一合理 UX（用户主动切"原文件"看图），接受
