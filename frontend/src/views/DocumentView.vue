@@ -161,8 +161,53 @@
           :file-list="fileList"
           multiple
           @update:file-list="handleFileChange"
-          accept=".pdf,.doc,.docx,.txt,.md,.xls,.xlsx,.csv,.jpg,.jpeg,.png"
+          accept=".doc,.docx,.docm,.xls,.xlsx,.xlsm,.xlsb,.ppt,.pptx,.pptm,.pps,.ppsx,.ppsm,.pot,.epub,.csv,.pdf,.jpg,.jpeg,.png,.txt,.md"
         >
+        <n-alert type="info" style="margin-bottom: 12px;" :show-icon="true">
+          <template #header>支持的格式（22种，最大 10MB）</template>
+          <div style="font-size: 12px; line-height: 1.8;">
+            <n-text strong>Office/PDF/EPUB/图片（20种）</n-text>：会显示"原文件"切换按钮 — PDF/图片 直显；Office/EPUB/CSV 走 LibreOffice 转 PDF
+            <div style="margin-top: 4px;">
+              <n-text depth="3" style="font-size: 12px;">Word：</n-text>
+              <n-tag size="small" style="margin: 1px;">.doc</n-tag>
+              <n-tag size="small" style="margin: 1px;">.docx</n-tag>
+              <n-tag size="small" style="margin: 1px;">.docm</n-tag>
+            </div>
+            <div style="margin-top: 4px;">
+              <n-text depth="3" style="font-size: 12px;">Excel：</n-text>
+              <n-tag size="small" style="margin: 1px;">.xls</n-tag>
+              <n-tag size="small" style="margin: 1px;">.xlsx</n-tag>
+              <n-tag size="small" style="margin: 1px;">.xlsm</n-tag>
+              <n-tag size="small" style="margin: 1px;">.xlsb</n-tag>
+            </div>
+            <div style="margin-top: 4px;">
+              <n-text depth="3" style="font-size: 12px;">PowerPoint：</n-text>
+              <n-tag size="small" style="margin: 1px;">.ppt</n-tag>
+              <n-tag size="small" style="margin: 1px;">.pptx</n-tag>
+              <n-tag size="small" style="margin: 1px;">.pptm</n-tag>
+              <n-tag size="small" style="margin: 1px;">.pps</n-tag>
+              <n-tag size="small" style="margin: 1px;">.ppsx</n-tag>
+              <n-tag size="small" style="margin: 1px;">.ppsm</n-tag>
+              <n-tag size="small" style="margin: 1px;">.pot</n-tag>
+            </div>
+            <div style="margin-top: 4px;">
+              <n-text depth="3" style="font-size: 12px;">其他：</n-text>
+              <n-tag size="small" style="margin: 1px;">.csv</n-tag>
+              <n-tag size="small" style="margin: 1px;">.epub</n-tag>
+              <n-tag size="small" style="margin: 1px;">.pdf</n-tag>
+              <n-tag size="small" style="margin: 1px;">.jpg</n-tag>
+              <n-tag size="small" style="margin: 1px;">.jpeg</n-tag>
+              <n-tag size="small" style="margin: 1px;">.png</n-tag>
+            </div>
+            <div style="margin-top: 8px;">
+              <n-text strong>文本类（2种）</n-text>：无"原文件"切换按钮 — 直接"提取内容"查看（markdown 渲染）
+            </div>
+            <div style="margin-top: 4px;">
+              <n-tag size="small" style="margin: 1px;" type="info">.txt</n-tag>
+              <n-tag size="small" style="margin: 1px;" type="info">.md</n-tag>
+            </div>
+          </div>
+        </n-alert>
           <n-button>
             <template #icon>
               <n-icon>
@@ -175,7 +220,7 @@
           </n-button>
         </n-upload>
         <n-text depth="3" style="font-size: 12px; margin-top: 4px;">
-          支持格式：PDF、DOC、DOCX、TXT、MD、XLS、XLSX、CSV、JPG、PNG、BMP、TIFF、GIF、WEBP等，支持多文件同时选择
+          支持格式：Word / Excel / PowerPoint / CSV / EPUB / PDF / 图片（JPG、PNG）/ 文本（TXT、MD），共 22 种，支持多文件同时选择
         </n-text>
       </n-form-item>
     </n-form>
@@ -1878,14 +1923,22 @@ const isImageFile = (document: Document | null): boolean => {
   return imageExtensions.some(ext => document.file_path.toLowerCase().endsWith(ext))
 }
 
-// 阶段二十四：判断是否走 LibreOffice 转 PDF 预览
-// 与后端 preview_converter.SUPPORTED_OFFICE_TYPES 对齐
+// 阶段二十六·26.3：判断是否走 LibreOffice 转 PDF 预览（与后端 SUPPORTED_OFFICE_TYPES 对齐，20 种）
 const OFFICE_EXTENSIONS = [
+  // Word 3 种
   '.doc','.docx','.docm',
-  '.xls','.xlsx','.xlsm',
-  '.ppt','.pptx',
+  // Excel 4 种
+  '.xls','.xlsx','.xlsm','.xlsb',
+  // PowerPoint 7 种
+  '.ppt','.pptx','.pptm',
+  '.pps','.ppsx','.ppsm',
+  '.pot',
+  // CSV / EPUB
+  '.csv',
+  '.epub',
+  // OpenDocument / RTF
   '.odt','.ods','.odp',
-  '.rtf','.epub',
+  '.rtf',
 ]
 const isOfficeFile = (document: Document | null): boolean => {
   if (!document) return false
@@ -1894,10 +1947,11 @@ const isOfficeFile = (document: Document | null): boolean => {
 }
 
 // 判断是否应该显示视图切换按钮
-// 阶段二十三·23.2：所有文档格式都显示"提取内容/原文件"切换（之前仅 PDF/图片支持）。
-// 非 PDF/图片切到"原文件"模式会降级为下载提示卡（见 original-file-preview 分支）。
-const shouldShowViewToggle = (_document: Document | null): boolean => {
-  return true
+// 阶段二十六·26.3：只对 4 类显示 — Office 文档（Word/Excel/PPT/CSV）、epub、PDF、图片
+// 文本类（.txt/.md）不显示切换按钮（切来切去无意义，提取内容模式即可）
+const shouldShowViewToggle = (doc: Document | null): boolean => {
+  if (!doc) return false
+  return isOfficeFile(doc) || isPDFFile(doc) || isImageFile(doc)
 }
 
 // 获取文件URL用于预览

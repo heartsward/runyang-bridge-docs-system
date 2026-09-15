@@ -230,7 +230,9 @@ stop-services.bat
 | .ppt 系/.odt/.ods/.odp/.rtf/.epub/.csv | **anydoc** | —（无本地引擎，失败即报错） |
 | .pdf | **anydoc**（文本层，<5ms） | 多模态 AI（扫描件）→ pymupdf |
 | .png/.jpg/.jpeg 等图片 | ImageExtractor（多模态 AI 优先） | tesseract OCR |
-| .txt/.md/.json 等纯文本 | TextExtractor（anydoc 不覆盖） | — |
+| .txt/.md 等纯文本 | TextExtractor（anydoc 不覆盖） | — |
+
+> **阶段二十六·26.3**：上传白名单 `ALLOWED_EXTENSIONS` 定为 22 种（Word 3 + Excel 4 + PPT 7 + .epub/.csv/.pdf + 图片 3 + .txt/.md）。**`.json` 不支持**（anydoc 无法把 JSON 转 Markdown，用户拍板移除）。PPT 7 种（.ppt/.pptx/.pptm/.pps/.ppsx/.ppsm/.pot）提取走 anydoc、"原文件"预览走 LibreOffice 转 PDF，均无需新增代码。
 
 **anydoc 依赖**:`firecrawl-anydoc>=0.2.4`(纯 Rust 单 wheel ~3.6MB,`pip install` 即得,无系统依赖、无需装 LibreOffice)。
 来源:https://github.com/firecrawl/anydoc(MIT)。支持 14 格式族 21 扩展名;PDF 仅文本层提取(扫描件走我们的多模态 AI,不用其付费 hosted OCR)。

@@ -6,6 +6,7 @@
 - 其他文本：包成 ``` 围栏的代码块，避免 Markdown 特殊字符被渲染
 - 强制 UTF-8 读取（中文 Windows GBK 容错）
 - 清理 NUL、控制字符
+- 注：.json 不在 SUPPORTED_EXTENSIONS（anydoc 不支持 json，阶段二十六·26.3 移除 json 支持）
 """
 import logging
 from pathlib import Path
@@ -23,7 +24,7 @@ MARKDOWN_EXTS = {".md", ".markdown"}
 
 class TextExtractor(BaseExtractor):
     SUPPORTED_EXTENSIONS = [
-        ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml",
+        ".txt", ".md", ".csv", ".xml", ".yml", ".yaml",
         ".log", ".conf", ".cfg", ".ini", ".properties", ".env",
         ".py", ".js", ".ts", ".html", ".css", ".sql",
         ".markdown",

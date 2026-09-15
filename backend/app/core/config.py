@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     # 文件上传配置
     UPLOAD_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'uploads'))
     MAX_FILE_SIZE: int = 10485760  # 10MB
-    ALLOWED_EXTENSIONS: str = "pdf,doc,docx,txt,md,xls,xlsx,csv,jpg,jpeg,png"
+    # 阶段二十六：扩展为 16 种（11 → 16）；新增 .docm/.xlsm/.xlsb/.epub/.json
+    ALLOWED_EXTENSIONS: str = "doc,docx,docm,xls,xlsx,xlsm,xlsb,ppt,pptx,pptm,pps,ppsx,ppsm,pot,epub,csv,pdf,jpg,jpeg,png,txt,md"
     
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379"

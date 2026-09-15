@@ -2221,3 +2221,182 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 风险 5：缓存清理 — 文档被覆盖上传后，缓存 PDF 仍是旧版 → 用 `documents.file_path` 的 mtime 比对，过期自动重转
 - 风险 6：CSV 不太适合 LibreOffice 转 PDF（会一页只放一点内容） → 24.4 加判断：`.csv` 直接走文本预览分支（前端用 `<pre>` 显示前 N 行）
 
+---
+
+## 阶段二十五：文本类原文件预览（.txt/.md/.csv/.json/.xml/.html 直接显示，2026-09-15）
+
+> 用户反馈：阶段二十四把 .csv 加进了 LibreOffice 转 PDF 白名单，但实测下来 .csv 转 PDF 体验差（一页只放一点数据）+ 转换 7s+ 太慢；用户明确指示 **.csv 用文本预览就好，转 PDF 太麻烦**。.txt 本来就不在 LibreOffice 白名单，但同样没有自己的预览方式（兜底走下载卡）—— 既然是文本类，**直接显示原文**比让用户下载更友好。
+
+### 步骤 25.1 — 后端：从 LibreOffice 白名单移除 .csv，新增文本预览端点
+
+- **做什么**：
+  1. `backend/app/services/preview_converter.py`：
+     - `SUPPORTED_OFFICE_TYPES` **移除** `.csv`（用户明确不转 PDF）
+     - 新增 `TEXT_PREVIEW_TYPES = {".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm", ".yml", ".yaml", ".log"}`（10 种纯文本类）
+     - 新增 `is_supported_text_type(file_type) -> bool` 判定函数
+     - 新增 `read_text_content(file_path, file_type, max_size_mb=5) -> str`：读文件文本；> 5MB 抛 `TextTooLargeError` 让前端走下载卡；UTF-8 优先,GBK/Latin-1 容错
+  2. `backend/app/api/endpoints/documents.py`：新增 `GET /api/v1/documents/{id}/text-content`
+     - 复用现有 `/preview` 端点的权限模型（登录用户）
+     - 调 `read_text_content` 读文件
+     - 返回 `text/plain; charset=utf-8` 响应体
+     - 超大文件返回 413 + 提示用户下载
+- **能改什么**：上述两个文件
+- **不能改什么**：
+  - `SUPPORTED_OFFICE_TYPES` 不改除了 .csv（其它 Office 格式保留）
+  - 现有 `/converted-pdf` 端点（只对 Office 格式生效，文本类不走）
+  - `text_extractor.py`（提取链路不动，只服务"原文件"预览）
+- **怎么验**：上传 .txt → curl `/text-content` → 返回 UTF-8 文本；.csv 同理；>5MB 文件返回 413；非文本扩展名返回 400；JWT 缺失返回 401
+- **回退方案**：git checkout preview_converter.py documents.py
+
+### 步骤 25.2 — 前端：原文件模式增加"文本预览"分支（无 LibreOffice 进度）
+
+- **做什么**：
+  1. `DocumentView.vue` / `SearchView.vue`：
+     - `OFFICE_EXTENSIONS` / `OFFICE_TYPES` **移除** `.csv`
+     - 新增 `TEXT_PREVIEW_TYPES` 常量 + `isTextFile(doc)` helper（与后端对齐）
+     - "原文件"分支加 `v-else-if="isTextFile(doc)"` 分支：
+       - 直接 fetch `/text-content`（不需要轮询/进度通道 —— 文本读取毫秒级）
+       - 显示 `<n-spin>` loading → `<pre class="text-preview">` 渲染文本（保留换行 + 等宽字体 + 自动 wrap）
+       - 错误 → fallback 到下载卡
+     - `.csv` 在 `<pre>` 里直接显示原始 CSV 字符串（用 monospace 字体方便看对齐）
+- **能改什么**：DocumentView.vue / SearchView.vue 模板 + helper
+- **不能改什么**：PDF/图片/Office 分支；下载入口；编辑/搜索/工具栏布局
+- **怎么验**：
+  - .txt 切"原文件"模式 → 显示文本
+  - .csv 切"原文件"模式 → 显示 CSV 字符串（直接看数据）
+  - .md 切"原文件"模式 → 显示 markdown 源（提示"提取内容"模式有渲染版）
+  - .json 同理
+  - 现有 PDF/图片/Office/.docx 行为不变
+  - vue-tsc 0 新增 error
+- **回退方案**：git checkout DocumentView.vue SearchView.vue
+
+### 步骤 25.3 — 验证 + 记忆库同步
+
+- **做什么**：
+  1. 后端：上传 .csv/.txt → curl `/text-content` 验证
+  2. 前端：vue-tsc + 视觉验证（用户实测）
+  3. `@architecture.md` 加 25.x 摘要；`@tech-stack.md` 文本预览链路说明
+  4. `progress.md` 加阶段二十五条目
+  5. 今日日志 append
+- **通过标准**：.csv/.txt/.md/.json/.xml/.html 切"原文件"模式直接显示文本；.csv 不再走 LibreOffice；Office 格式仍走 LibreOffice
+- **回退方案**：N/A
+
+### 实施顺序与风险
+- 顺序：25.1 → 25.2 → 25.3
+- 风险 1：文本文件可能含 GBK 编码（旧 Windows 文件）→ `chardet` 自动探测（项目已装）回退 GBK/Latin-1
+- 风险 2：超大文本（> 5MB）→ 限制阈值,超过走下载卡
+- 风险 3：.csv 在 `<pre>` 里显示可能行很长 → CSS `white-space: pre-wrap` + `word-break: break-all` 兜底
+- 风险 4：前端 fetch `/text-content` 无 Authorization 头 → axios 拦截器自动加 Bearer,与现有 API 一致
+
+---
+
+## 阶段二十六：上传格式扩展 + 预览按钮按需显示（2026-09-15）
+
+> **最终拍板（26.3 修订）**：上传格式 **22 种** = `.doc, .docx, .docm, .xls, .xlsx, .xlsm, .xlsb, .ppt, .pptx, .pptm, .pps, .ppsx, .ppsm, .pot, .epub, .csv, .pdf, .jpg, .jpeg, .png, .txt, .md`
+>
+> 处理策略：
+> - **anydoc 可处理**(19 种)：`.doc/.docx/.docm/.xls/.xlsx/.xlsm/.xlsb/.ppt/.pptx/.pptm/.pps/.ppsx/.ppsm/.pot/.epub/.csv/.pdf`（`.pdf` 含文本层 + 扫描件降级多模态 AI）
+> - **图片** (`.jpg/.jpeg/.png`)：保持原 ImageExtractor（多模态 AI 描述 + OCR 兜底）
+> - **文本** (`.txt/.md`)：保持原 TextExtractor
+> - **`.json` 移除**：anydoc 无法把 JSON 转 Markdown（22 种支持列表无 .json）→ 按用户要求**不支持** json 上传
+>
+> 预览切换按钮（"提取内容 / 原文件"）**只对 4 类显示**：
+> - ✅ office 类文档（Word 3 + Excel 4 + PPT 7 + .csv）→ LibreOffice 转 PDF
+> - ✅ epub → LibreOffice 转 PDF
+> - ✅ PDF → iframe
+> - ✅ 图片（.jpg/.jpeg/.png）→ `<img>`
+> - ❌ **.txt / .md** 不显示切换按钮（走"提取内容"模式 markdown 渲染即可）
+
+### 26.3 修订记录（相对原 26.1/26.2 计划的变更）
+- 用户追加 7 种 PowerPoint：`.ppt/.pptx/.pptm/.pps/.ppsx/.ppsm/.pot`（anydoc 提取 ✅ + LibreOffice 转 PDF ✅）
+- 用户移除 `.json`（anydoc 转不出 markdown）→ 全部 json 相关代码清除：
+  - `config.py` ALLOWED 去 json
+  - `preview_converter.py`：删 `TEXT_PREVIEW_TYPES` / `is_supported_text_type` / `TextTooLargeError` / `read_text_content` / `_read_with_fallback` / `_read_and_format_json`；`SUPPORTED_OFFICE_TYPES` 扩到 20 种（+PPT 7 种）
+  - `documents.py`：删 `GET /{id}/text-content` 端点
+  - `text_extractor.py`：`.json` 出 SUPPORTED_EXTENSIONS，删 `_format_json` 分支
+  - `DocumentView.vue`：删 isJsonFile / text-preview 模板分支 / CSS；OFFICE_EXTENSIONS 扩 20 种
+  - `SearchView.vue`：删 isJsonFile；OFFICE_TYPES 扩 20 种；`shouldShowViewToggle` 从 `return true` 改为 office/PDF/image 三类
+- 上传界面说明文字重写：22 种分组（Word/Excel/PowerPoint/其他 + 文本类 2 种），accept 属性同步
+
+### 步骤 26.1 — 后端：上传白名单扩展到 16 种 + 合并阶段二十五代码
+
+- **做什么**：
+  1. `backend/.env`：`ALLOWED_EXTENSIONS=doc,docx,docm,xls,xlsx,xlsm,xlsb,epub,csv,pdf,jpg,jpeg,png,txt,md,json`
+  2. `backend/app/core/config.py`：`ALLOWED_EXTENSIONS` 默认值同步改
+  3. `backend/app/services/preview_converter.py`：
+     - `SUPPORTED_OFFICE_TYPES` 改为 `.frozenset({.doc,.docx,.docm,.xls,.xlsx,.xlsm,.xlsb,.csv,.epub,.odt,.ods,.odp,.rtf})`（**保留 .csv**，因为用户要求 .csv 切"原文件"走 LibreOffice 转 PDF；保留 LibreOffice 支持的 .odt/.ods/.odp/.rtf 兼容 PDF 预览）
+     - `TEXT_PREVIEW_TYPES` 新增 `.json`（阶段二十五未实施，现在一并）
+     - `is_supported_text_type()` 判定
+     - `read_text_content(file_path, file_type, max_size_mb=5) -> str`：通用文本读取（UTF-8 → GBK → Latin-1 容错）；超 5MB 抛 `TextTooLargeError`
+     - `read_json_content(file_path, max_size_mb=5) -> str`：`json.loads` → `json.dumps(indent=2, ensure_ascii=False)`；非法 JSON 原样返回 + `X-JSON-Valid: false` header（容错）
+  4. `backend/app/api/endpoints/documents.py`：新增 `GET /api/v1/documents/{id}/text-content`
+     - 复用 `/preview` 端点的权限模型（登录用户）+ path 校验
+     - 根据 file_type 路由到 `read_text_content` 或 `read_json_content`
+     - 返回 `text/plain; charset=utf-8`
+     - 超大文件返回 413 + 提示下载
+- **能改什么**：4 个文件
+- **不能改什么**：
+  - 提取链路（anydoc/TextExtractor/ImageExtractor）不动 — 只需确保 ALLOWED_EXTENSIONS 加完后这些类型能正常走原链路
+  - 现有 `/converted-pdf` / `/preview` 端点不动
+- **怎么验**：上传 .json → curl `/text-content` → 返回格式化 JSON（中文不转义、有缩进）；.txt 同样；.csv 走 `/converted-pdf`（LibreOffice）；ALLOWED 拒绝 .ppt/.odt 等未列出的类型
+- **回退方案**：git checkout config.py .env preview_converter.py documents.py
+
+### 步骤 26.2 — 前端：上传界面格式说明 + accept 属性 + 文本预览分支
+
+- **做什么**：
+  1. `DocumentView.vue`：
+     - 上传模态框（L124-175）：在 `<n-alert type="info">` 之前或之后加一段格式说明（n-text 或 n-alert type="info"）：
+       > **支持的格式**：`.doc` `.docx` `.docm` `.xls` `.xlsx` `.xlsm` `.xlsb` `.epub` `.csv` `.pdf` `.jpg` `.jpeg` `.png` `.txt` `.md` `.json`（共 16 种，最大 10MB）
+       > - Office/EPUB/PDF/图片（10种）会显示"原文件"切换按钮（PDF/图片直显，Office/EPUB 走 LibreOffice 转 PDF）
+       > - 文本类（.txt/.md/.json）只有"提取内容"模式（无原文件切换）：.txt/.md markdown 渲染、.json 格式化显示
+     - `accept` 属性改为新 16 种
+  2. `DocumentView.vue` / `SearchView.vue`：
+     - `OFFICE_EXTENSIONS` 改 13 种（与后端 SUPPORTED_OFFICE_TYPES 对齐：.doc/.docx/.docm/.xls/.xlsx/.xlsm/.xlsb/.csv/.epub/.odt/.ods/.odp/.rtf）
+     - 新增 `TEXT_PREVIEW_TYPES` 常量（.txt/.md/.json）+ `isTextFile(doc)` helper
+     - `shouldShowViewToggle` 改为只对 office + PDF + image 显示（不再 return true）：
+       ```typescript
+       const shouldShowViewToggle = (doc: Document | null): boolean => {
+         if (!doc) return false
+         return isOfficeFile(doc) || isPDFFile(doc) || isImageFile(doc)
+       }
+       ```
+     - 模板里原"原文件"模式分支加 `v-else-if="isTextFile(doc)"` 子分支：直接 fetch `/text-content` → `<pre>` 显示（文本类不再走兜底下载卡，但保留兜底以防万一）
+- **能改什么**：DocumentView.vue / SearchView.vue
+- **不能改什么**：
+  - 提取链路显示（"提取内容"模式对所有格式都显示，markdown 渲染逻辑不变）
+  - PDF iframe / 图片 `<img>` / Office LibreOffice 转 PDF 分支
+  - 下载入口（仍然保留兜底）
+- **怎么验**：
+  - `.txt` 切"原文件"模式 → 无切换按钮（只有"提取内容"按钮可见）；提取内容显示 markdown 渲染
+  - `.json` 同上；上传一个 .json → 切"提取内容"显示（任意doc）
+  - `.docx` 切"原文件" → 切到"原文件"显示 PDF iframe
+  - `.pdf` 同上但不走 LibreOffice（直接 iframe）
+  - `.png` 直接 `<img>`
+  - vue-tsc 0 新增 error
+- **回退方案**：git checkout DocumentView.vue SearchView.vue
+
+### 步骤 26.3 — 验证 + 记忆库同步
+
+- **做什么**：
+  1. 后端：上传 .json → curl `/text-content` 验证中文不转义、有缩进
+  2. 前端：vue-tsc + 视觉验证（用户实测）
+  3. `@architecture.md` 加 26.x 摘要
+  4. `@tech-stack.md` LibreOffice 章节补充 .csv 行为（"用户已确认 .csv 走 LibreOffice 转 PDF"）
+  5. `progress.md` 加阶段二十六条目
+  6. 今日日志 append
+- **通过标准**：
+  - 16 种格式全部能上传
+  - 提取内容模式对所有 16 种都有渲染（.txt/.md/.json 是 markdown 渲染；.docx/.xlsx 等是 markdown 内容；PDF/图片是 OCR/AI 描述）
+  - 切换按钮只对 10 种（office 9 种 + epub + PDF + 图片 3 种 = 13 种）显示
+  - .json 切"提取内容"看到 json 内容；原"提取内容"是 markdown 渲染（保留）
+  - .txt/.md 切"提取内容"看到 markdown 渲染
+- **回退方案**：N/A
+
+### 实施顺序与风险
+- 顺序：26.1 → 26.2 → 26.3
+- 风险 1：旧文档（之前上传的 .doc 等）`file_type` 字段是 `.doc` 不是 `.docm`，但 ALLOWED 现在都接受——OK
+- 风险 2：用户上传 .docm 后前端 accept 已经接受；后端 ALLOWED 也接受——OK
+- 风险 3：.json 走"提取内容"模式需要 backend 把 JSON 转成 markdown 表格或列表才能搜索到字段（这一步不在本阶段范围；如果用户后续反馈"搜不到 JSON 字段"再加）；当前"原文件"模式显示 + "提取内容"模式显示 JSON 源文本即可
+- 风险 4：阶段二十四的批量预热脚本 `batch_convert_previews.py` 会自动适配新 SUPPORTED_OFFICE_TYPES（直接读后端白名单），不用改
+- 风险 5：`.json` 之前被我从 SUPPORTED_OFFICE_TYPES 移除（用户当时说不用），现在用户又决定用，但要求"按文本预览逻辑处理"——所以 .json **留在 TEXT_PREVIEW_TYPES**，**不进** SUPPORTED_OFFICE_TYPES（用户新需求里 .json 没有列入"office/epub"那组）
+

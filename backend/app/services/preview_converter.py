@@ -9,15 +9,15 @@ Office 格式 → PDF 预览转换器（阶段二十四）
   的 extract_{doc_id}_*.json 完全不互相干扰）
 - 跨进程文件锁：避免 LibreOffice 同实例冲突（LibreOffice 不允许多实例）
 
-支持格式（LibreOffice 7.6 实测可转 PDF）：
+支持格式（LibreOffice 7.6 实测可转 PDF，阶段二十六·26.3 共 20 种）：
 - .doc / .docx / .docm
-- .xls / .xlsx / .xlsm
-- .ppt / .pptx
+- .xls / .xlsx / .xlsm / .xlsb
+- .ppt / .pptx / .pptm / .pps / .ppsx / .ppsm / .pot
 - .odt / .ods / .odp
 - .rtf / .epub
-- .csv（文本类，但 LibreOffice 也能转；前端可走文本预览分支，此处保留支持）
+- .csv（文本类，但 LibreOffice 转得更整齐）
 
-不支持：.pdf（已是 PDF）/ 图片（直接显示）/ .txt / .md / .json 等纯文本（走文本预览更友好）
+不支持：.pdf（已是 PDF）/ 图片（直接显示）/ .txt / .md 等纯文本（无"原文件"切换，走提取内容）
 """
 import json
 import logging
@@ -35,19 +35,32 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# 阶段二十四：LibreOffice 支持转 PDF 的格式（LibreOffice 7.6 实测）
+# 阶段二十六·26.3：LibreOffice 支持转 PDF 的格式（20 种）
+# - Word 3 种：.doc/.docx/.docm
+# - Excel 4 种：.xls/.xlsx/.xlsm/.xlsb
+# - PowerPoint 7 种：.ppt/.pptx/.pptm/.pps/.ppsx/.ppsm/.pot
+# - .csv / .epub
+# - OpenDocument / RTF：.odt/.ods/.odp/.rtf
 SUPPORTED_OFFICE_TYPES = frozenset({
+    # Word 3 种
     ".doc", ".docx", ".docm",
-    ".xls", ".xlsx", ".xlsm",
-    ".ppt", ".pptx",
+    # Excel 4 种
+    ".xls", ".xlsx", ".xlsm", ".xlsb",
+    # PowerPoint 7 种
+    ".ppt", ".pptx", ".pptm",
+    ".pps", ".ppsx", ".ppsm",
+    ".pot",
+    # CSV / EPUB
+    ".csv",
+    ".epub",
+    # OpenDocument / RTF
     ".odt", ".ods", ".odp",
-    ".rtf", ".epub",
-    ".csv",  # 文本类，LibreOffice 能转；前端可走文本分支
+    ".rtf",
 })
 
-# 阶段二十四：纯文本/已 PDF/图片等不需要 LibreOffice 转换（前端走文本预览/iframe/图片直显）
+# 已 PDF/图片等不需要 LibreOffice 转换（前端走 iframe / 图片直显 / 已 PDF 不需转）
 UNSUPPORTED_FOR_CONVERT = frozenset({
-    ".pdf", ".txt", ".md", ".json", ".xml", ".html", ".htm",
+    ".pdf",
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg",
 })
 

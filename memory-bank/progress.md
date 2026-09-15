@@ -1179,3 +1179,37 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - TemporaryDirectory 在 `with` 块内 `return pdf_out` 后，外层 `shutil.move` 找不到文件 → 返回 `bytes` 替代路径 ✅
 - 进度状态读写需要原子写（并发场景下 `write → read` 可能看到残缺 JSON）→ `tmp + os.replace` ✅
 - LibreOffice 同用户不能多实例 → 临时 `UserInstallation` profile + 进程内 `threading.Lock` + 跨进程文件锁 ✅
+
+---
+
+## 阶段二十六：上传格式扩展 + 预览按钮按需显示（2026-09-15）
+
+> 用户拍板最终 22 种（26.3 修订：追加 PPT 7 种、移除 .json）：
+> Word 3（.doc/.docx/.docm）+ Excel 4（.xls/.xlsx/.xlsm/.xlsb）+ PowerPoint 7（.ppt/.pptx/.pptm/.pps/.ppsx/.ppsm/.pot）+ .epub/.csv/.pdf + 图片 3（.jpg/.jpeg/.png）+ 文本 2（.txt/.md）
+
+### 26.1 — 后端白名单 + 预览支持矩阵
+- `config.py` `ALLOWED_EXTENSIONS` 默认值改 22 种（`.env` 无该项，默认值直接生效）
+- `preview_converter.py` `SUPPORTED_OFFICE_TYPES` 扩到 20 种（+PPT 7 种；anydoc 提取与 LibreOffice 转 PDF 本就支持，零新增代码）
+- anydoc 提取链路确认：`anydoc_extractor.py` SUPPORTED_EXTENSIONS 已含全部 PPT 7 种，无需改动
+
+### 26.2 — 前端预览按钮按需显示
+- `DocumentView.vue` / `SearchView.vue`：`OFFICE_EXTENSIONS`/`OFFICE_TYPES` 扩 20 种
+- **`shouldShowViewToggle` 从 `return true` 改为只对 4 类显示**：Office（含 PPT/CSV）→ LibreOffice 转 PDF；PDF → iframe；图片 → `<img>`；**文本类（.txt/.md）不显示切换按钮**
+- 上传模态框格式说明重写：按 Word/Excel/PowerPoint/其他 + 文本类分组列全 22 种 + `accept` 属性同步 + 底部旧文案（"BMP/TIFF/GIF/WEBP 等"，早已失真）一并修正
+
+### 26.3 — 移除 .json 支持（用户拍板：anydoc 转不出 JSON 的 Markdown）
+清除全部 json 预览死代码：
+- `config.py` ALLOWED 去 json
+- `preview_converter.py`：删 `TEXT_PREVIEW_TYPES` / `is_supported_text_type` / `TextTooLargeError` / `read_text_content` / `_read_with_fallback` / `_read_and_format_json`（连同未用 `Tuple` import）
+- `documents.py`：删 `GET /{id}/text-content` 端点
+- `text_extractor.py`：`.json` 出 SUPPORTED_EXTENSIONS，删 `_format_json` 分支与 `import json`
+- `DocumentView.vue`：删 `isJsonFile` / JSON `<pre>` 模板分支 / `.text-preview*` CSS
+- `SearchView.vue`：删 `isJsonFile` / `JSON_TYPES`
+
+### 验证
+- ✅ 后端：`ALLOWED_EXTENSIONS` 解析 22 种；`SUPPORTED_OFFICE_TYPES` 20 种（PPT 7 种全部 office=True，.pdf/.txt/.md/.json=False）；json 死代码 hasattr 断言全部通过；完整 `app.main:app` 导入成功、无 text-content 残留路由
+- ✅ 前端：`npm run build` 通过（vite build 0 error）
+
+### 风险 / 遗留
+- 历史已上传的 .json 文档：`document.content` 已是旧 TextExtractor 代码块格式，搜索/预览仍可用（markdown 渲染代码块），但新 .json 无法再上传
+- 上传说明里"Office/PDF/EPUB/图片 20 种" = 22 总种 − 文本 2 种（.txt/.md 无切换按钮）

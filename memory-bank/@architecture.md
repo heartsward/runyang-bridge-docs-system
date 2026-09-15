@@ -65,6 +65,12 @@ runyang-bridge-docs-system/
 > - `.gitignore` 加 `backend/cache/`（运行时缓存不入版本库）
 > - 重写 `docs/环境安装-LibreOffice.md`（阶段十九前是讲"内容提取"；本次改为讲"PDF 预览转换"，明确边界与 anydoc 解耦）
 
+> **2026-09-15 变更（阶段二十六·26.3 最终版）**：上传白名单定为 **22 种** = Word 3（.doc/.docx/.docm）+ Excel 4（.xls/.xlsx/.xlsm/.xlsb）+ PowerPoint 7（.ppt/.pptx/.pptm/.pps/.ppsx/.ppsm/.pot）+ .epub/.csv/.pdf + 图片 3（.jpg/.jpeg/.png）+ 文本 2（.txt/.md）。
+> - **`.json` 不支持**（用户拍板：anydoc 无法把 JSON 转 Markdown）→ 清除全部 json 预览代码：`config.py` ALLOWED 去 json；`preview_converter.py` 删 `TEXT_PREVIEW_TYPES`/`is_supported_text_type`/`TextTooLargeError`/`read_text_content`/`_read_with_fallback`/`_read_and_format_json`；`documents.py` 删 `GET /{id}/text-content` 端点；`text_extractor.py` `.json` 出 SUPPORTED_EXTENSIONS、删 `_format_json` 分支
+> - `SUPPORTED_OFFICE_TYPES` 扩到 **20 种**（+PPT 7 种）；anydoc 已支持全部 PPT 格式（提取零改动）；LibreOffice 已实测支持 PPT 转 PDF（预览零改动）
+> - 前端 `DocumentView.vue`/`SearchView.vue`：`OFFICE_EXTENSIONS`/`OFFICE_TYPES` 扩 20 种；删 `isJsonFile` 及 JSON `<pre>` 分支；**`shouldShowViewToggle` 改为只对 4 类显示**（Office 含 PPT/CSV + epub → LibreOffice 转 PDF；PDF → iframe；图片 → `<img>`），文本类（.txt/.md）不显示切换按钮
+> - 上传界面说明文字重写：按 Word/Excel/PowerPoint/其他 + 文本类分组列全 22 种，`accept` 属性同步
+
 ---
 
 ## 1. backend/ — FastAPI 后端
