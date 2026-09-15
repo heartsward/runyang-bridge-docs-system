@@ -377,13 +377,13 @@
               </div>
             </div>
 
-            <!-- 转 PDF 成功 -->
-            <iframe
-              v-show="previewConvertStatus === 'ready'"
-              :src="`/api/v1/documents/${previewDocumentData.document_id}/converted-pdf`"
-              style="width: 100%; height: 100%; border: none; border-radius: 4px;"
-              title="Office 文档 PDF 预览"
-            />
+<!-- 转 PDF 成功（26.10：浏览器原生 iframe 不带 axios 拦截器 token，必须拼 ?token=） -->
+          <iframe
+            v-show="previewConvertStatus === 'ready'"
+            :src="`/api/v1/documents/${previewDocumentData.document_id}/converted-pdf?token=${encodeURIComponent(apiService.getToken() || '')}`"
+            style="width: 100%; height: 100%; border: none; border-radius: 4px;"
+            title="Office 文档 PDF 预览"
+          />
           </div>
 
           <!-- 其他文件类型显示下载信息 -->

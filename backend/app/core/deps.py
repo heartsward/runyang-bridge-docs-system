@@ -95,6 +95,51 @@ def get_optional_user(
         return None
 
 
+def get_user_for_iframe(
+    db: Session = Depends(get_db),
+    token: Optional[str] = None,  # Query 参数 ?token=xxx，由前端 iframe URL 传入
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+) -> User:
+    """阶段二十六·26.10：iframe 专用认证
+
+    浏览器原生 iframe 发请求不会带 axios 拦截器注入的 Authorization header，
+    因此 converted-pdf 端点必须接受 URL query token 才能正常返回 PDF。
+    优先级：Authorization Bearer > query token > 都缺失则 401。
+    """
+    raw_token = None
+    if credentials and credentials.credentials:
+        raw_token = credentials.credentials
+    elif token and token.strip():
+        raw_token = token.strip()
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=401,
+            detail="缺少认证凭据（iframe 需带 token 查询参数）",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = verify_token(raw_token)
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="认证凭据无效",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    username: str = payload.get("sub")
+    if not username:
+        raise HTTPException(status_code=401, detail="token 缺少 sub 字段")
+
+    user = crud_user.get_by_username(db, username=username)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="用户账户未激活")
+    return user
+
+
 def require_test_endpoints_enabled() -> None:
     """
     测试/调试端点门禁依赖

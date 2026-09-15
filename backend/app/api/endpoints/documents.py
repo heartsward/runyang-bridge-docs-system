@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 import os
-from app.core.deps import get_db, get_current_active_user
+from app.core.deps import get_db, get_current_active_user, get_user_for_iframe
 from app.crud import document as crud_document
 from app.models.user import User
 from app.models.document import Document as DocumentModel
@@ -596,7 +596,7 @@ async def get_converted_pdf(
     *,
     db: Session = Depends(get_db),
     document_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_user_for_iframe),
 ):
     """返回 LibreOffice 转好的 PDF（iframe 用）。
 
