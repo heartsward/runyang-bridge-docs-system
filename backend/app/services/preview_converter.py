@@ -133,20 +133,23 @@ def detect_soffice_path() -> Optional[str]:
 def get_version_string(soffice_path: str) -> str:
     """调 soffice --version 拿版本号（带超时）
 
-    阶段二十六·26.5：Windows 下加 CREATE_NO_WINDOW 静默运行。
-    soffice --version 在某些 Windows 版本上会启动完整实例并弹窗口，
-    用户关窗口会中断探测 → 必须静默，避免"运行脚本/首次预览就弹窗"。
+    阶段二十六·26.5+26.8：Windows 下彻底静默（--headless + CREATE_NO_WINDOW +
+    CREATE_DETACHED_PROCESS + STARTUPINFO wShowWindow=SW_HIDE 四重保险），
+    防止 LibreOffice 首次 profile 初始化时弹 "Welcome to LibreOffice" 窗口。
     """
     creationflags = 0
+    startupinfo = None
     if platform.system() == "Windows":
-        creationflags = subprocess.CREATE_NO_WINDOW
-    # --headless 关键：Windows 上 soffice --version 不带 --headless 会拉起 GUI 实例弹窗，
-    # 用户关窗口会中断探测。--headless + CREATE_NO_WINDOW 双保险彻底静默。
+        creationflags = subprocess.CREATE_NO_WINDOW | 0x00000008  # CREATE_DETACHED_PROCESS
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0  # SW_HIDE
     try:
         out = subprocess.run(
             [soffice_path, "--headless", "--version"],
             capture_output=True, text=True, timeout=10,
             creationflags=creationflags,
+            startupinfo=startupinfo,
         )
         return (out.stdout or out.stderr or "").strip().split("\n")[0]
     except Exception as e:
@@ -267,20 +270,70 @@ class PreviewConverter:
         """清掉某 doc 的缓存（文档被覆盖上传后调用）"""
         p = self._cache_path(doc_id)
         p.unlink(missing_ok=True)
+        # 同步清指纹，否则下次 _is_cache_fresh 还会看到旧指纹
+        self._fingerprint_path(doc_id).unlink(missing_ok=True)
         _PreviewStatusStore.clear(doc_id)
 
     def _is_cache_fresh(self, doc_id: int, source_path: str) -> bool:
-        """缓存是否新鲜（存在 + mtime 匹配源文件）"""
+        """缓存是否新鲜（存在 + 源文件大小/指纹匹配）
+
+        阶段二十六·26.8 重要修复：之前只比 mtime，但 Windows 覆盖上传时默认会**保留旧文件的 mtime**，
+        导致新文件覆盖旧文件后 mtime 不变 → 缓存被判定为"新鲜" → 返回旧 PDF → 预览空白。
+        现改为同时比对**源文件大小 + 头 4096 字节**（快速指纹，覆盖写也保证不同）。
+        """
         cached = self.get_cached_pdf(doc_id)
         if not cached:
             return False
         if not os.path.exists(source_path):
             return False
-        # mtime 比较（PDF 的 mtime 应 ≥ 源文件 mtime）
         try:
-            return cached.stat().st_mtime >= os.path.getmtime(source_path)
+            src_stat = os.stat(source_path)
+            # 1) 大小匹配（最便宜的判定：覆盖写新文件大小通常不同）
+            fingerprint_path = self._fingerprint_path(doc_id)
+            if fingerprint_path.exists():
+                try:
+                    saved = json.loads(fingerprint_path.read_text(encoding="utf-8"))
+                    saved_size = saved.get("source_size", -1)
+                    saved_head = saved.get("source_head", "")
+                    # 大小不同 → 源文件变了 → 缓存失效
+                    if saved_size != src_stat.st_size:
+                        logger.info(f"[PreviewConverter] doc {doc_id} 源文件大小变化 {saved_size}→{src_stat.st_size}，缓存失效")
+                        return False
+                    # 读源文件前 4096 字节比指纹
+                    with open(source_path, "rb") as f:
+                        head = f.read(4096)
+                    if saved_head != head.decode("utf-8", errors="replace"):
+                        logger.info(f"[PreviewConverter] doc {doc_id} 源文件内容变化（头哈希不同），缓存失效")
+                        return False
+                except Exception:
+                    # 指纹文件坏了，保守按陈旧处理 → 重转
+                    return False
+            # 2) 没有指纹文件（旧版本遗留）→ 仅按 mtime 兜底
+            return cached.stat().st_mtime >= src_stat.st_mtime
         except Exception:
             return False
+
+    def _fingerprint_path(self, doc_id: int) -> Path:
+        """源文件指纹（大小 + 头 4096 字节），用于缓存失效判定。"""
+        return CACHE_DIR / f"{doc_id}.source.fp.json"
+
+    def _save_fingerprint(self, doc_id: int, source_path: str) -> None:
+        """转换成功后保存源文件指纹，便于下次精确判定。"""
+        try:
+            src_stat = os.stat(source_path)
+            with open(source_path, "rb") as f:
+                head = f.read(4096)
+            payload = {
+                "source_size": src_stat.st_size,
+                "source_head": head.decode("utf-8", errors="replace"),
+                "saved_at": time.time(),
+            }
+            self._fingerprint_path(doc_id).write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.warning(f"[PreviewConverter] 保存指纹失败 doc={doc_id}: {e}")
 
     # ---------- 文件锁 ----------
     def _get_file_lock(self, doc_id: int) -> "_FileLock":
@@ -344,6 +397,8 @@ class PreviewConverter:
                 # 把 PDF 字节写入缓存
                 target = self._cache_path(doc_id)
                 target.write_bytes(pdf_bytes)
+                # 保存源文件指纹（大小+头），下次可精确判定缓存是否有效
+                self._save_fingerprint(doc_id, file_path)
                 elapsed = round(time.monotonic() - t0, 1)
                 _PreviewStatusStore.write(doc_id, {
                     "doc_id": doc_id, "status": "ready",
@@ -396,9 +451,16 @@ class PreviewConverter:
 
             # Windows:不弹出 cmd 控制台窗口（静默运行 LibreOffice 子进程）
             # CREATE_NO_WINDOW = 0x08000000；仅 Windows 有效，其它平台忽略
+            # 阶段二十六·26.8 加：CREATE_DETACHED_PROCESS（0x00000008）+ STARTUPINFO wShowWindow=SW_HIDE
+            # 双保险防止 LibreOffice 首次 profile 初始化时弹 "Welcome to LibreOffice" 窗口
             creationflags = 0
+            startupinfo = None
             if platform.system() == "Windows":
-                creationflags = subprocess.CREATE_NO_WINDOW
+                creationflags = subprocess.CREATE_NO_WINDOW | 0x00000008  # CREATE_DETACHED_PROCESS
+                # SW_HIDE = 0，彻底隐藏窗口
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
 
             try:
                 result = subprocess.run(
@@ -409,6 +471,7 @@ class PreviewConverter:
                     encoding="utf-8",
                     errors="replace",
                     creationflags=creationflags,
+                    startupinfo=startupinfo,
                 )
             except subprocess.TimeoutExpired as e:
                 raise RuntimeError(f"soffice 转换超时 ({timeout}s)") from e
