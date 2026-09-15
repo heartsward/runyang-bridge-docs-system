@@ -135,11 +135,6 @@ class ApiService {
     delete this.api.defaults.headers.common['Authorization']
   }
 
-  // 获取当前token
-  getToken() {
-    return this.token
-  }
-
   // 基础请求方法
   async get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.api.get<T>(url, config)
