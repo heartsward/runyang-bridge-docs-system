@@ -51,6 +51,20 @@ runyang-bridge-docs-system/
 
 > **2026-09-15 变更（阶段二十三）**：① 预览去掉"提取的图片"展示但保留图片提取：`content_extractor.py` 提取流程不再调 `insert_image_refs`、独立图片文档不再把图引用拼到 MD；`wiki.py` `/rebuild?reextract_images=true` 路径不再写 MD；`image_extractor.py` 删除 `insert_image_refs` 函数 + `_PAGE_HEADER_RE` + 未用的 `import re`。图片本体仍走 `extract_pdf_images` / `register_image_doc` 落盘 + `idx.add_image` 入 `wiki_images` 表 + `describe_image_sync` AI 中文描述——图片域 MCP（`get_doc_images` / `search_images`）继续可用。② 预览工具栏右侧增加"提取内容/原文件"切换：所有格式都显示（之前仅 PDF/图片），非 PDF/图片切到"原文件"模式降级为下载提示卡；`DocumentView.vue` / `SearchView.vue` 的 `shouldShowViewToggle` 改为 `return true`，工具栏由 `n-space`（toggle 左）改为 flex 布局（toggle 右，`margin-left:auto`）。
 
+> **2026-09-15 变更（阶段二十四）**：Office 格式在线预览（LibreOffice 转 PDF + iframe）。
+> - 新增 `backend/app/services/preview_converter.py`（单例 + 路径探测 + 缓存 + 文件锁 + 独立进度状态）
+>   - soffice 路径探测顺序：`.env LIBREOFFICE_BIN_PATH` → 平台标准路径 → `PATH` 兜底
+>   - 缓存：`backend/cache/converted_pdfs/{doc_id}.pdf`，按 doc_id + 源文件 mtime 比对失效（覆盖上传自动重转）
+>   - 进度状态（独立通道）：`task_status/preview_convert_{doc_id}.json`，与内容提取 `extract_{doc_id}_*.json` 完全分离
+>   - 文件锁：进程内 `threading.Lock` + 跨进程 `fcntl.flock`（Linux/macOS）/ `msvcrt.locking`（Windows）/ noop fallback
+>   - 支持：.doc/.docx/.xls/.xlsx/.ppt/.pptx/.odt/.ods/.odp/.rtf/.epub/.csv（14 种）
+>   - **关键踩坑**：soffice 转换在 TemporaryDirectory with 块中，`return pdf_out` 后 `__exit__` 会清理目录 → 改为返回 `bytes` 内容由外层写缓存（已修复，实测 7.4s 转换 53KB xlsx → 733KB PDF）
+> - 新增 3 个端点：`GET /api/v1/documents/{id}/converted-pdf`（返回 inline PDF，缓存命中秒出；缓存未命中同步触发）、`GET /api/v1/documents/{id}/conversion-status`（前端轮询，独立于 `/tasks/document/{id}/extraction-status`）、`POST /api/v1/documents/{id}/convert`（后台预热）
+> - 前端 `DocumentView.vue` / `SearchView.vue` 增加"Office 文档分支"：`isOfficeFile()` 判断 → loading 覆盖层（带 elapsed 计时 + "与内容提取独立"提示）→ iframe 显示 PDF；失败 fallback 到下载卡
+> - `Settings` 新增 `LIBREOFFICE_BIN_PATH`（可选自定义）+ `PREVIEW_CONVERT_TIMEOUT`（默认 120s）
+> - `.gitignore` 加 `backend/cache/`（运行时缓存不入版本库）
+> - 重写 `docs/环境安装-LibreOffice.md`（阶段十九前是讲"内容提取"；本次改为讲"PDF 预览转换"，明确边界与 anydoc 解耦）
+
 ---
 
 ## 1. backend/ — FastAPI 后端

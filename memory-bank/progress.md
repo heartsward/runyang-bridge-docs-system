@@ -5,22 +5,23 @@
 
 ---
 
-## 当前状态：阶段零~二十·22 全部完成，阶段二十三进行中
+## 当前状态:阶段零~二十三全部完成,阶段二十四进行中
 
-**最后更新**：2026-09-15 11:00
+**最后更新**:2026-09-15 12:35
 
-- 初始 9 项 P0/P1/P2 问题清零；内容提取器重构（extraction 模块）
-- AI 引擎统一到 llama.cpp + Qwen3-VL 单接口；旧 AI 配置清理
-- AI Wiki 系统全链路落地（MD 副本 + FTS5 + FastMCP 12 tools + 前端编辑/下载）
-- **Android 客户端与移动端 API 整体移除（2026-09-12，阶段十一）**：数据查询与利用改由 AI 工作台经 AI Wiki MCP（`/mcp`）接入
-- **start-services.bat 启动修复（2026-09-12，阶段十二）**：venv 缺失自动创建+装依赖、managed runtime 回退、补 fastmcp 依赖
-- **阶段十三~十七**：AI 配置热生效 / 测试连接增强 / 后台 worker 修复 / 三处下载统一 / 设置页配置加载
-- **阶段十八**：PDF/图片提取+文类+图片检索+三路中文检索+MCP 图片工具（参考 OpenKB）
-- **阶段十九**：anydoc 替换 LibreOffice（参考 firecrawl/anydoc）
-- **阶段二十·20.1~20.10**：多词联合搜索、Markdown 预览、智能搜索分词、MCP 资产工具、停止脚本安全化等
-- **阶段二十一（2026-09-14）**：补齐 `backend/.env` CORS auto 模式全套配置
-- **阶段二十二（2026-09-14）**：update.sh / update.bat / push.sh / push.bat 一键运维脚本
-- **阶段二十三进行中（2026-09-15 11:00）**：① 预览去掉"提取的图片"展示（图片正常提取到磁盘 + wiki_images 表 + AI 描述，但不再嵌入 MD）② 预览工具栏右侧增加"提取内容/原文件"切换，所有格式都显示（之前仅 PDF/图片）
+- 初始 9 项 P0/P1/P2 问题清零;内容提取器重构(extraction 模块)
+- AI 引擎统一到 llama.cpp + Qwen3-VL 单接口;旧 AI 配置清理
+- AI Wiki 系统全链路落地(MD 副本 + FTS5 + FastMCP 12 tools + 前端编辑/下载)
+- **Android 客户端与移动端 API 整体移除(2026-09-12,阶段十一)**:数据查询与利用改由 AI 工作台经 AI Wiki MCP(`/mcp`)接入
+- **start-services.bat 启动修复(2026-09-12,阶段十二)**:venv 缺失自动创建+装依赖、managed runtime 回退、补 fastmcp 依赖
+- **阶段十三~十七**:AI 配置热生效 / 测试连接增强 / 后台 worker 修复 / 三处下载统一 / 设置页配置加载
+- **阶段十八**:PDF/图片提取+文类+图片检索+三路中文检索+MCP 图片工具(参考 OpenKB)
+- **阶段十九**:anydoc 替换 LibreOffice(参考 firecrawl/anydoc)
+- **阶段二十·20.1~20.10**:多词联合搜索、Markdown 预览、智能搜索分词、MCP 资产工具、停止脚本安全化等
+- **阶段二十一(2026-09-14)**:补齐 `backend/.env` CORS auto 模式全套配置
+- **阶段二十二(2026-09-14)**:update.sh / update.bat / push.sh / push.bat 一键运维脚本
+- **阶段二十三(2026-09-15)**:预览去掉底部图片清单 + 工具栏"原文件"切换支持所有格式
+- **阶段二十四进行中(2026-09-15 12:35)**:Office 格式在线预览(LibreOffice 转 PDF + iframe,用户拍板路线 D2),前端带独立进度通道
 
 ---
 
@@ -1111,3 +1112,70 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 **遗留观察**：
 - 旧文档 MD 副本仍含图引用 —— 后续如需彻底清洗，可走 `/rebuild?reextract_images=true`（会落盘 + 登记新图，但不再重写 MD），老数据需要专门脚本清洗
 - 独立图片文档切到"提取内容"模式会显示空 —— 已是当前唯一合理 UX（用户主动切"原文件"看图），接受
+
+---
+
+### 2026-09-15 — 阶段二十四：Office 格式在线预览（LibreOffice 转 PDF + iframe）
+
+**用户需求**：阶段二十三让"原文件"切换支持所有格式后，非 PDF/图片只能下载。**用户进一步要求**：能直接在浏览器里看 .docx/.xlsx/.pptx。
+
+**调研结论**：
+- 桌面版"迅捷 PDF 转换器"是 GUI 软件，**无公开 Python SDK/CLI 接口**，无法代码调用；网页版需上传文件到公网服务器（运维文档敏感 → 不可接受）❌
+- pandoc 对 .docx 转换效果顶尖，但**不支持 .xlsx/.pptx**（无 spreadsheet/presentation reader）❌
+- LibreOffice 全覆盖 .doc/.docx/.xls/.xlsx/.ppt/.pptx/.odt/.ods/.odp/.rtf/.epub/.csv 等 14 种 ✅
+- 用户拍板：**路线 D2（纯 LibreOffice）**
+
+**阶段十九 vs 阶段二十四的关系**：
+- 阶段十九：LibreOffice **全栈移除**（不再做内容提取；改用 anydoc）
+- 阶段二十四：LibreOffice **局部回滚** —— **仅**承担"Office 转 PDF 预览"角色
+- 两条链路并存且解耦：anydoc 走内容提取（快、保结构），LibreOffice 走 PDF 转换（保留排版，供 iframe）
+
+**用户补充要求**：
+1. **PDF 转换进度提示**与**文件内容提取进度**完全分开（两条独立 UI + 后端状态）
+2. **LibreOffice 环境安装文档**重写（之前讲"内容提取"，现在讲"PDF 预览转换"）
+
+#### 24.1 — LibreOffice 安装文档重写
+- `docs/环境安装-LibreOffice.md` 整篇重写：
+  - 角色：从"内容提取"改为"PDF 预览转换"（阶段十九起 anydoc 接手内容提取）
+  - 强调"不影响内容提取/智能搜索/MCP"
+  - 三平台安装（Windows 安装版勾 PATH / Linux apt 4 包 / macOS brew）
+  - 验证 + 故障排除 + 与 anydoc 解耦边界
+- `Settings` 加 `LIBREOFFICE_BIN_PATH` + `PREVIEW_CONVERT_TIMEOUT`（默认 120s）
+
+#### 24.2 — 后端 PDF 转换器
+- 新增 `backend/app/services/preview_converter.py`（~330 行）
+- `PreviewConverter` 单例 + `get_preview_converter()` 工厂
+- `detect_soffice_path()`：`.env` 自定义 → 平台标准路径 → `PATH` 兜底
+- `SUPPORTED_OFFICE_TYPES` 14 种格式 + `is_supported_office_type()` 判定
+- 缓存 `backend/cache/converted_pdfs/{doc_id}.pdf` + mtime 比对失效
+- **独立进度通道** `task_status/preview_convert_{doc_id}.json`（单文件覆盖式，与 `extract_{doc_id}_*.json` 完全分离）
+- `_PreviewStatusStore` 原子写（临时文件 + rename）
+- `_FileLock`：进程内 `threading.Lock` + 跨进程 fcntl/msvcrt/noop 三档 fallback
+- `_call_soffice()` 用临时 `UserInstallation` profile 防污染用户配置 + 防多实例冲突
+- **`return pdf_out` → `_call_soffice()` 块退出时 TemporaryDirectory 清理 → 文件不存在** ❌ 改返回 `bytes` 由外层 `target.write_bytes(pdf_bytes)`（已修复）
+
+#### 24.3 — 3 个新端点
+- `GET /api/v1/documents/{id}/converted-pdf` — 返回 inline PDF，缓存命中秒出；缓存未命中同步触发（小文件秒出，大 xlsx 30s+）；LibreOffice 未装返回 503 + 安装文档链接
+- `GET /api/v1/documents/{id}/conversion-status` — 轮询用，状态机 `idle → converting → ready | error`
+- `POST /api/v1/documents/{id}/convert` — 后台预热（FastAPI BackgroundTasks）
+
+#### 24.4 — 前端独立进度通道
+- `DocumentView.vue` / `SearchView.vue` 都加：
+  - `OFFICE_EXTENSIONS` / `OFFICE_TYPES` + `isOfficeFile()` 判定（与后端 SUPPORTED_OFFICE_TYPES 对齐）
+  - `previewConvertStatus` / `previewConvertError` / `previewConvertElapsed` 状态（与"内容提取"进度 ref 完全独立命名）
+  - `pollPreviewConvertStatus()` 2 秒轮询 `/conversion-status`
+  - `watch([previewMode, currentDocument])` 切换模式时自动启停轮询
+  - 模板里 Office 分支：loading 覆盖层（**显示 elapsed 计时 + "与内容提取独立"提示**） → iframe 显示 PDF；失败 fallback 到下载卡 + 错误信息 + 安装文档链接
+
+#### 24.5 — 验证 + 记忆库同步
+- ✅ `vue-tsc --noEmit` 0 新增 error
+- ✅ 后端 3 个模块导入 + 路由注册成功
+- ✅ **真实转换测试**：润扬大桥设备资产清单.xlsx（53KB） → PDF（733KB）耗时 **7.4s**；二次调用命中缓存 **0.000s**
+- ✅ 进度状态格式正确（前端轮询可读）
+- ✅ `.gitignore` 加 `backend/cache/`（运行时缓存不入版本库）
+- ✅ 记忆库：`@architecture.md` 加 24.x 摘要 / `@tech-stack.md` 加 LibreOffice 角色边界（明确"严禁用于内容提取"）/ `progress.md` 加详细条目 / 今日日志
+
+**踩坑记录**：
+- TemporaryDirectory 在 `with` 块内 `return pdf_out` 后，外层 `shutil.move` 找不到文件 → 返回 `bytes` 替代路径 ✅
+- 进度状态读写需要原子写（并发场景下 `write → read` 可能看到残缺 JSON）→ `tmp + os.replace` ✅
+- LibreOffice 同用户不能多实例 → 临时 `UserInstallation` profile + 进程内 `threading.Lock` + 跨进程文件锁 ✅

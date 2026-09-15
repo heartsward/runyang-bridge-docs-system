@@ -1,6 +1,7 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
-from fastapi.responses import FileResponse
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 import os
 from app.core.deps import get_db, get_current_active_user
@@ -11,6 +12,8 @@ from app.schemas.document import (
     Document, DocumentCreate, DocumentUpdate, DocumentList,
     Category, CategoryCreate, CategoryUpdate
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -583,6 +586,149 @@ def preview_document(
             filename=filename,
             media_type='application/octet-stream'
         )
+
+
+# ==================== 阶段二十四：Office → PDF 预览转换端点 ====================
+# 与"内容提取"进度通道完全独立（走 preview_convert_{doc_id}.json）
+
+@router.get("/{document_id}/converted-pdf", summary="Office 格式转 PDF 用于浏览器预览")
+async def get_converted_pdf(
+    *,
+    db: Session = Depends(get_db),
+    document_id: int,
+    current_user: User = Depends(get_current_active_user),
+):
+    """返回 LibreOffice 转好的 PDF（iframe 用）。
+
+    - 缓存命中：直接返回（秒出）
+    - 缓存未命中：同步触发转换（小文件秒出；大文件如 xlsx 可能 30s+）
+    - LibreOffice 未装：返回 503 + 指引文档链接
+    """
+    document = crud_document.get(db=db, id=document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    if not document.file_path or '..' in document.file_path or not os.path.exists(document.file_path):
+        raise HTTPException(status_code=404, detail="文档文件不存在或路径无效")
+
+    # 仅对支持的扩展名走转换
+    ext = os.path.splitext(document.file_path)[1].lower().lstrip(".")
+    from app.services.preview_converter import (
+        is_supported_office_type, get_preview_converter,
+    )
+    if not is_supported_office_type(ext):
+        raise HTTPException(
+            status_code=400,
+            detail=f"文档类型 .{ext} 不需要 LibreOffice 转换（PDF/图片/文本直接可看）",
+        )
+
+    converter = get_preview_converter()
+    if not converter.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="LibreOffice 未安装,Office 格式在线预览不可用。请参见 docs/环境安装-LibreOffice.md 安装后重启后端。",
+        )
+
+    try:
+        pdf_path = await converter.get_or_convert(
+            doc_id=document_id,
+            file_path=document.file_path,
+            file_type=ext,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=f"PDF 转换失败: {e}")
+
+    # inline 显示（浏览器 PDF 查看器渲染）
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "public, max-age=3600",  # 缓存 1 小时
+        },
+    )
+
+
+@router.get("/{document_id}/conversion-status", summary="查询 PDF 转换进度")
+def get_conversion_status(
+    *,
+    db: Session = Depends(get_db),
+    document_id: int,
+    current_user: User = Depends(get_current_active_user),
+):
+    """前端轮询用：返回 {status, started_at, finished_at, elapsed_sec, output_size, error_msg}
+
+    状态机：idle → converting → ready | error
+    与"内容提取进度"端点 /tasks/document/{id}/extraction-status 完全独立
+    """
+    document = crud_document.get(db=db, id=document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    from app.services.preview_converter import get_preview_converter
+    converter = get_preview_converter()
+    return converter.get_status(document_id)
+
+
+@router.post("/{document_id}/convert", summary="异步触发 PDF 转换（预热）")
+async def trigger_convert(
+    *,
+    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks,
+    document_id: int,
+    current_user: User = Depends(get_current_active_user),
+):
+    """异步触发 LibreOffice 转换,适合"上传后立即预热"或"用户进预览前预热"。
+
+    返回 task_started=True,前端可以开始轮询 /conversion-status。
+    """
+    document = crud_document.get(db=db, id=document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    if not document.file_path or not os.path.exists(document.file_path):
+        raise HTTPException(status_code=404, detail="文档文件不存在")
+
+    ext = os.path.splitext(document.file_path)[1].lower().lstrip(".")
+    from app.services.preview_converter import (
+        is_supported_office_type, get_preview_converter,
+    )
+    if not is_supported_office_type(ext):
+        raise HTTPException(
+            status_code=400,
+            detail=f"文档类型 .{ext} 不需要 LibreOffice 转换",
+        )
+
+    converter = get_preview_converter()
+    if not converter.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="LibreOffice 未安装,无法触发转换",
+        )
+
+    # 推后台任务（不阻塞响应）
+    background_tasks.add_task(
+        _run_convert_async,
+        doc_id=document_id,
+        file_path=document.file_path,
+        file_type=ext,
+    )
+    return {"doc_id": document_id, "task_started": True, "status": "converting"}
+
+
+async def _run_convert_async(doc_id: int, file_path: str, file_type: str):
+    """后台任务的同步包装（FastAPI BackgroundTasks 不能 await async 协程）"""
+    from app.services.preview_converter import get_preview_converter
+    converter = get_preview_converter()
+    try:
+        converter.convert_blocking(doc_id, file_path, file_type)
+    except Exception as e:
+        logger.warning(f"[converted-pdf] 后台预热失败 doc={doc_id}: {e}")
+
+
+# ==================== 阶段二十四 end ====================
 
 
 # Analytics endpoint removed

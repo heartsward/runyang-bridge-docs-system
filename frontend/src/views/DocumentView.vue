@@ -263,22 +263,70 @@
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
         <div v-else-if="shouldShowViewToggle(currentDocument) && previewMode === 'original'" class="original-file-preview">
           <!-- PDF 文件使用 iframe 预览 -->
-          <iframe 
+          <iframe
             v-if="isPDFFile(currentDocument)"
-            :src="getFileUrl(currentDocument)" 
+            :src="getFileUrl(currentDocument)"
             style="width: 100%; height: 600px; border: none; border-radius: 4px;"
             title="PDF预览"
           ></iframe>
-          
+
           <!-- 图片文件预览 -->
           <div v-else-if="isImageFile(currentDocument)" style="text-align: center;">
-            <n-image 
-              :src="getFileUrl(currentDocument)" 
+            <n-image
+              :src="getFileUrl(currentDocument)"
               style="max-width: 100%; max-height: 600px;"
               :alt="currentDocument.title"
             />
           </div>
-          
+
+          <!-- 阶段二十四：Office 文档走 LibreOffice 转 PDF + iframe（带独立进度通道） -->
+          <div v-else-if="isOfficeFile(currentDocument)" style="position: relative;">
+            <!-- 转 PDF 中：覆盖式 loading（与内容提取进度独立） -->
+            <div v-if="previewConvertStatus !== 'ready' && previewConvertStatus !== 'error'" style="position: absolute; inset: 0; background: rgba(255,255,255,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; padding: 24px;">
+              <n-spin size="large" />
+              <div style="margin-top: 16px; font-size: 14px;">
+                {{
+                  previewConvertStatus === 'converting'
+                    ? `正在转换为 PDF（LibreOffice · 约 ${previewConvertElapsed}s · 首次可能较慢）`
+                    : '准备转换…'
+                }}
+              </div>
+              <n-text depth="3" style="margin-top: 8px; font-size: 12px;">
+                此进度与文件内容提取进度独立 · 仅影响本次浏览器预览
+              </n-text>
+            </div>
+
+            <!-- 转 PDF 失败：fallback 到下载卡 -->
+            <div v-if="previewConvertStatus === 'error'" style="padding: 24px;">
+              <n-alert type="error" :show-icon="true" title="PDF 转换失败">
+                <n-text style="font-size: 13px;">{{ previewConvertError || 'LibreOffice 转换出错' }}</n-text>
+                <n-text depth="3" style="font-size: 12px; display: block; margin-top: 4px;">
+                  参见 docs/环境安装-LibreOffice.md
+                </n-text>
+              </n-alert>
+              <div style="margin-top: 16px; text-align: center;">
+                <n-dropdown
+                  trigger="click"
+                  :options="downloadMenuOptions"
+                  @select="(key: string) => downloadDocument(currentDocument!, key)"
+                >
+                  <n-button type="primary">
+                    <template #icon><n-icon><DownloadOutline /></n-icon></template>
+                    下载文件
+                  </n-button>
+                </n-dropdown>
+              </div>
+            </div>
+
+            <!-- 转 PDF 成功：iframe 显示 -->
+            <iframe
+              v-show="previewConvertStatus === 'ready'"
+              :src="`/api/v1/documents/${currentDocument.id}/converted-pdf`"
+              style="width: 100%; height: 600px; border: none; border-radius: 4px;"
+              title="Office 文档 PDF 预览"
+            />
+          </div>
+
           <!-- 其他文件类型显示下载信息 -->
           <div v-else class="file-download-info">
             <n-empty description="此文件类型不支持在线预览">
@@ -560,6 +608,48 @@ const previewContent = ref('')
 const previewLoading = ref(false)
 const previewMode = ref<'extracted' | 'original'>('extracted')
 const currentDocument = ref<Document | null>(null)
+
+// 阶段二十四：PDF 预览转换进度状态（与"内容提取"完全独立）
+// 状态机：idle → converting → ready | error
+const previewConvertStatus = ref<'idle' | 'converting' | 'ready' | 'error'>('idle')
+const previewConvertError = ref<string>('')
+const previewConvertElapsed = ref<number>(0)
+let _convertStatusTimer: ReturnType<typeof setInterval> | null = null
+
+const pollPreviewConvertStatus = async (docId: number) => {
+  if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+  _convertStatusTimer = setInterval(async () => {
+    try {
+      const r = await apiService.get(`/documents/${docId}/conversion-status`)
+      const status = r?.status || 'idle'
+      previewConvertStatus.value = status
+      previewConvertElapsed.value = r?.elapsed_sec || 0
+      previewConvertError.value = r?.error_msg || ''
+      // ready 或 error 停轮询
+      if (status === 'ready' || status === 'error') {
+        if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+      }
+    } catch (e) {
+      // 网络/认证错误 — 静默继续轮询
+    }
+  }, 2000)
+}
+
+const stopPreviewConvertPolling = () => {
+  if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+}
+
+// 监听：切到"原文件"模式 + 文档是 Office → 触发轮询；切走/关弹窗 → 停
+watch([previewMode, currentDocument], ([mode, doc]) => {
+  if (mode === 'original' && doc && isOfficeFile(doc)) {
+    previewConvertStatus.value = 'converting'
+    pollPreviewConvertStatus(doc.id)
+  } else {
+    stopPreviewConvertPolling()
+    previewConvertStatus.value = 'idle'
+    previewConvertError.value = ''
+  }
+})
 const editLoading = ref(false)
 
 // 阶段十八·18.8：图片水合（带 token 拉 wiki 图片 → blob URL）
@@ -1786,6 +1876,21 @@ const isImageFile = (document: Document | null): boolean => {
   if (!document) return false
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']
   return imageExtensions.some(ext => document.file_path.toLowerCase().endsWith(ext))
+}
+
+// 阶段二十四：判断是否走 LibreOffice 转 PDF 预览
+// 与后端 preview_converter.SUPPORTED_OFFICE_TYPES 对齐
+const OFFICE_EXTENSIONS = [
+  '.doc','.docx','.docm',
+  '.xls','.xlsx','.xlsm',
+  '.ppt','.pptx',
+  '.odt','.ods','.odp',
+  '.rtf','.epub',
+]
+const isOfficeFile = (document: Document | null): boolean => {
+  if (!document) return false
+  const path = document.file_path.toLowerCase()
+  return OFFICE_EXTENSIONS.some(ext => path.endsWith(ext))
 }
 
 // 判断是否应该显示视图切换按钮

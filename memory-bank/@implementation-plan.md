@@ -2132,3 +2132,92 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 风险 2：图片 doc 切到提取内容模式显示为空 → 已是当前唯一合理 UX（用户主动切"原文件"看图），接受
 - 风险 3：工具栏 toggle 移到右侧可能挤压搜索高亮导航宽度 → 用 `flex-wrap` 兜底（小窗口换行）
 
+---
+
+## 阶段二十四：Office 格式在线预览（LibreOffice 转 PDF + iframe 渲染，2026-09-15 用户拍板路线 D2）
+
+> 目标：让 .docx/.xlsx/.pptx/.odt/.ods/.odp/.rtf/.epub 等 LibreOffice 支持的格式在"原文件"模式也能直接浏览器里看（之前只能下载）。路线选 D2（纯 LibreOffice），理由：xlsx/pptx 是用户场景常见格式（资产台账、NVR 总表、培训 PPT），pandoc 不支持这两种；LibreOffice 全覆盖代价是 ~400MB。
+>
+> 关键事实：阶段十九（anydoc 替换 LibreOffice）已**显式移除**所有 LibreOffice/soffice 代码。本阶段是阶段十九的反向操作 — 重新引入 LibreOffice，但仅作为"预览专用转换器"（不替换 anydoc 的提取链路）。两个链路并存：anydoc 走 MD 提取（速度快，保结构），LibreOffice 走 PDF 转换（保留排版，供 iframe 预览）。
+
+### 步骤 24.1 — LibreOffice 安装说明文档恢复 + 一键脚本适配
+
+- **做什么**：
+  1. 恢复 `docs/环境安装-LibreOffice.md`（阶段十九一并删了；本阶段重新写）
+     - Windows：从 https://www.libreoffice.org/download/ 下载安装版，安装时勾选"添加到 PATH"
+     - Linux：`sudo apt install libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress`（只装核心 + 3 个组件，避免 ~400MB 全装）
+     - 验证命令：`soffice --version`
+  2. `install-complete.bat` / `install-complete.sh` 加一段 soffice 检测：找不到则 `echo` 警告 + 指引看 `docs/环境安装-LibreOffice.md`（不阻塞安装）
+- **能改什么**：上述脚本 + 文档
+- **不能改什么**：start-services 脚本（启动时不需要 LibreOffice，只在用户切到"原文件"时才用）
+- **怎么验**：在已装/未装 LibreOffice 的机器上分别跑一遍；安装日志能清晰指引用户；README 更新一条
+- **回退方案**：N/A（文档删除不影响代码）
+
+### 步骤 24.2 — 后端：PDF 转换器（缓存 + 文件锁）
+
+- **做什么**：新建 `backend/app/services/preview_converter.py`
+  1. `SUPPORTED_OFFICE_TYPES = {'.doc','.docx','.docm','.xls','.xlsx','.xlsm','.ppt','.pptx','.odt','.ods','.odp','.rtf','.epub','.csv'}`（LibreOffice 支持的转 PDF 格式；`.csv` 单独走文本预览更友好，但先纳入统一转换）
+  2. `is_supported(file_type) -> bool`：判断是否走 LibreOffice 转换
+  3. `convert_to_pdf(doc_id, file_path, file_type) -> Path`：用 `subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', '--outdir', tmp_dir, file_path])`；首次成功后**缓存**到 `backend/cache/converted_pdfs/{doc_id}.pdf`；超时默认 120s（PDF 大文件可能更久）
+  4. `get_or_convert(doc_id, file_path, file_type) -> Path`：缓存命中直接返回；否则调 `convert_to_pdf`；写入缓存
+  5. **文件锁**（关键）：用 `fcntl.flock`（Linux）/ `msvcrt.locking`（Windows）或简单的 pidfile + lockfile 防 LibreOffice 多进程并发 — LibreOffice **不允许同一用户同时开多个实例**，否则会报"source file could not be loaded"
+  6. 进度状态：写 `backend/task_status/preview_convert_{doc_id}.json`（沿用现有 task_status 模式），含 `status/idle/converting/ready/error`、`started_at/finished_at`、`error_msg`
+- **能改什么**：新增 1 个文件；不动现有 conversion 逻辑
+- **不能改什么**：extraction 模块（anydoc 链路）；preview_converter 是**独立的预览辅助**，与内容提取解耦
+- **怎么验**：单测调 `convert_to_pdf` 转一份 .docx → 输出 PDF；缓存命中测试；并发锁测试（开 2 个线程同时转同 doc，应排队）；soffice 不存在时清晰报错（提示装 LibreOffice）
+- **回退方案**：git checkout 删除 preview_converter.py
+
+### 步骤 24.3 — 后端：3 个新端点
+
+- **做什么**：在 `backend/app/api/endpoints/documents.py`（preview 端点旁）加：
+  1. `GET /api/v1/documents/{id}/converted-pdf`：返回 inline PDF；不存在缓存则同步触发转换（小文件秒出）+ 返回；转换中超时则返回 202 + 轮询地址
+  2. `GET /api/v1/documents/{id}/conversion-status`：返回 `{status, error_msg, finished_at}`；前端轮询用
+  3. `POST /api/v1/documents/{id}/convert`：手动异步触发（后台 task 走 BackgroundTasks），返回 task_id；用于"首次转完下载后下次秒出"预热
+  4. 三端点权限：登录用户（与现有 preview 一致）；后端做 path 校验（与现有 preview 同一套）
+- **能改什么**：documents.py（新增 3 个 endpoint）；路由 `api_v1.py` 注册
+- **不能改什么**：现有 preview 端点（PDF/图片原样保留）；download 端点
+- **怎么验**：上传 .docx → curl `/converted-pdf` → 返回 PDF（首调慢，二调秒出）；curl `/conversion-status` 返回 ready；下载 .xlsx → `/converted-pdf` 走 LibreOffice；PDF/图片调 `/converted-pdf` 直接走原文件（不再经 LibreOffice）
+- **回退方案**：git checkout documents.py api_v1.py
+
+### 步骤 24.4 — 前端：原文件模式分支加 LibreOffice 转换分支
+
+- **做什么**：在 `DocumentView.vue` 和 `SearchView.vue` 的 `<div v-else-if="previewMode === 'original'">` 块内：
+  1. 新增 helper `getOriginalPreview(doc)`：返回 `'pdf' | 'image' | 'download'`（PDF/图片原样；Office 文档 → 'pdf'）
+  2. Office 文档分支：
+     - `<n-spin>` 显示"正在转换为 PDF（首次约 X 秒）..."
+     - 同时 `<iframe :src="/converted-pdf 端点">`（iframe 加载即触发转换，加载慢就 spin）
+     - 转换失败 → fallback 到现有"此文件类型不支持在线预览"+ 下载按钮
+  3. `v-else` 兜底分支保持原样（现有下载卡）
+- **能改什么**：DocumentView.vue / SearchView.vue 的"原文件"分支；新增 helper 函数
+- **不能改什么**：PDF iframe / 图片 n-image 渲染；下载入口；编辑/搜索高亮/工具栏布局
+- **怎么验**：
+  - .docx 文档：首次切到"原文件" → loading → iframe 显示 PDF；二次切秒出
+  - .xlsx 文档：同上（30s 内可接受）
+  - .pptx 文档：同上
+  - .txt / .md 文档：保持下载卡（不在 LibreOffice 必需列表内，但文本文件直接显示也可考虑，后续可选）
+  - PDF / 图片：保持原渲染不变
+  - vue-tsc 0 新增 error
+- **回退方案**：git checkout DocumentView.vue SearchView.vue
+
+### 步骤 24.5 — 端到端验收 + 记忆库同步
+
+- **做什么**：
+  1. E2E：上传 .docx + .xlsx + .pptx 各 1 → 切到"原文件" → 看到 PDF
+  2. 性能：小 .docx < 5s，中 .xlsx < 30s
+  3. soffice 检测：未装 LibreOffice 的机器上预览 .docx 应有清晰提示
+  4. vue-tsc 0 新增 error；后端重启 `/health` 200
+  5. 记忆库：`@architecture.md`（LibreOffice 转换器职责）、`@tech-stack.md`（解禁 LibreOffice，明确"作为预览转换器，不替换 anydoc"）、`progress.md`、每日日志
+  6. `docs/AI-Wiki-MCP调用文档.md` 不需要改（MCP 不涉及预览）
+  7. `docs/版本更新日志.md` 记里程碑
+- **通过标准**：.docx/.xlsx/.pptx 都能在线预览；缓存生效（第二次秒出）；失败有清晰错误
+- **回退方案**：N/A
+
+### 实施顺序与风险
+- 顺序：24.1 → 24.2 → 24.3 → 24.4 → 24.5
+- 风险 1：阶段十九删过 LibreOffice，本次"恢复"是合理但要明确边界 — `@tech-stack.md` 必须加一条"严禁引入 LibreOffice"反例（用于预览转换），避免阶段二十五又有人想删
+- 风险 2：soffice 多进程并发会冲突 → 文件锁是关键，必须在 24.2 验证
+- 风险 3：转换超时 — 大 .xlsx 可能超过 60s 默认 timeout，要给前端可调超时参数
+- 风险 4：soffice 进程"泄漏" — 转换完成后没正常退出会话 → 用 `--headless` + 临时 user profile (`-env:UserInstallation=file:///tmp/lo_profile_xxx`)，避免污染用户配置目录
+- 风险 5：缓存清理 — 文档被覆盖上传后，缓存 PDF 仍是旧版 → 用 `documents.file_path` 的 mtime 比对，过期自动重转
+- 风险 6：CSV 不太适合 LibreOffice 转 PDF（会一页只放一点内容） → 24.4 加判断：`.csv` 直接走文本预览分支（前端用 `<pre>` 显示前 N 行）
+

@@ -325,22 +325,67 @@
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
         <div v-else-if="shouldShowViewToggle(previewDocumentData) && previewMode === 'original'" class="original-file-preview" style="height: 60vh;">
           <!-- PDF 文件使用 iframe 预览 -->
-          <iframe 
+          <iframe
             v-if="isPDFFile(previewDocumentData)"
-            :src="getFileUrl(previewDocumentData)" 
+            :src="getFileUrl(previewDocumentData)"
             style="width: 100%; height: 100%; border: none; border-radius: 4px;"
             title="PDF预览"
           ></iframe>
-          
+
           <!-- 图片文件预览 -->
           <div v-else-if="isImageFile(previewDocumentData?.file_type)" style="text-align: center; height: 100%; display: flex; align-items: center; justify-content: center;">
-            <img 
-              :src="getFileUrl(previewDocumentData)" 
+            <img
+              :src="getFileUrl(previewDocumentData)"
               style="max-width: 100%; max-height: 100%; object-fit: contain;"
               :alt="previewDocumentData.title"
             />
           </div>
-          
+
+          <!-- 阶段二十四：Office 文档走 LibreOffice 转 PDF + iframe（独立进度通道） -->
+          <div v-else-if="isOfficeFile(previewDocumentData)" style="position: relative; height: 100%;">
+            <!-- 转 PDF 中 -->
+            <div v-if="previewConvertStatus !== 'ready' && previewConvertStatus !== 'error'" style="position: absolute; inset: 0; background: rgba(255,255,255,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; padding: 24px;">
+              <n-spin size="large" />
+              <div style="margin-top: 16px; font-size: 14px;">
+                {{
+                  previewConvertStatus === 'converting'
+                    ? `正在转换为 PDF（LibreOffice · 约 ${previewConvertElapsed}s · 首次可能较慢）`
+                    : '准备转换…'
+                }}
+              </div>
+              <n-text depth="3" style="margin-top: 8px; font-size: 12px;">
+                此进度与文件内容提取进度独立 · 仅影响本次浏览器预览
+              </n-text>
+            </div>
+
+            <!-- 转 PDF 失败 -->
+            <div v-if="previewConvertStatus === 'error'" style="padding: 24px; height: 100%; display: flex; flex-direction: column; justify-content: center;">
+              <n-alert type="error" :show-icon="true" title="PDF 转换失败">
+                <n-text style="font-size: 13px;">{{ previewConvertError || 'LibreOffice 转换出错' }}</n-text>
+              </n-alert>
+              <div style="margin-top: 16px; text-align: center;">
+                <n-dropdown
+                  trigger="click"
+                  :options="downloadMenuOptions"
+                  @select="(key: string) => downloadDocument(previewDocumentData?.document_id, key, previewDocumentData?.title, previewDocumentData?.file_type)"
+                >
+                  <n-button type="primary">
+                    <template #icon><n-icon><DownloadOutline /></n-icon></template>
+                    下载文件
+                  </n-button>
+                </n-dropdown>
+              </div>
+            </div>
+
+            <!-- 转 PDF 成功 -->
+            <iframe
+              v-show="previewConvertStatus === 'ready'"
+              :src="`/api/v1/documents/${previewDocumentData.document_id}/converted-pdf`"
+              style="width: 100%; height: 100%; border: none; border-radius: 4px;"
+              title="Office 文档 PDF 预览"
+            />
+          </div>
+
           <!-- 其他文件类型显示下载信息 -->
           <div v-else class="file-download-info">
             <n-empty description="此文件类型不支持在线预览">
@@ -487,6 +532,45 @@ const previewContent = ref('')
 const previewDocumentData = ref<PreviewData | null>(null)
 const previewMode = ref<'extracted' | 'original'>('extracted')
 
+// 阶段二十四：PDF 预览转换进度状态（与"内容提取"完全独立）
+const previewConvertStatus = ref<'idle' | 'converting' | 'ready' | 'error'>('idle')
+const previewConvertError = ref<string>('')
+const previewConvertElapsed = ref<number>(0)
+let _convertStatusTimer: ReturnType<typeof setInterval> | null = null
+
+const pollPreviewConvertStatus = async (docId: number) => {
+  if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+  _convertStatusTimer = setInterval(async () => {
+    try {
+      const r = await apiService.get(`/documents/${docId}/conversion-status`)
+      const status = r?.status || 'idle'
+      previewConvertStatus.value = status
+      previewConvertElapsed.value = r?.elapsed_sec || 0
+      previewConvertError.value = r?.error_msg || ''
+      if (status === 'ready' || status === 'error') {
+        if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+      }
+    } catch (e) {
+      // 网络/认证错误静默继续
+    }
+  }, 2000)
+}
+
+const stopPreviewConvertPolling = () => {
+  if (_convertStatusTimer) { clearInterval(_convertStatusTimer); _convertStatusTimer = null }
+}
+
+watch([previewMode, previewDocumentData], ([mode, doc]) => {
+  if (mode === 'original' && doc && isOfficeFile(doc)) {
+    previewConvertStatus.value = 'converting'
+    pollPreviewConvertStatus(doc.document_id)
+  } else {
+    stopPreviewConvertPolling()
+    previewConvertStatus.value = 'idle'
+    previewConvertError.value = ''
+  }
+})
+
 // 搜索高亮导航相关（阶段二十·20.5：多词分别导航）
 // termGroups: 按查询顺序 [{ term, count, indexes: 全局 mark 索引[] }]
 const termGroups = ref<Array<{ term: string; count: number; indexes: number[] }>>([])
@@ -617,6 +701,20 @@ const isImageFile = (fileType?: string) => {
 const isPDFFile = (document: any): boolean => {
   if (!document) return false
   return document.file_type?.toLowerCase() === 'pdf'
+}
+
+// 阶段二十四：判断是否走 LibreOffice 转 PDF 预览（与后端 SUPPORTED_OFFICE_TYPES 对齐）
+const OFFICE_TYPES = [
+  'doc','docx','docm',
+  'xls','xlsx','xlsm',
+  'ppt','pptx',
+  'odt','ods','odp',
+  'rtf','epub',
+]
+const isOfficeFile = (document: any): boolean => {
+  if (!document) return false
+  const ft = (document.file_type || '').toLowerCase()
+  return OFFICE_TYPES.includes(ft)
 }
 
 // 判断是否应该显示视图切换按钮

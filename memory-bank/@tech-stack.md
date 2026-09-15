@@ -232,14 +232,26 @@ stop-services.bat
 | .png/.jpg/.jpeg 等图片 | ImageExtractor（多模态 AI 优先） | tesseract OCR |
 | .txt/.md/.json 等纯文本 | TextExtractor（anydoc 不覆盖） | — |
 
-**anydoc 依赖**：`firecrawl-anydoc>=0.2.4`（纯 Rust 单 wheel ~3.6MB，`pip install` 即得，无系统依赖、无需装 LibreOffice）。
-来源：https://github.com/firecrawl/anydoc（MIT）。支持 14 格式族 21 扩展名；PDF 仅文本层提取（扫描件走我们的多模态 AI，不用其付费 hosted OCR）。
+**anydoc 依赖**:`firecrawl-anydoc>=0.2.4`(纯 Rust 单 wheel ~3.6MB,`pip install` 即得,无系统依赖、无需装 LibreOffice)。
+来源:https://github.com/firecrawl/anydoc(MIT)。支持 14 格式族 21 扩展名;PDF 仅文本层提取(扫描件走我们的多模态 AI,不用其付费 hosted OCR)。
 
-**引擎切换**（`backend/app/core/config.py`）：
-- `AI_SERVICE_ENABLED`: 控制扫描件/图片是否走多模态 AI（anydoc 本身不需要 AI）
+**引擎切换**(`backend/app/core/config.py`):
+- `AI_SERVICE_ENABLED`: 控制扫描件/图片是否走多模态 AI(anydoc 本身不需要 AI)
 - `AI_FALLBACK_TO_LOCAL`: AI 失败时是否降级本地
-- `PDF_ENGINE` / `OCR_ENGINE` / `MINERU_ENABLED` / `PADDLEOCR_LANG`: 本地引擎内部切换（保留）
-- ~~`AI_ALL_FORMATS_AI`~~：**阶段十九已移除**（anydoc 已是全格式首选引擎，"全格式 AI 规整"开关无意义）
+- `PDF_ENGINE` / `OCR_ENGINE` / `MINERU_ENABLED` / `PADDLEOCR_LANG`: 本地引擎内部切换(保留)
+- ~~`AI_ALL_FORMATS_AI`~~:**阶段十九已移除**(anydoc 已是全格式首选引擎,"全格式 AI 规整"开关无意义)
+
+**LibreOffice(阶段二十四重新引入 — 仅作"PDF 预览转换器")**:
+- **角色边界**:仅用于"原文件"模式把 Office 格式转成 PDF 供 iframe 预览;**不参与内容提取**(anydoc 完全独立)
+- **可选依赖**:不强制安装;未装时降级为下载提示卡(不影响内容提取/智能搜索/MCP)
+- **soffice 路径探测顺序**(由 `backend/app/services/preview_converter.detect_soffice_path()`):
+  1. `.env` 中的 `LIBREOFFICE_BIN_PATH`(用户自定义)
+  2. 平台标准路径(Windows `C:\Program Files\LibreOffice\program\soffice.exe` / Linux `/usr/bin/soffice` / macOS `/Applications/LibreOffice.app/Contents/MacOS/soffice`)
+  3. `PATH` 中的 `soffice` / `libreoffice`
+- **缓存**:`backend/cache/converted_pdfs/{doc_id}.pdf`(按 doc_id + 源文件 mtime 比对)
+- **进度通道**:`task_status/preview_convert_{doc_id}.json`(独立文件,不与 `extract_{doc_id}_*.json` 序列混淆)
+- **⚠️ 严禁**:阶段十九刚清掉 LibreOffice 是为了"零系统依赖",阶段二十四是局部回滚 —— **禁止把 LibreOffice 重新用于内容提取链路**(会绕过 anydoc 的速度优势);只在 `preview_converter.py` 内使用
+- 安装说明见 `docs/环境安装-LibreOffice.md`(本阶段重写,反映新角色)
 
 **MinerU 集成（阶段四规划）**：
 - MinerU 是 2026 年中文文档提取 SOTA（Apache-2.0 + 商业附加条款）

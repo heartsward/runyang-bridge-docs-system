@@ -155,5 +155,9 @@ alembic/versions/
 # 任务状态文件
 task_status/
 
+# 阶段二十四：PDF 预览转换缓存（LibreOffice 转换产物，按 doc_id 缓存）
+# 运行时数据，重启后丢失不影响功能（首次访问会重转）
+backend/cache/
+
 # 性能分析文件
 profile_*.prof
