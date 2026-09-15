@@ -48,6 +48,13 @@ const router = createRouter({
       component: () => import('../views/SettingsView.vue'),
       meta: { requiresAuth: true }
     },
+    // 阶段二十七：OnlyOffice 在线编辑器
+    {
+      path: '/office-edit/:docId',
+      name: 'office-edit',
+      component: () => import('../views/OfficeEditor.vue'),
+      meta: { requiresAuth: true }
+    },
   ],
 })
 

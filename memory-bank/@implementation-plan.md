@@ -2411,3 +2411,78 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - `已清 cache/converted_pdfs/`、`task_status/preview_convert_*.json`、`cache/soffice_locks/`
 - **保留**：`ALLOWED_EXTENSIONS` 22 种上传白名单（含 PPT 7 种）保留
 - **约束**：项目不引入 LibreOffice / soffice；如未来需 Office 在线预览必须选 SaaS（OnlyOffice / Collabora Online）
+
+---
+
+## 阶段二十七：OnlyOffice 在线编辑集成（2026-09-15）
+
+> 用户决定：在新机器 192.168.66.234:9090 部署的 OnlyOffice Document Server 基础上，
+> 为项目增加 Office 类文档（doc/docx/xls/xlsx/ppt/pptx/odt/ods/odp/csv/epub 等）的"在线编辑"能力。
+> 用户拍板：在线编辑 + 保存回后端（完整闭环）。
+>
+> 已部署资源：
+> - OnlyOffice Document Server: http://192.168.66.234:9090
+> - JWT 秘钥: Rydq@12345
+>
+> 关键决策点：
+> - 26.11 已彻底回退 LibreOffice / soffice；OnlyOffice 是 C++ 独立引擎，与"不用 LibreOffice"约束兼容
+> - OnlyOffice 不是 Python 库，是独立 HTTP 服务，需要回调 URL 网络可达
+> - 后端对外可达地址：待确认（默认假设 http://192.168.66.99:8002）
+> - OnlyOffice 服务器是否允许 HTTP callback：待用户确认 local.json 配置
+
+### Step 27.1 — 后端基础 + 配置（~80 行）
+
+- `backend/app/core/config.py` 加 4 个字段：
+  - `ONLYOFFICE_DS_URL` (str, 默认 `http://192.168.66.234:9090`)
+  - `ONLYOFFICE_JWT_SECRET` (str, 默认 `Rydq@12345`)
+  - `ONLYOFFICE_CALLBACK_BASE_URL` (str, 后端对外地址，回调 URL 的 host 部分)
+  - `ONLYOFFICE_STORAGE_PATH` (str, 临时文件目录, 默认 `backend/cache/onlyoffice/`)
+- `backend/.env.example` 加注释（部署时填真实值）
+- 新建 `backend/app/services/onlyoffice.py`：
+  - JWT 工具：`sign_token(payload) -> str` (HS256)、`verify_token(token) -> dict`
+  - 配置签名：`build_editor_config(doc, user) -> dict`（前端 JS SDK 直接用）
+  - 文件类型映射：扩展名 → OnlyOffice `fileType`（docx/xlsx/pptx/csv/...）
+
+### Step 27.2 — 后端 3 个端点（~170 行）
+
+- `GET /api/v1/onlyoffice/config` — 前端拉配置（DS URL + JWT），用于初始化 JS SDK
+  - 必须登录（`Depends(get_current_active_user)`）
+- `POST /api/v1/documents/{id}/onlyoffice-url` — 签发编辑 URL
+  - 必须登录
+  - 检查文件存在 + 是 OnlyOffice 支持的类型
+  - 内部签 JWT：`{ doc_id, user_id, exp }` 给 OnlyOffice 用
+  - 构造 editor URL 返回 `{ url }`
+- `POST /api/v1/onlyoffice/callback` — OnlyOffice 保存回调（**免登录**，因为是 OnlyOffice 服务端回调）
+  - 验 JWT
+  - 解析 payload：`status=2` 表示用户点保存；`status=4` 文档关闭无修改；`status=6` 强制断开
+  - 从 OnlyOffice 下载新版文件（payload 含 `url` 指向临时文件）→ `shutil.copy` 覆盖原文件
+  - 更新数据库 `file_path` mtime（清掉缓存判定陈旧问题）
+  - 触发重新提取任务（`add_content_extraction_task`）
+  - 失效旧 PDF 缓存（注：26.11 已删 preview_converter，理论上无残留，但保险起见 `cache/converted_pdfs/` 也清一下）
+  - 返回 `{"error": 0}` 给 OnlyOffice
+
+### Step 27.3 — 前端编辑入口（~120 行）
+
+- `DocumentView.vue` 表格列 + 预览弹窗：Office 类文档旁边加"✏ 在线编辑"按钮
+- 新建 `frontend/src/views/OfficeEditor.vue`：
+  - 路由 `/office-edit/:docId`（router 注册）
+  - 页面挂载时调 `GET /onlyoffice/config` 拿配置 + JS API script
+  - 实例化 `DocsAPI.DocEditor('placeholder', config)` 嵌入编辑器
+  - 编辑器配置：`mode='edit'`、`editorConfig.callbackUrl` 指后端 callback
+- 编辑完成关闭页面提示"已保存,内容已更新"
+
+### Step 27.4 — 验证 + 记忆库（~30 行）
+
+- 用真 Office 文件跑完整链路：打开 → 编辑一段 → 保存 → 检查后端文件已被覆盖
+- `docs/部署指南.md` 加 OnlyOffice 章节
+- `memory-bank/@architecture.md` 加 27 摘要条目
+- `memory-bank/@tech-stack.md` 加 OnlyOffice 章节
+- `memory-bank/progress.md` 加 27 详细记录
+
+### 实施顺序与风险
+
+- 顺序：27.1 → 27.2 → 27.3 → 27.4
+- 风险 1：OnlyOffice 服务器要求 callback URL 是 HTTPS — 需要在 OnlyOffice 容器配置 `allowHttp=true` 或后端套 HTTPS 代理；先按 HTTP 跑，遇到 401/403 调试
+- 风险 2：网络可达性 — 后端能访问 192.168.66.234:9090；OnlyOffice 能访问后端 8002 端口；启动前 curl 双向验证
+- 风险 3：JWT 时区/时钟 — OnlyOffice 服务器与后端服务器时钟偏差 > 几秒会 token 校验失败；用 `time.time()` 而非 datetime.now() 避免时区问题
+- 风险 4：编辑中文文件名 — callback URL 含中文文件名要 URL encode；前端 office URL 也要 encode

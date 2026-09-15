@@ -526,9 +526,11 @@ import type { Document, Category, User } from '@/types/api'
 import apiService from '@/services/api'
 import { debounce } from '@/utils'
 import { downloadWikiDocument, hydrateWikiImages } from '@/utils/file-download'
+import { useRouter } from 'vue-router'
 
 const message = useMessage()
 const dialog = useDialog()
+const router = useRouter()
 const searchQuery = ref('')
 const debouncedSearchQuery = ref('')
 
@@ -825,6 +827,15 @@ const columns = [
         }, {
           default: () => '预览'
         }),
+        // 阶段二十七：OnlyOffice 在线编辑按钮（仅 Office 类文档显示）
+        isOnlyOfficeSupported(row.file_path) ? h(NButton, {
+          size: 'small',
+          type: 'info',
+          style: 'color: white; background-color: #f0a020;',
+          onClick: () => openInOnlyOffice(row)
+        }, {
+          default: () => '✏ 在线编辑'
+        }) : null,
         h(NDropdown, {
           trigger: 'click',
           options: downloadMenuOptions,
@@ -1324,6 +1335,44 @@ const downloadMenuOptions = [
   { label: '下载 Markdown（AI 编辑版）', key: 'markdown' },
 ]
 
+// 阶段二十七：OnlyOffice 在线编辑器
+// 从后端 /onlyoffice/config 拉取支持类型（运行时判断，避免本地维护清单）
+const onlyofficeAvailableTypes = ref<string[]>([])
+const onlyofficeConfigLoaded = ref(false)
+
+const loadOnlyOfficeConfig = async () => {
+  if (onlyofficeConfigLoaded.value) return
+  try {
+    const cfg = await apiService.get<{
+      enabled: boolean
+      available_types: string[]
+    }>('/onlyoffice/config')
+    if (cfg.enabled) {
+      onlyofficeAvailableTypes.value = cfg.available_types || []
+    }
+    onlyofficeConfigLoaded.value = true
+  } catch (e) {
+    // 401/404 都代表 OnlyOffice 未启用或不可用，按钮自动隐藏
+    onlyofficeConfigLoaded.value = true
+    onlyofficeAvailableTypes.value = []
+  }
+}
+
+const isOnlyOfficeSupported = (filePath: string | undefined): boolean => {
+  if (!filePath) return false
+  const ext = ('.' + (filePath.split('.').pop() || '')).toLowerCase()
+  return onlyofficeAvailableTypes.value.includes(ext)
+}
+
+const openInOnlyOffice = async (doc: Document) => {
+  if (!isOnlyOfficeSupported(doc.file_path)) {
+    message.warning('该文档类型不支持在线编辑')
+    return
+  }
+  message.info('正在打开 OnlyOffice 编辑器…')
+  router.push({ name: 'office-edit', params: { docId: String(doc.id) } })
+}
+
 const downloadDocument = async (doc: Document, type: 'original' | 'markdown' = 'original') => {
   try {
     // 阶段十六：统一走共享下载工具（三个下载点同一逻辑/同一端点）
@@ -1779,7 +1828,8 @@ onMounted(async () => {
   try {
     await Promise.all([
       loadDocuments(),
-      loadCurrentUser()
+      loadCurrentUser(),
+      loadOnlyOfficeConfig()  // 阶段二十七：拉 OnlyOffice 配置（页面级并行加载）
     ])
   } catch (error) {
     console.error('初始化页面失败:', error)

@@ -36,7 +36,21 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 10485760  # 10MB
     # 阶段二十六：扩展为 16 种（11 → 16）；新增 .docm/.xlsm/.xlsb/.epub/.json
     ALLOWED_EXTENSIONS: str = "doc,docx,docm,xls,xlsx,xlsm,xlsb,ppt,pptx,pptm,pps,ppsx,ppsm,pot,epub,csv,pdf,jpg,jpeg,png,txt,md"
-    
+
+    # 阶段二十七：OnlyOffice Document Server 集成（在线编辑 Office 类文档）
+    # DS 服务地址（容器/服务器已部署），前端 + 后端回调均使用此地址
+    ONLYOFFICE_DS_URL: str = "http://192.168.66.234:9090"
+    # JWT 秘钥（必须与 DS 容器 /etc/onlyoffice/documentserver/local.json 中 services.CoAuthoring.secret 一致）
+    ONLYOFFICE_JWT_SECRET: str = "Rydq@12345"
+    # 后端对外可达地址（DS 回调用；按部署环境改 .env）
+    ONLYOFFICE_CALLBACK_BASE_URL: str = "http://192.168.66.99:8002"
+    # 编辑时下载/保存文件的临时目录（.gitignore）
+    ONLYOFFICE_STORAGE_PATH: str = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', '..', 'cache', 'onlyoffice')
+    )
+    # 是否启用 OnlyOffice 编辑入口（关闭时按钮隐藏，但不影响其他功能）
+    ONLYOFFICE_ENABLED: bool = True
+
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379"
     
