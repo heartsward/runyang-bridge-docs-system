@@ -131,11 +131,22 @@ def detect_soffice_path() -> Optional[str]:
 
 
 def get_version_string(soffice_path: str) -> str:
-    """调 soffice --version 拿版本号（带超时）"""
+    """调 soffice --version 拿版本号（带超时）
+
+    阶段二十六·26.5：Windows 下加 CREATE_NO_WINDOW 静默运行。
+    soffice --version 在某些 Windows 版本上会启动完整实例并弹窗口，
+    用户关窗口会中断探测 → 必须静默，避免"运行脚本/首次预览就弹窗"。
+    """
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    # --headless 关键：Windows 上 soffice --version 不带 --headless 会拉起 GUI 实例弹窗，
+    # 用户关窗口会中断探测。--headless + CREATE_NO_WINDOW 双保险彻底静默。
     try:
         out = subprocess.run(
-            [soffice_path, "--version"],
-            capture_output=True, text=True, timeout=5,
+            [soffice_path, "--headless", "--version"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=creationflags,
         )
         return (out.stdout or out.stderr or "").strip().split("\n")[0]
     except Exception as e:
