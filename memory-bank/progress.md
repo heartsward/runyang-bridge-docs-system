@@ -1230,3 +1230,19 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - 两个视图（DocumentView / SearchView）同步改
 - 验证：本机 soffice 探测 OK（`C:\Program Files\LibreOffice\program\soffice.exe`）；`CREATE_NO_WINDOW` 可用；前端 build 0 error；服务已重启
 - **关键认知**：用户看到的"系统不在本机"实为 Office→PDF 转换在新机器失败（大概率 LibreOffice 未装）；doc 4 本身是 PDF（`file_type='pdf'`），走 iframe 直显、根本不触发 LibreOffice 转换
+
+### 26.6 — soffice --version 版本探测漏加静默参数（用户实测：预览 Office 文档弹 LibreOffice 窗口）
+- **根因**：26.5 只给 `_call_soffice`（实际转换）加了 `CREATE_NO_WINDOW`，漏了第二个 soffice 调用点 `get_version_string()`（bootstrap 时 `soffice --version` 探测版本）。Windows 上不带 `--headless` 会拉起 GUI 实例弹窗；用户关窗口 → 探测中断 → 转换流程被连带打断
+- **修复**：`get_version_string` 加 `--headless` + `CREATE_NO_WINDOW` + 超时 5s→10s（commit 210bb0a）
+- 现在两处 soffice 调用（版本探测 + 实际转换）都彻底静默
+- 验证：真实转换 xlsx 7.1s 成功 733KB（静默）；后端启动后不拉起任何 soffice 进程（启动脚本本身不碰 LibreOffice，弹窗只发生在预览 Office 文档时）
+- **时序教训**：改完代码必须重启后端才生效（soffice 探测是启动时跑的）；用户看到的弹窗多为旧代码在跑
+
+### 26.7 — 文档列表页加 PDF 转换进度列（用户要求，与"内容提取"指示并列）
+- **后端**：`documents.py` 新增 `GET /api/v1/documents/conversion-status/batch?doc_ids=1,2,3` —— 列表页一次拉取本页所有文档转换状态（复用 `get_status`；Office 类返回真实状态，非 Office 返回 `status='n/a'`；限 100 id）。踩坑：误加 `from sqlalchemy import in_`（实际用 ORM 的 `DocumentModel.id.in_()`）导致 ImportError，已删
+- **前端** `DocumentView.vue`：
+  - `pdfConvertStatus` ref（doc_id → {status, elapsed_sec, error_msg}）
+  - 表格"内容提取"列后加"PDF 转换"列：`ready`→"已完成"(绿) / `converting`→"转换中·Xs"(黄) / `error`→"失败"(红) / `idle`→"未转换"(灰) / 非 Office→"—"
+  - `loadDocuments` 后调 `loadPdfConvertStatus`；有文档 converting 时 `startPdfConvertPolling`(3s)，全到终态停止
+  - `onBeforeUnmount` 清理转换/预览两个轮询定时器
+- 验证：批量端点 e2e 结构正确（doc1 png→n/a，doc2-4 pdf→n/a，doc5-6 xlsx→ready）；前端 build 0 error；服务已重启

@@ -72,6 +72,8 @@ runyang-bridge-docs-system/
 > - 上传界面说明文字重写：按 Word/Excel/PowerPoint/其他 + 文本类分组列全 22 种，`accept` 属性同步
 > - **26.5（部署到新机器实测）**：① LibreOffice 子进程加 `subprocess.CREATE_NO_WINDOW`（Windows 静默，不弹 cmd 窗口）；② 前端预览轮询加**超时兜底**——`idle` 持续 15s 未启动报"LibreOffice 未装/重启"、`converting` 超 150s 报"超时"，防止 LibreOffice 未装时 `/converted-pdf` 503 不写状态文件导致前端无限 2s 轮询刷日志；③ converting 期间进度改前端客户端计时真实递增。**长期约束：LibreOffice 是可选依赖，未装时 Office 预览必须优雅降级（报明确错误 + 下载入口），绝不能让前端无限轮询或弹控制台窗口。**
 > - **26.4 踩坑修复（用户实测 PPT 上传被拒）**：`upload.py` 的 `validate_file_content()` 内有**独立于扩展名白名单的魔术字节白名单** `MAGIC_SIGNATURES`，原先只登记 8 种，导致 `.ppt/.pptx/...` 与 `.epub` 虽过了 `ALLOWED_EXTENSIONS` 却在内容校验被"默认拒绝"。已补齐 22 种（OLE2 头：doc/xls/ppt/pot/pps/xlsb；ZIP 头：docx/docm/xlsx/xlsm/pptx/pptm/ppsx/ppsm/epub）。**教训：扩展上传格式必须同时改 `ALLOWED_EXTENSIONS`（扩展名）+ `MAGIC_SIGNATURES`（内容）+ 前端 `accept` 三处**。
+> - **26.6**：`preview_converter.get_version_string()`（bootstrap 探测版本 `soffice --version`）是**第二个 soffice 调用点**，26.5 漏改它 → Windows 上不带 `--headless` 会拉 GUI 实例弹窗，用户关窗口中断探测。已加 `--headless` + `CREATE_NO_WINDOW`。**教训：调 soffice 的所有点都要静默（当前 2 处：`_call_soffice` 转换 + `get_version_string` 探测）**。
+> - **26.7**：文档列表页加"PDF 转换"进度列（与"内容提取"指示并列）。后端新增批量端点 `GET /documents/conversion-status/batch?doc_ids=1,2,3`（一次拉本页全部转换状态，复用 `get_status`；非 Office 返回 `n/a`）；前端 `DocumentView.vue` 表格新增列：已完成(绿)/转换中·Xs(黄)/失败(红)/未转换(灰)/非Office(—)，有文档转换中时 3s 轮询、全到终态停止，`onBeforeUnmount` 清理定时器。
 > - 上传界面去重：删除 `<n-upload>` 内的 `<n-alert>` 格式框体（在上传点击区会误触发选文件，且与右侧文字重复），只保留按钮 + 下方一行 `n-text` 文字
 
 ---

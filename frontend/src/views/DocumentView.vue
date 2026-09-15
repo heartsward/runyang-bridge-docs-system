@@ -533,7 +533,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive, h, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, h, watch } from 'vue'
 import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NSpace,
@@ -766,6 +766,61 @@ const rules = {
 
 const documents = ref<Document[]>([])
 
+// 阶段二十六·26.7：文档列表页 PDF 转换进度（与"内容提取"指示并列）
+// 状态映射：doc_id -> { status, elapsed_sec, error_msg }
+// 取值：'ready'(已完成) / 'converting'(转换中·Xs) / 'error'(失败) / 'idle'(未转换) / 'n/a'(非Office)
+interface PdfConvertItem {
+  status: 'idle' | 'converting' | 'ready' | 'error' | 'n/a'
+  elapsed_sec: number
+  error_msg?: string | null
+}
+const pdfConvertStatus = ref<Record<number, PdfConvertItem>>({})
+let _pdfConvertTimer: ReturnType<typeof setInterval> | null = null
+
+// 拉取本页所有文档的 PDF 转换状态（批量端点，一次请求）
+const loadPdfConvertStatus = async () => {
+  const ids = documents.value.map(d => d.id)
+  if (ids.length === 0) return
+  try {
+    const resp = await apiService.get(`/documents/conversion-status/batch`, {
+      params: { doc_ids: ids.join(',') },
+    })
+    const statuses: Record<number, any> = resp?.statuses || {}
+    const next: Record<number, PdfConvertItem> = {}
+    for (const doc of documents.value) {
+      const s = statuses[doc.id]
+      if (!s) {
+        next[doc.id] = { status: 'idle', elapsed_sec: 0 }
+        continue
+      }
+      next[doc.id] = {
+        status: s.status as PdfConvertItem['status'],
+        elapsed_sec: s.elapsed_sec || 0,
+        error_msg: s.error_msg,
+      }
+    }
+    pdfConvertStatus.value = next
+  } catch (e) {
+    // 静默失败，不打断列表展示
+    console.error('加载 PDF 转换状态失败:', e)
+  }
+}
+
+// 是否有文档处于"转换中"（决定是否继续轮询）
+const hasConvertingDoc = (): boolean =>
+  Object.values(pdfConvertStatus.value).some(s => s.status === 'converting')
+
+// 轮询：有文档在转换时启动，全部到终态后停止（26.5 的超时兜底同样适用）
+const startPdfConvertPolling = () => {
+  if (_pdfConvertTimer) return
+  _pdfConvertTimer = setInterval(async () => {
+    await loadPdfConvertStatus()
+    if (!hasConvertingDoc()) stopPdfConvertPolling()
+  }, 3000)
+}
+const stopPdfConvertPolling = () => {
+  if (_pdfConvertTimer) { clearInterval(_pdfConvertTimer); _pdfConvertTimer = null }
+}
 
 const allTags = computed(() => {
   const tagSet = new Set<string>()
@@ -923,6 +978,33 @@ const columns = [
           type: 'warning',
           size: 'small'
         }, { default: () => '提取中' })
+      }
+    }
+  },
+  {
+    // 阶段二十六·26.7：PDF 转换进度（与"内容提取"指示并列，仅 Office 类文档有意义）
+    title: 'PDF 转换',
+    key: 'pdf_conversion',
+    width: 110,
+    render: (row: Document) => {
+      // 非 Office 类文档（PDF/图片/文本）无需转换
+      if (!isOfficeFile(row)) {
+        return h('span', { style: { fontSize: '12px', color: '#bbb' } }, '—')
+      }
+      const st = pdfConvertStatus.value[row.id]
+      if (!st) {
+        // 状态尚未加载
+        return h('span', { style: { fontSize: '12px', color: '#bbb' } }, '…')
+      }
+      if (st.status === 'ready') {
+        return h(NTag, { type: 'success', size: 'small' }, { default: () => '已完成' })
+      } else if (st.status === 'converting') {
+        return h(NTag, { type: 'warning', size: 'small' }, { default: () => `转换中 · ${st.elapsed_sec}s` })
+      } else if (st.status === 'error') {
+        return h(NTag, { type: 'error', size: 'small', title: st.error_msg || '转换失败' }, { default: () => '失败' })
+      } else {
+        // idle：尚未转换（首次预览时才触发）
+        return h(NTag, { type: 'default', size: 'small' }, { default: () => '未转换' })
       }
     }
   },
@@ -1570,6 +1652,9 @@ const loadDocuments = async () => {
       documents.value = []
     }
     updateStatistics()
+    // 阶段二十六·26.7：刷新 PDF 转换进度；若有文档在转换则启动轮询
+    await loadPdfConvertStatus()
+    if (hasConvertingDoc()) startPdfConvertPolling()
   } catch (error: any) {
     console.error('加载文档失败:', error)
     documents.value = []
@@ -1905,6 +1990,12 @@ onMounted(async () => {
   } catch (error) {
     console.error('初始化页面失败:', error)
   }
+})
+
+// 页面卸载时停止 PDF 转换轮询，避免泄漏
+onBeforeUnmount(() => {
+  stopPdfConvertPolling()
+  stopPreviewConvertPolling()
 })
 
 // 文件类型检测方法

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse, Response
@@ -649,6 +649,53 @@ async def get_converted_pdf(
             "Cache-Control": "public, max-age=3600",  # 缓存 1 小时
         },
     )
+
+
+@router.get("/conversion-status/batch", summary="批量查询 PDF 转换进度（文档列表页用）")
+def get_conversion_status_batch(
+    *,
+    db: Session = Depends(get_db),
+    doc_ids: str = Query(..., description="逗号分隔的文档 ID，如 1,2,3"),
+    current_user: User = Depends(get_current_active_user),
+):
+    """文档列表页一次性拉取本页所有文档的 PDF 转换状态。
+
+    返回 {statuses: {doc_id: {status, elapsed_sec, error_msg, from_cache}}}。
+    - Office 类文档：返回真实转换状态（idle/converting/ready/error）
+    - 非 Office 文档（PDF/图片/文本）：返回 status='n/a'（无需转换）
+    与单文档端点 /{id}/conversion-status 共用 get_status，不重复实现。
+    """
+    from app.services.preview_converter import get_preview_converter, is_supported_office_type
+
+    # 解析 doc_ids
+    ids = [int(x) for x in doc_ids.split(",") if x.strip().isdigit()]
+    if not ids:
+        return {"statuses": {}}
+    ids = ids[:100]  # 限制单次查询数量，避免列表过长拖慢
+
+    # 按 id 批量查文档
+    docs = db.query(DocumentModel).filter(DocumentModel.id.in_(ids)).all()
+    id_map = {d.id: d for d in docs}
+
+    converter = get_preview_converter()
+    result: Dict[int, Dict[str, Any]] = {}
+    for did in ids:
+        doc = id_map.get(did)
+        if not doc:
+            continue  # 文档不存在（可能已删），跳过
+        ext = (os.path.splitext(doc.file_path)[1].lower().lstrip(".") or "") if doc.file_path else ""
+        if not is_supported_office_type(ext):
+            # 非 Office 文档：无需转换
+            result[did] = {"status": "n/a", "elapsed_sec": 0, "error_msg": None, "from_cache": False}
+            continue
+        st = converter.get_status(did)
+        result[did] = {
+            "status": st.get("status", "idle"),
+            "elapsed_sec": st.get("elapsed_sec", 0),
+            "error_msg": st.get("error_msg"),
+            "from_cache": st.get("from_cache", False),
+        }
+    return {"statuses": result}
 
 
 @router.get("/{document_id}/conversion-status", summary="查询 PDF 转换进度")
