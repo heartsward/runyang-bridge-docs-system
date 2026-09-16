@@ -38,35 +38,39 @@
         
         <!-- 第二行：标签筛选 -->
         <div v-if="allTags.length > 0">
-          <n-space align="center" wrap>
+          <!-- 27.9：去掉 slice(0,10) 硬限制——按字母序排列时超过10个会把第10个挤出可视窗
+               看起来像"覆盖"；现全量显示，超高时内部纵向滚动；"清除筛选"放外侧 -->
+          <n-space align="start" wrap>
             <n-text depth="3" style="white-space: nowrap;">按标签筛选:</n-text>
-            <n-space wrap>
-              <n-tag 
-                v-for="tag in allTags.slice(0, 10)" 
-                :key="tag" 
-                size="small" 
-                type="default"
-                :style="{
-                  cursor: 'pointer',
-                  backgroundColor: selectedTags.includes(tag) ? '#e8f4fd' : '',
-                  borderColor: selectedTags.includes(tag) ? '#409eff' : '',
-                  color: selectedTags.includes(tag) ? '#409eff' : '',
-                  fontWeight: selectedTags.includes(tag) ? 'bold' : 'normal',
-                  transition: 'all 0.3s ease'
-                }"
-                @click="toggleTagFilter(tag)"
-              >
-                {{ tag }} ({{ getTagCount(tag) }})
-              </n-tag>
-              <n-button size="tiny" type="error" @click="clearTagFilters" v-if="selectedTags.length > 0">
-                清除筛选 ({{ selectedTags.length }})
-              </n-button>
-            </n-space>
+            <div style="max-height: 96px; overflow-y: auto; flex: 1;">
+              <n-space wrap size="small">
+                <n-tag
+                  v-for="tag in allTags"
+                  :key="tag"
+                  size="small"
+                  type="default"
+                  :style="{
+                    cursor: 'pointer',
+                    backgroundColor: selectedTags.includes(tag) ? '#e8f4fd' : '',
+                    borderColor: selectedTags.includes(tag) ? '#409eff' : '',
+                    color: selectedTags.includes(tag) ? '#409eff' : '',
+                    fontWeight: selectedTags.includes(tag) ? 'bold' : 'normal',
+                    transition: 'all 0.3s ease'
+                  }"
+                  @click="toggleTagFilter(tag)"
+                >
+                  {{ tag }} ({{ getTagCount(tag) }})
+                </n-tag>
+              </n-space>
+            </div>
+            <n-button size="tiny" type="error" @click="clearTagFilters" v-if="selectedTags.length > 0">
+              清除筛选 ({{ selectedTags.length }})
+            </n-button>
           </n-space>
           <!-- 显示当前筛选状态 -->
           <div v-if="selectedTags.length > 0" style="margin-top: 8px;">
             <n-text depth="2" style="font-size: 12px;">
-              当前筛选: {{ selectedTags.join(' + ') }} 
+              当前筛选: {{ selectedTags.join(' + ') }}
               (显示 {{ filteredDocuments.length }} 个文档)
             </n-text>
           </div>

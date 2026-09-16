@@ -1305,3 +1305,10 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **前端**：`DocumentView.vue` 内容提取列宽 120→150，状态标签后加 🔄 重新提取按钮（NTooltip + RefreshOutline，仅管理员可见，提取中禁用防重复入队）；新增 `retryExtraction()` 复用已有 `taskService.retryDocumentExtraction` + `monitorContentExtraction` 轮询
 - **验证**：e2e 临时文档全绿——删除前 md/图/索引齐备，删除后 5 项（md/图/索引/原件/DB）全清；顺带确认 FileManager 路径安全检查会拒绝 uploads 外文件删除；前端 build ✓
 - **坑**：e2e 测试造 Document 必须带 owner_id（NOT NULL）；测试文件必须放 uploads 目录内（FileManager.safe_delete_file 有目录白名单）
+
+### 27.9 — 标签筛选硬限制 slice(0,10) 误像"标签被覆盖"（用户实测）
+- **现象**：文档列表页"按标签筛选"超过10个标签后只显示前10个；后续添加的标签看似"把前面的覆盖了"，实为字母序排第11位之后被截掉
+- **根因**：`DocumentView.vue` L45 `allTags.slice(0, 10)` 硬限制（项目早期拍脑袋定的）
+- **修复**：去掉 slice，全量渲染；外层 `<n-space align="start">` + 内层 `max-height: 96px; overflow-y: auto` 滚动容器处理超高情况；"清除筛选"按钮移出滚动容器避免滚走；v-for 缩进对齐
+- **排查结论**：本项目其他 slice 限制均为合理的展示美化（如表格列每行只显示前3个标签、仪表盘最近5条），不需要动
+- 验证：build ✓
