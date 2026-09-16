@@ -1,11 +1,12 @@
 """
-阶段二十七：OnlyOffice Document Server 集成
+阶段二十七·27.2：OnlyOffice Document Server 集成（只读预览）
 
 职责：
 - JWT 签发/校验（用 ONLYOFFICE_JWT_SECRET，与 DS 容器一致；不复用用户 SECRET_KEY）
-- 文件扩展名 → OnlyOffice fileType / fileTypeKey 映射
-- 构造前端 JS SDK 用的 editor config（含回调 URL、文件下载 URL 等）
-- 处理 OnlyOffice 保存回调（status=2/4/6）— 从 DS 下载新版覆盖原文件 + 触发重新提取
+- 文件扩展名 → OnlyOffice fileType 映射
+- 构造前端 JS SDK 用的预览 config（mode=view，含回调 URL、文件下载 URL 等）
+
+27.2：编辑能力已移除——callback 只作心跳应答，不再从 DS 下载/覆盖文件。
 
 文档：
 - 后端集成: https://api.onlyoffice.com/editors/advancedcontrols.htm
@@ -14,10 +15,8 @@
 import json
 import logging
 import os
-import shutil
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 import jwt
 from app.core.config import settings
@@ -98,34 +97,30 @@ def build_editor_config(
     callback_url: str,    # DS 保存后回调后端的 URL
     user_id: int,
     user_name: str,
-    mode: str = "edit",   # edit / view
+    mode: str = "view",   # view（只读预览，默认）/ edit（编辑，27.2 已弃用）
     lang: str = "zh-CN",
 ) -> dict:
     """构造 OnlyOffice JS SDK 的 config dict（直接传给 DocEditor）
 
+    阶段二十七·27.2：默认 mode='view'（只读预览，不允许编辑）。
+    编辑功能完全回退：用户改主意不想编辑 Office 文件，只想在线预览。
+    callback 端点仍保留（DS 在用户关闭编辑器时仍会发 status=4 心跳）。
     重要：所有 URL 必须填绝对 URL；DS 不接受相对路径。
     """
     doc_key = f"doc_{doc_id}_v{int(datetime.now(timezone.utc).timestamp())}"
 
-    # token: 给前端用（DS 同时会用它验签文件下载请求）
-    token_payload = {
-        "document_id": doc_id,
-        "file_type": file_type,
-            "iat": int(datetime.now(timezone.utc).timestamp()),
-        }
-    config_token = sign_jwt(token_payload, expires_in=600)
-
-    return {
+    is_view_mode = mode == "view"
+    config = {
         "document": {
             "fileType": file_type,
             "key": doc_key,
             "title": file_name,
             "url": file_url,
             "permissions": {
-                "edit": mode == "edit",
+                "edit": not is_view_mode,
                 "download": True,
                 "print": True,
-                "review": True,
+                "review": not is_view_mode,
             },
         },
         "editorConfig": {
@@ -137,16 +132,23 @@ def build_editor_config(
             },
             "callbackUrl": callback_url,
             "customization": {
-                "autosave": True,
-                "comments": True,
-                "review": True,
+                "autosave": False,   # 只读预览不需要自动保存
+                "comments": not is_view_mode,  # 只读预览禁用评论
+                "review": not is_view_mode,
                 "spellcheck": True,
                 "compactHeader": False,
                 "toolbar": True,
+                # viewer 专用缩放：-2 = 适应页宽（宽屏下文档不再缩成中间窄条）
+                "zoom": -2 if is_view_mode else 100,
             },
         },
-        "token": config_token,
     }
+
+    # 27.3：DS 开了 JWT 校验时，token payload 必须是【整个 config 对象】
+    # （官方约定：token = JWT(secret, config)，DS 逐字段比对；
+    #  之前只签 {document_id, file_type} → 报"文档安全令牌的格式不正确"）
+    config["token"] = sign_jwt(dict(config), expires_in=600)
+    return config
 
 
 # ============================================================
@@ -178,48 +180,5 @@ def build_file_download_url(*, doc_id: int) -> str:
 
 
 def build_callback_url() -> str:
-    """DS 保存回调后端的 URL"""
+    """DS 回调后端的 URL（只读模式下仅心跳）"""
     return f"{settings.ONLYOFFICE_CALLBACK_BASE_URL.rstrip('/')}/api/v1/onlyoffice/callback"
-
-
-# ============================================================
-# 回调处理（状态码 + 文件下载）
-# ============================================================
-# OnlyOffice callback status codes
-STATUS_EDITING = 1          # 文档正在编辑
-STATUS_SAVE = 2              # 文档保存（用户点保存）
-STATUS_SAVE_NO_CHANGES = 3  # 文档保存（无修改，仍通知）
-STATUS_CLOSE_NO_CHANGES = 4 # 文档关闭，无修改
-STATUS_ERROR = 5            # 错误
-STATUS_FORCE_CLOSE = 6      # 强制关闭（无保存）
-
-
-def download_edited_file_from_ds(download_url: str, target_path: str) -> bool:
-    """从 OnlyOffice 临时文件 URL 下载新版文件，覆盖 target_path
-
-    DS 的 URL 在 callback payload 中（url 字段），带 token。
-    失败返回 False，不抛异常（callback 必须返回 error=0 给 DS，否则 DS 会重试）。
-    """
-    import requests
-    try:
-        # DS 回调的 url 走 DS_JWT 或独立 token，按 OnlyOffice 默认约定
-        # payload 里的 url 通常带 token（DS 给的直链），不需要额外 Authorization
-        # 但保险起见加个短超时和异常捕获
-        resp = requests.get(download_url, timeout=60, stream=True)
-        if resp.status_code != 200:
-            logger.error(f"[OnlyOffice] 下载失败 status={resp.status_code} url={download_url[:80]}")
-            return False
-
-        # 原子写入：临时文件 + rename，避免 DS 写一半导致后端文件损坏
-        tmp_path = target_path + ".tmp." + str(os.getpid())
-        with open(tmp_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=64 * 1024):
-                if chunk:
-                    f.write(chunk)
-        # 确保磁盘写完
-        os.replace(tmp_path, target_path)
-        logger.info(f"[OnlyOffice] 已下载新版文件 → {target_path}")
-        return True
-    except Exception as e:
-        logger.exception(f"[OnlyOffice] 下载异常: {e}")
-        return False

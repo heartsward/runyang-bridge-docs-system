@@ -1257,3 +1257,28 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - 保留：ALLOWED_EXTENSIONS 22 种上传白名单（含 PPT 7 种）保留——Office 类可上传但预览时走"提取内容"或下载
 - 保留：@architecture.md 阶段二十四+26.5/26.6/26.7 历史条目（过程记录），新增 26.11 条目说明当前状态
 - 长期约束：项目不引入 LibreOffice / soffice；如未来需 Office 在线预览必须选 SaaS 路线
+
+### 27.2 — OnlyOffice 编辑能力整体回退为"只读在线预览"（用户决策）
+- 后端：`build_editor_config` 默认 mode='view'（edit/review/comments/autosave 全 False）；端点 `/onlyoffice/documents/{id}/url` → `/preview-url`（函数 `get_onlyoffice_preview_url`）；callback 改为只读心跳（只验 token + 回 error=0，**不再下载/覆盖文件**）；services 删 `download_edited_file_from_ds` + `STATUS_*` 常量
+- 前端：列表表格删 ✏在线编辑按钮；预览弹窗底部删 [编辑]+[✏在线编辑]（普通模式仅 [关闭][下载]）；👁在线预览放在预览工具栏 ✏编辑（MD 编辑入口）旁边（仅 Office 类显示）；`OfficeEditor.vue` 改"在线预览"语义 + 删 saveStatus；`openInOnlyOffice` → `openOnlyOfficePreview`
+- ⚠️ 踩坑（重要）：同一文件连续多个并行 Edit 会互相覆盖（竞态）——对同一文件的编辑必须**串行**执行并逐一 grep 验证，本次只有第一个编辑保留，其余 2 个需重做
+- 验证：后端 106 路由展平含 4 条 onlyoffice；callback status=2 模拟只回 error=0 不碰文件；前端 vite build ✓；后端重启后旧 /url 404、新 /preview-url 401
+
+### 27.3 — 修复 DS 报"文档安全令牌的格式不正确"（JWT token payload 结构错误，27.1 引入）
+- **根因**：DS 开 JWT 校验时，OnlyOffice 官方约定 `config.token` 的 payload **必须是整个 config 对象**（document+editorConfig），DS 逐字段比对；27.1 签的是 `{document_id, file_type}` 自定义 payload → DS 拒绝。27.1 只验证了"签发 URL 200"，未真实加载文档，所以没暴露
+- **修复**：`build_editor_config` 先构造完整 config（不含 token），再 `config["token"] = sign_jwt(dict(config), expires_in=600)`
+- **教训**：OnlyOffice 集成不能自创 JWT payload 结构；校验点=用户真实打开文档
+- 验证：token payload 顶层 keys = [document, editorConfig, iat, exp] ✓；后端已重启
+- **待用户确认**：后端 `ONLYOFFICE_JWT_SECRET`（.env / config.py）必须与 DS local.json `jwt_secret` 完全一致，否则仍报 token 错误
+
+### 27.4 — 在线预览窗口"特别窄"修复（用户实测反馈）
+- **后端** `build_editor_config`：`customization.zoom = -2`（OnlyOffice viewer 官方参数：-2=适应页宽，-1=适应整页；宽屏下文档不再缩成中间窄条）
+- **前端** `OfficeEditor.vue`：① DocEditor config 显式传 `width:'100%', height:'100%'`（部分 DS 版本会量容器尺寸后写死像素，显式传百分比更稳）；② CSS 加 `.editor-frame-wrapper :deep(div)` 强制 SDK 包装层撑满；③ 高度 `calc(100vh - 220px)` → `calc(100vh - 190px)`（多给 30px 可视高度）
+- 顺带补修 27.2 并行编辑被覆盖遗漏：错误文案 "无法加载 OnlyOffice 编辑器" → "无法加载 OnlyOffice 预览"
+- 验证：后端 zoom=-2 ✓；vite 热更新后 JS/CSS 模块均含新值 ✓；build ✓
+
+### 27.5 — 预览窗口"特别窄"真根因修复（27.4 的 zoom 修复不够，编辑器本身只有 ~150px 高）
+- **根因（读 DS api.js 源码确认）**：`DocsAPI.DocEditor` 用 `target.parentNode.replaceChild(iframe, target)` **把占位 div 整个替换掉**，不是把 iframe 插进占位 div。因此 ① 挂在占位 div（`.editor-frame-wrapper`）上的 `calc(100vh-190px)` 高度随 div 消失而失效；② iframe 的 `width/height="100%"` 是 **HTML 属性**，其父级（n-spin 内容区，无显式高度）高度为 auto → 百分比高度解析失败，按 HTML 规范回落到 iframe 默认 **150px** → 编辑器只剩一小条
+- **修复**：新增外层 `.office-editor-host`（不被替换，带 calc 显式高度）包住占位 div；iframe CSS 强制 100% 撑满 host；`destroyEditor` 改用 SDK 自带 `editor.destroyEditor()`（旧逻辑按 id 找占位 div，替换后找不到）
+- **方法教训**：此类第三方 SDK DOM 行为不要猜——直接 curl DS 的 `api.js` 读源码（本项目 DS 9.4.0，createIframe 函数实锤 replaceChild + iframe 属性式宽高）
+- 验证：vite build ✓；scoped CSS 编译为 `.office-editor-host[data-v-x] iframe`（iframe 无 data-v 属预期）✓

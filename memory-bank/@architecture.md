@@ -85,6 +85,12 @@ runyang-bridge-docs-system/
 > - **保留**：`ALLOWED_EXTENSIONS` 22 种上传白名单（含 PPT 7 种）保留——用户可上传 Office，列表仍显示"已上传"，预览时 Office/文本类走"提取内容"模式，无"原文件"切换
 > - **保留**：上面阶段二十四 + 26.5/26.6/26.7 历史条目全部保留（作为过程记录，便于以后回查为什么做过这些改动；但当前代码已无对应实现，按 26.11 状态为准）
 > - **长期约束**：项目不引入 LibreOffice / soffice / 任何本地 Office 转 PDF 方案；Office 类预览一律走"提取内容"（用户查看 markdown）或下载原文件
+>
+> **2026-09-15 变更（阶段二十七·27.1/27.2/27.3 — OnlyOffice 只读在线预览）**：Office 类文档新增 OnlyOffice Document Server（SaaS 路线，部署在 `http://192.168.66.234:9090`，与 26.11 约束兼容）**只读预览**。
+> - 新增 `backend/app/services/onlyoffice.py`（JWT 签发/校验用独立 `ONLYOFFICE_JWT_SECRET`；扩展名→fileType 映射；`build_editor_config` 构造 SDK config）+ `backend/app/api/endpoints/onlyoffice.py`（4 端点：`GET /onlyoffice/config`、`POST /onlyoffice/documents/{id}/preview-url`、`GET /onlyoffice/file/{id}`、`POST /onlyoffice/callback`）
+> - **27.2**：编辑能力整体移除（用户决策：不需要编辑 Office，只在线预览）——`build_editor_config` 默认 `mode='view'` 且 `permissions.edit/review/comments/autosave` 全 False；端点由 `/url` 改名 `/preview-url`；callback 改为**只读心跳**（只验 token + 记日志 + 回 `error=0`，**永不下载/覆盖文件**，保留仅为 DS 协议应答兼容）；`download_edited_file_from_ds` 及 `STATUS_*` 常量已删。前端：列表表格 ✏在线编辑按钮删除；预览弹窗底部删 [编辑]+[✏在线编辑]（普通模式仅 [关闭][下载]）；预览工具栏 ✏编辑（MD 编辑入口）旁边新增 👁在线预览（`EyeOutline` 图标，仅 Office 类显示）；`OfficeEditor.vue` 页面标题/文案全部改"在线预览/只读预览"，删 `saveStatus` 死代码；路由 `name: 'office-edit'` 保留（内部标识，避免断链）
+> - **27.3**：修复 DS 报"文档安全令牌的格式不正确"——DS 开 JWT 校验时 `config.token` 的 payload **必须是整个 config 对象**（官方约定：DS 逐字段比对），之前只签 `{document_id, file_type}`。现 `build_editor_config` 先构造完整 config 再 `sign_jwt(dict(config))`。注意：后端 `ONLYOFFICE_JWT_SECRET` 必须与 DS 的 local.json `jwt_secret` **完全一致**
+> - 配置（`config.py`）：`ONLYOFFICE_DS_URL` / `ONLYOFFICE_JWT_SECRET` / `ONLYOFFICE_CALLBACK_BASE_URL`（必须 DS 反向可达）/ `ONLYOFFICE_ENABLED`
 
 ---
 

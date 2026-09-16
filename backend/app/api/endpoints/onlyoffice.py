@@ -1,21 +1,18 @@
 """
-阶段二十七：OnlyOffice Document Server 集成端点
+阶段二十七·27.2：OnlyOffice Document Server 集成端点（只读预览）
 
 4 个端点：
-- GET  /api/v1/onlyoffice/config                  前端拉配置（DS URL）
-- POST /api/v1/onlyoffice/documents/{id}/url      签发编辑 URL（登录态）
-- POST /api/v1/onlyoffice/callback                DS 保存回调（免登录，DS 服务器调用）
-- GET  /api/v1/onlyoffice/file/{id}               DS 拉文件 URL（免登录，DS 调用）
+- GET  /api/v1/onlyoffice/config                          前端拉配置（DS URL）
+- POST /api/v1/onlyoffice/documents/{id}/preview-url      签发只读预览 URL（登录态）
+- POST /api/v1/onlyoffice/callback                        DS 回调（免登录，心跳应答）
+- GET  /api/v1/onlyoffice/file/{id}                       DS 拉文件 URL（免登录，DS 调用）
 
 调用链路：
-1. 用户在前端点"在线编辑"
-2. 前端调 GET /config 拿 DS URL，再调 POST .../url 拿编辑入口 URL
-3. 前端 window.open(url) → 跳到 OnlyOffice 编辑器
+1. 用户在前端点"在线预览"
+2. 前端调 GET /config 拿 DS URL，再调 POST .../preview-url 拿预览入口 URL
+3. 前端 window.open(url) → 跳到 OnlyOffice 预览器（mode=view，无编辑权限）
 4. OnlyOffice 通过 GET /file/{id} 拉原文件
-6. 用户编辑完，OnlyOffice 通过 POST /callback 通知保存
-7. callback 端点从 DS URL 下载新版文件，覆盖 uploads/{file}
-8. 触发重新提取（内容提取 + AI 描述）
-9. 返回 {"error": 0} 给 DS
+5. DS 周期性 POST /callback 心跳（只读模式无保存事件，一律回 error=0）
 """
 import logging
 import os
@@ -27,20 +24,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.deps import get_db, get_current_active_user, get_optional_user
+from app.core.deps import get_db, get_current_active_user
 from app.crud import document as crud_document
 from app.models.user import User
 from app.services.onlyoffice import (
-    STATUS_SAVE,
-    STATUS_CLOSE_NO_CHANGES,
     build_callback_url,
     build_editor_config,
     build_editor_page_url,
     build_file_download_url,
-    download_edited_file_from_ds,
     get_onlyoffice_file_type,
     is_onlyoffice_supported,
-    sign_jwt,
     verify_jwt,
 )
 
@@ -76,19 +69,19 @@ def get_onlyoffice_config(current_user: User = Depends(get_current_active_user))
 
 
 # ============================================================
-# 端点 2：签发编辑 URL
+# 端点 2：签发只读预览 URL（27.2：编辑能力已移除）
 # ============================================================
 @router.post(
-    "/onlyoffice/documents/{document_id}/url",
-    summary="获取 OnlyOffice 编辑器入口 URL",
+    "/onlyoffice/documents/{document_id}/preview-url",
+    summary="获取 OnlyOffice 只读预览入口 URL",
 )
-def get_onlyoffice_edit_url(
+def get_onlyoffice_preview_url(
     *,
     db: Session = Depends(get_db),
     document_id: int,
     current_user: User = Depends(get_current_active_user),
 ):
-    """为已登录用户签发 OnlyOffice 编辑器入口 URL
+    """为已登录用户签发 OnlyOffice 只读预览入口 URL
 
     返回的 URL 已经含 JWT + base64 编码的 config，前端直接 window.open 即可。
     """
@@ -105,7 +98,7 @@ def get_onlyoffice_edit_url(
     if not is_onlyoffice_supported(document.file_path):
         raise HTTPException(
             status_code=400,
-            detail=f"文档类型 {os.path.splitext(document.file_path)[1]} 不支持在线编辑",
+            detail=f"文档类型 {os.path.splitext(document.file_path)[1]} 不支持在线预览",
         )
 
     file_type = get_onlyoffice_file_type(document.file_path)
@@ -119,13 +112,13 @@ def get_onlyoffice_edit_url(
         callback_url=build_callback_url(),
         user_id=current_user.id,
         user_name=current_user.username,
-        mode="edit",
+        mode="view",  # 27.2：只读预览，禁用编辑
     )
 
     url = build_editor_page_url(config)
 
     logger.info(
-        f"[OnlyOffice] 签发编辑 URL doc={document_id} user={current_user.id} type={file_type}"
+        f"[OnlyOffice] 签发只读预览 URL doc={document_id} user={current_user.id} type={file_type}"
     )
 
     # 同时返回 config dict（前端 SDK 直接用，不必再 base64 解码）
@@ -185,26 +178,25 @@ def onlyoffice_download_file(
 
 
 # ============================================================
-# 端点 4：DS 保存回调（免登录）
+# 端点 4：DS 回调（免登录，只读模式下仅作心跳应答）
 # ============================================================
-@router.post("/onlyoffice/callback", summary="OnlyOffice 保存回调")
-async def onlyoffice_callback(request: Request, db: Session = Depends(get_db)):
-    """OnlyOffice 在文档保存/关闭时回调此端点
+@router.post("/onlyoffice/callback", summary="OnlyOffice 回调（只读心跳）")
+async def onlyoffice_callback(request: Request):
+    """OnlyOffice 在文档打开/关闭/心跳时回调此端点
 
     Payload 格式：
     {
         "key": "...",
-        "status": 2,           # 2=保存 4=关闭无修改 6=强制断开
-        "url": "...",          # DS 上临时文件 URL（status=2/6 时）
+        "status": 4,           # 1=编辑中心跳 2=保存 4=关闭无修改 6=强制断开
+        "url": "...",
         "token": "...",
         "users": [...],
         "actions": [...]
     }
 
-    - 必须免登录：DS 没有用户 token，用自己的 JWT 校验
-    - status=2 时需要下载新版文件并覆盖原文件
-    - status=4 时直接返回 error=0
-    - status=6 时同样下载 + 覆盖（强制断开 = 用户最后编辑过的版本）
+    27.2：系统已改为只读预览（mode=view），DS 不会产生保存事件。
+    本端点只做 token 校验 + 记日志 + 回 {"error": 0}，
+    **不再下载/覆盖任何文件**，保留它是为了 DS 协议兼容（必须有应答）。
     """
     try:
         body = await request.json()
@@ -212,7 +204,7 @@ async def onlyoffice_callback(request: Request, db: Session = Depends(get_db)):
         logger.warning("[OnlyOffice] callback: 无法解析 JSON")
         return JSONResponse({"error": 1, "message": "invalid JSON"})
 
-    # 1) 校验 token（DS 在 payload.token 里带了 JWT）
+    # 校验 token（DS 在 payload.token 里带了 JWT）
     token = body.get("token", "")
     if not token:
         return JSONResponse({"error": 1, "message": "missing token"})
@@ -224,56 +216,8 @@ async def onlyoffice_callback(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": 1, "message": "invalid token"})
 
     status = body.get("status")
-    download_url = body.get("url", "")
     doc_id = payload.get("document_id")
-    logger.info(f"[OnlyOffice] callback doc={doc_id} status={status}")
+    logger.info(f"[OnlyOffice] callback（只读心跳）doc={doc_id} status={status}")
 
-    if status == STATUS_CLOSE_NO_CHANGES:
-        # 文档关闭无修改，不下载
-        return JSONResponse({"error": 0})
-
-    if status not in (STATUS_SAVE, 2, 6):
-        # 状态 1=正在编辑（DS 周期性发，不算回调）
-        # 状态 5=错误
-        # 其它未知状态 → 也返回 error=0（DS 不会再重试）
-        return JSONResponse({"error": 0})
-
-    # 2) 查文档
-    document = crud_document.get(db=db, id=doc_id)
-    if not document or not document.file_path:
-        logger.warning(f"[OnlyOffice] callback 文档 {doc_id} 不存在")
-        return JSONResponse({"error": 1, "message": "document not found"})
-
-    target_path = document.file_path
-    if not os.path.exists(target_path):
-        logger.warning(f"[OnlyOffice] callback 文档 {doc_id} 路径无效: {target_path}")
-        return JSONResponse({"error": 1, "message": "file path invalid"})
-
-    # 3) 下载新版文件 + 覆盖原文件
-    if not download_url:
-        return JSONResponse({"error": 1, "message": "no download url"})
-
-    ok = download_edited_file_from_ds(download_url, target_path)
-    if not ok:
-        return JSONResponse({"error": 1, "message": "download failed"})
-
-    # 4) 触发重新提取（异步，不阻塞 DS 回调）
-    try:
-        from app.services.background_tasks import get_task_manager
-        task_manager = get_task_manager()
-        # 先标记为"未中中"
-        document.content_extracted = None
-        document.content_extraction_error = None
-        db.commit()
-        db.refresh(document)
-
-        task_manager.add_content_extraction_task(
-            document_id=document.id,
-            file_path=document.file_path,
-            title=document.title,
-        )
-        logger.info(f"[OnlyOffice] 触发文档 {doc_id} 重新提取")
-    except Exception as e:
-        logger.exception(f"[OnlyOffice] 触发重新提取失败: {e}")
-
+    # 只读模式：无论何种状态都不覆盖文件，直接应答成功
     return JSONResponse({"error": 0})

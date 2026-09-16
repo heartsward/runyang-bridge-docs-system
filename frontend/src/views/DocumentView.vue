@@ -211,6 +211,18 @@
             {{ previewEditMode ? '退出编辑' : '编辑' }}
           </n-button>
 
+          <!-- 27.2：OnlyOffice 在线预览（仅 Office 类文档显示，只读） -->
+          <n-button
+            v-if="isOnlyOfficeSupported(currentDocument?.file_path)"
+            size="small"
+            type="warning"
+            style="color: white; background-color: #f0a020;"
+            @click="openOnlyOfficePreview(currentDocument!)"
+          >
+            <template #icon><n-icon><EyeOutline /></n-icon></template>
+            在线预览
+          </n-button>
+
           <!-- 搜索高亮信息（仅在提取内容模式下显示） -->
           <n-space v-if="previewMode === 'extracted' && searchKeyword && highlightedCount > 0" size="small">
             <n-tag type="warning" size="small">
@@ -315,22 +327,6 @@
         </template>
         <template v-else>
           <n-button @click="showPreviewModal = false">关闭</n-button>
-          <!-- 阶段二十七：编辑 + 在线编辑（仅 Office 类文档显示） -->
-          <n-button
-            v-if="currentUser?.is_superuser"
-            type="info"
-            @click="editDocument(currentDocument!)"
-          >
-            编辑
-          </n-button>
-          <n-button
-            v-if="isOnlyOfficeSupported(currentDocument?.file_path)"
-            type="warning"
-            style="color: white; background-color: #f0a020;"
-            @click="openInOnlyOffice(currentDocument!)"
-          >
-            ✏ 在线编辑
-          </n-button>
           <n-dropdown
             v-if="currentDocument"
             trigger="click"
@@ -534,7 +530,7 @@ import {
   useMessage,
   useDialog
 } from 'naive-ui'
-import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline, PencilOutline } from '@vicons/ionicons5'
+import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline, PencilOutline, EyeOutline } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { documentService, uploadService, authService, taskService } from '@/services'
 import { wikiService } from '@/services/wiki'
@@ -843,15 +839,7 @@ const columns = [
         }, {
           default: () => '预览'
         }),
-        // 阶段二十七：OnlyOffice 在线编辑按钮（仅 Office 类文档显示）
-        isOnlyOfficeSupported(row.file_path) ? h(NButton, {
-          size: 'small',
-          type: 'info',
-          style: 'color: white; background-color: #f0a020;',
-          onClick: () => openInOnlyOffice(row)
-        }, {
-          default: () => '✏ 在线编辑'
-        }) : null,
+        // 阶段二十七·27.2：列表表格不再显示在线编辑/预览按钮（移入预览弹窗）
         h(NDropdown, {
           trigger: 'click',
           options: downloadMenuOptions,
@@ -1351,7 +1339,7 @@ const downloadMenuOptions = [
   { label: '下载 Markdown（AI 编辑版）', key: 'markdown' },
 ]
 
-// 阶段二十七：OnlyOffice 在线编辑器
+// 阶段二十七·27.2：OnlyOffice 在线预览（只读）
 // 从后端 /onlyoffice/config 拉取支持类型（运行时判断，避免本地维护清单）
 const onlyofficeAvailableTypes = ref<string[]>([])
 const onlyofficeConfigLoaded = ref(false)
@@ -1380,12 +1368,12 @@ const isOnlyOfficeSupported = (filePath: string | undefined): boolean => {
   return onlyofficeAvailableTypes.value.includes(ext)
 }
 
-const openInOnlyOffice = async (doc: Document) => {
+// 阶段二十七·27.2：OnlyOffice 在线预览（只读，不再支持编辑）
+const openOnlyOfficePreview = async (doc: Document) => {
   if (!isOnlyOfficeSupported(doc.file_path)) {
-    message.warning('该文档类型不支持在线编辑')
+    message.warning('该文档类型不支持在线预览')
     return
   }
-  message.info('正在打开 OnlyOffice 编辑器…')
   router.push({ name: 'office-edit', params: { docId: String(doc.id) } })
 }
 
