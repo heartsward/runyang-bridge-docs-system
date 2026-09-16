@@ -1282,3 +1282,26 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **修复**：新增外层 `.office-editor-host`（不被替换，带 calc 显式高度）包住占位 div；iframe CSS 强制 100% 撑满 host；`destroyEditor` 改用 SDK 自带 `editor.destroyEditor()`（旧逻辑按 id 找占位 div，替换后找不到）
 - **方法教训**：此类第三方 SDK DOM 行为不要猜——直接 curl DS 的 `api.js` 读源码（本项目 DS 9.4.0，createIframe 函数实锤 replaceChild + iframe 属性式宽高）
 - 验证：vite build ✓；scoped CSS 编译为 `.office-editor-host[data-v-x] iframe`（iframe 无 data-v 属预期）✓
+
+### 27.6 — 换新机器部署后预览报"文件内容与文件扩展名不匹配"（跨机取错文件，隐蔽坑）
+- **现象**：新机器部署后点在线预览，编辑器 UI 正常加载但开文档报错；新机器后端日志**没有任何 /onlyoffice/file 请求**
+- **根因**：`config.py` 的 `ONLYOFFICE_CALLBACK_BASE_URL` 默认值写死旧机器 IP（192.168.66.99:8002），新机器 .env 未覆盖 → DS 去**旧机器**下载；旧机器后端恰好还开着且 JWT 密钥相同（同一份代码）→ 验签通过，返回旧库同 id 的另一份文件（doc 6 在旧库是"我的pt账号.xlsx"，新库是 Joye pptx）→ DS 报内容/扩展名不匹配
+- **诊断路径**：① 新机器日志无 file 请求 = DS 没来 → ② 旧机器日志有 file/6 200 = DS 去了旧机器 → ③ 两库 doc 6 文件不同 = 实锤
+- **修复**：新机器 `backend/.env` 加 `ONLYOFFICE_CALLBACK_BASE_URL=http://<新IP>:8002` 并重启后端
+- **防再踩**：config.py 该配置项加醒目注释（commit 9c125e5）
+- **规律**：OnlyOffice 三地址各有角色——DS_URL（浏览器访问 DS）、CALLBACK_BASE_URL（DS 反向访问后端，**必须本机 IP**）、JWT_SECRET（两台保持一致）；迁移部署时 CALLBACK_BASE_URL 是必改项
+
+### 27.7 — 新机器后端起不来：.env 带 BOM 导致 Settings 校验崩（extra_forbidden）
+- **现象**：新机器（C:/rywd/...）启动报 `AI_SERVICE_ENABLED Extra inputs are not permitted`，注意报错字段名前带 `﻿`（BOM）
+- **根因**：.env 被 Windows 记事本存成 UTF-8 BOM → pydantic 把首键读成 `\ufeffAI_SERVICE_ENABLED`，匹配不上已定义的 `AI_SERVICE_ENABLED` 字段 → BaseSettings 默认 extra=forbid 直接崩（整个 API 路由加载失败）
+- **修复**（config.py，commit cb8b426）：`env_file_encoding="utf-8-sig"`（剥 BOM）+ `extra="ignore"`（容忍旧版残留字段如 AI_ALL_FORMATS_AI）
+- **注意**：`AI_SERVICE_ENABLED` 字段本身还在代码里（阶段十九移除的是 `AI_ALL_FORMATS_AI`），所以纯 BOM 问题
+- 验证：BOM 测试 .env 下 Settings() 正常，字段解析 True ✓
+- **部署经验**：Windows 上编辑 .env 用 VS Code（右下角看编码），不要用记事本；或统一 utf-8-sig 后随便什么编辑器都行
+
+### 27.8 — 删除级联清理 wiki 三件套 + 列表"重新提取"按钮（用户要求）
+- **后端**：`services/wiki/index.py` 新增 `WikiIndex.remove_doc(doc_id)` — 一个事务删 8 张表（docs_fts/docs_fts_zh/doc_meta/doc_tags/doc_links 双向/doc_text/wiki_images/images_fts；FTS5 的 doc_id 是 UNINDEXED 存储列可按值 DELETE）
+- **后端**：`crud/document.py delete_with_file` 在 DB+原件删除成功后级联清 `wiki/{id}.md` + `wiki/images/{id}/` + `remove_doc`（best-effort，失败只记日志不回滚；result 加 wiki_cleaned/wiki_index_removed）
+- **前端**：`DocumentView.vue` 内容提取列宽 120→150，状态标签后加 🔄 重新提取按钮（NTooltip + RefreshOutline，仅管理员可见，提取中禁用防重复入队）；新增 `retryExtraction()` 复用已有 `taskService.retryDocumentExtraction` + `monitorContentExtraction` 轮询
+- **验证**：e2e 临时文档全绿——删除前 md/图/索引齐备，删除后 5 项（md/图/索引/原件/DB）全清；顺带确认 FileManager 路径安全检查会拒绝 uploads 外文件删除；前端 build ✓
+- **坑**：e2e 测试造 Document 必须带 owner_id（NOT NULL）；测试文件必须放 uploads 目录内（FileManager.safe_delete_file 有目录白名单）

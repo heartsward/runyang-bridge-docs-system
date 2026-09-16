@@ -527,10 +527,11 @@ import {
   NRadioButton,
   NImage,
   NRadio,
+  NTooltip,
   useMessage,
   useDialog
 } from 'naive-ui'
-import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline, PencilOutline, EyeOutline } from '@vicons/ionicons5'
+import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline, PencilOutline, EyeOutline, RefreshOutline } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { documentService, uploadService, authService, taskService } from '@/services'
 import { wikiService } from '@/services/wiki'
@@ -799,24 +800,31 @@ const columns = [
   {
     title: '内容提取',
     key: 'content_extraction',
-    width: 120,
+    width: 150,
     render: (row: Document) => {
+      let tag
       if (row.content_extracted === true) {
-        return h(NTag, { 
-          type: 'success',
-          size: 'small'
-        }, { default: () => '已完成' })
+        tag = h(NTag, { type: 'success', size: 'small' }, { default: () => '已完成' })
       } else if (row.content_extracted === false) {
-        return h(NTag, { 
-          type: 'error',
-          size: 'small'
-        }, { default: () => '失败' })
+        tag = h(NTag, { type: 'error', size: 'small' }, { default: () => '失败' })
       } else {
-        return h(NTag, { 
-          type: 'warning',
-          size: 'small'
-        }, { default: () => '提取中' })
+        tag = h(NTag, { type: 'warning', size: 'small' }, { default: () => '提取中' })
       }
+      // 27.8：状态后加"重新提取"按钮（仅管理员；提取中禁用防止重复入队）
+      // 场景：上传时提取失败/中断后手动补救，走已有的 retry-extraction 端点
+      const retryBtn = currentUser.value?.is_superuser
+        ? h(NTooltip, { trigger: 'hover' }, {
+            trigger: () => h(NButton, {
+              size: 'tiny',
+              quaternary: true,
+              circle: true,
+              disabled: row.content_extracted === null,
+              onClick: () => retryExtraction(row)
+            }, { icon: () => h(NIcon, null, { default: () => h(RefreshOutline) }) }),
+            default: () => '重新提取文档内容'
+          })
+        : null
+      return h(NSpace, { size: 4, align: 'center' }, { default: () => [tag, retryBtn] })
     }
   },
   {
@@ -1040,6 +1048,21 @@ const uploadDocument = async () => {
     message.error(errorMessage)
   } finally {
     uploading.value = false
+  }
+}
+
+// 27.8：手动重新提取（列表"内容提取"列按钮触发）
+const retryExtraction = async (doc: Document) => {
+  try {
+    await taskService.retryDocumentExtraction(doc.id)
+    message.info(`已加入重新提取队列：${doc.title}`)
+    // 立即把行状态置为"提取中"，然后复用现有轮询盯结果
+    const idx = documents.value.findIndex(d => d.id === doc.id)
+    if (idx !== -1) documents.value[idx].content_extracted = null
+    monitorContentExtraction(doc.id)
+  } catch (error: any) {
+    console.error('重新提取失败:', error)
+    message.error('重新提取失败' + (error?.response?.data?.detail ? `：${error.response.data.detail}` : ''))
   }
 }
 

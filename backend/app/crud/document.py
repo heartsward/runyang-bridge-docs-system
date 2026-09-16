@@ -177,7 +177,29 @@ class CRUDDocument:
             # 4. 删除数据库记录
             db.delete(document)
             db.commit()
-            
+
+            # 5. 级联清理 wiki 三件套（27.8）：md 副本 + 图片目录 + 索引条目
+            #    best-effort：清理失败只记日志，不回滚已完成的删除
+            try:
+                from pathlib import Path
+                import shutil as _shutil
+                from app.services.wiki.storage import WikiStorage, WIKI_DIR
+                from app.services.wiki.index import WikiIndex
+
+                md_path = WikiStorage().get_path(id)
+                if md_path.exists():
+                    md_path.unlink()
+                img_dir = WIKI_DIR / "images" / str(id)
+                if img_dir.exists():
+                    _shutil.rmtree(img_dir, ignore_errors=True)
+                removed = WikiIndex().remove_doc(id)
+                result["wiki_cleaned"] = True
+                result["wiki_index_removed"] = removed
+                logger.info(f"文档 {id} wiki 级联清理完成: {removed}")
+            except Exception as wiki_err:
+                result["wiki_cleaned"] = False
+                logger.warning(f"文档 {id} wiki 级联清理失败（不影响删除）: {wiki_err}")
+
             result["document_deleted"] = True
             result["file_deleted"] = file_deleted
             result["success"] = True

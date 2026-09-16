@@ -2486,3 +2486,10 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 风险 2：网络可达性 — 后端能访问 192.168.66.234:9090；OnlyOffice 能访问后端 8002 端口；启动前 curl 双向验证
 - 风险 3：JWT 时区/时钟 — OnlyOffice 服务器与后端服务器时钟偏差 > 几秒会 token 校验失败；用 `time.time()` 而非 datetime.now() 避免时区问题
 - 风险 4：编辑中文文件名 — callback URL 含中文文件名要 URL encode；前端 office URL 也要 encode
+
+## 阶段二十七·27.8：删除级联清理 + 手动重新提取（2026-09-16）
+> 用户要求：① 界面删除文档时级联清 wiki 三件套（md副本/图片目录/索引条目）
+> ② 列表"内容提取"列加"重新提取"按钮（防上传时提取失败无法补救）
+- 能改：`services/wiki/index.py`（加 remove_doc）、`crud/document.py`（delete_with_file 尾部加级联）、`DocumentView.vue`（内容提取列加按钮 + retryExtraction 函数）
+- 不能改：retry-extraction 端点（已存在，复用）、删除端点签名、DB 表结构
+- 验证：index.remove_doc 单测（假 doc_id）；delete_with_file e2e（临时文档+临时文件）；前端 build

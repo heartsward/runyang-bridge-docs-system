@@ -278,6 +278,29 @@ class WikiIndex:
         logger.info(f"全量重建完成: {stats['ok']}/{stats['total']} 文档")
         return stats
 
+    def remove_doc(self, doc_id: int) -> Dict[str, int]:
+        """级联删除某文档的全部索引条目（27.8：界面删除文档时调用）
+
+        覆盖 8 张表：docs_fts / docs_fts_zh / doc_meta / doc_tags /
+        doc_links（双向）/ doc_text / wiki_images / images_fts。
+        FTS5 表的 doc_id 是 UNINDEXED 存储列，可按值 DELETE。
+        返回各表删除行数（调试用）。
+        """
+        counts: Dict[str, int] = {}
+        with self._conn() as conn:
+            for table in ("docs_fts", "docs_fts_zh", "doc_meta",
+                          "doc_tags", "doc_text", "wiki_images", "images_fts"):
+                cur = conn.execute(f"DELETE FROM {table} WHERE doc_id=?", (doc_id,))
+                counts[table] = cur.rowcount
+            cur = conn.execute(
+                "DELETE FROM doc_links WHERE src_doc_id=? OR dst_doc_id=?",
+                (doc_id, doc_id),
+            )
+            counts["doc_links"] = cur.rowcount
+            conn.commit()
+        logger.info(f"已级联删除文档 {doc_id} 的索引条目: {counts}")
+        return counts
+
     def search(
         self,
         query: str,
