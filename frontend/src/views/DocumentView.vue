@@ -1976,7 +1976,10 @@ const getFileUrl = (document: Document | null): string => {
   font-weight: bold;
 }
 
-/* 阶段 3E：Markdown 渲染样式（替代旧的 preview-content-table） */
+/* 阶段 3E：Markdown 渲染样式（替代旧的 preview-content-table）
+   注意：v-html 注入的子元素不带 data-v 属性 → scoped 选择器无法命中；
+   参考 SearchView 写法，所有"作用于 v-html 子元素"的规则必须加 :deep() 穿透。
+   27.10：补齐 :deep() 让表格边框 / 列表样式 / pre 等都能渲染 */
 .markdown-content {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
@@ -1993,12 +1996,12 @@ const getFileUrl = (document: Document | null): string => {
   overflow-wrap: break-word;
 }
 
-.markdown-content h1,
-.markdown-content h2,
-.markdown-content h3,
-.markdown-content h4,
-.markdown-content h5,
-.markdown-content h6 {
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4),
+.markdown-content :deep(h5),
+.markdown-content :deep(h6) {
   margin-top: 24px;
   margin-bottom: 16px;
   font-weight: 600;
@@ -2007,26 +2010,26 @@ const getFileUrl = (document: Document | null): string => {
   padding-bottom: 8px;
 }
 
-.markdown-content h1 { font-size: 2em; }
-.markdown-content h2 { font-size: 1.5em; }
-.markdown-content h3 { font-size: 1.25em; border-bottom: none; }
-.markdown-content h4 { font-size: 1em; border-bottom: none; }
+.markdown-content :deep(h1) { font-size: 2em; }
+.markdown-content :deep(h2) { font-size: 1.5em; }
+.markdown-content :deep(h3) { font-size: 1.25em; border-bottom: none; }
+.markdown-content :deep(h4) { font-size: 1em; border-bottom: none; }
 
-.markdown-content p {
+.markdown-content :deep(p) {
   margin: 0 0 16px 0;
 }
 
-.markdown-content ul,
-.markdown-content ol {
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
   margin: 0 0 16px 0;
   padding-left: 32px;
 }
 
-.markdown-content li {
+.markdown-content :deep(li) {
   margin: 4px 0;
 }
 
-.markdown-content table {
+.markdown-content :deep(table) {
   border-collapse: collapse;
   margin: 16px 0;
   width: auto;
@@ -2034,20 +2037,20 @@ const getFileUrl = (document: Document | null): string => {
   font-size: 13px;
 }
 
-.markdown-content table th,
-.markdown-content table td {
+.markdown-content :deep(table th),
+.markdown-content :deep(table td) {
   border: 1px solid #d0d7de;
   padding: 6px 12px;
   text-align: left;
   vertical-align: top;
 }
 
-.markdown-content table th {
+.markdown-content :deep(table th) {
   background-color: #f6f8fa;
   font-weight: 600;
 }
 
-.markdown-content code {
+.markdown-content :deep(code) {
   background-color: #f6f8fa;
   padding: 2px 6px;
   border-radius: 3px;
@@ -2055,7 +2058,7 @@ const getFileUrl = (document: Document | null): string => {
   font-size: 0.9em;
 }
 
-.markdown-content pre {
+.markdown-content :deep(pre) {
   background-color: #f6f8fa;
   padding: 16px;
   border-radius: 6px;
@@ -2063,25 +2066,25 @@ const getFileUrl = (document: Document | null): string => {
   line-height: 1.5;
 }
 
-.markdown-content pre code {
+.markdown-content :deep(pre code) {
   background-color: transparent;
   padding: 0;
 }
 
-.markdown-content blockquote {
+.markdown-content :deep(blockquote) {
   border-left: 4px solid #d0d7de;
   padding-left: 16px;
   color: #57606a;
   margin: 16px 0;
 }
 
-.markdown-content hr {
+.markdown-content :deep(hr) {
   border: 0;
   border-top: 2px solid #eaecef;
   margin: 24px 0;
 }
 
-.markdown-content mark {
+.markdown-content :deep(mark) {
   background-color: #fff3cd;
   color: #856404;
   padding: 2px 4px;
@@ -2090,7 +2093,7 @@ const getFileUrl = (document: Document | null): string => {
   transition: all 0.3s ease;
 }
 
-.markdown-content mark.active-highlight {
+.markdown-content :deep(mark.active-highlight) {
   background-color: #ffc107;
   color: #212529;
   box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);

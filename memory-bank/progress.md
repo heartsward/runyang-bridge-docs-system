@@ -1312,3 +1312,10 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **修复**：去掉 slice，全量渲染；外层 `<n-space align="start">` + 内层 `max-height: 96px; overflow-y: auto` 滚动容器处理超高情况；"清除筛选"按钮移出滚动容器避免滚走；v-for 缩进对齐
 - **排查结论**：本项目其他 slice 限制均为合理的展示美化（如表格列每行只显示前3个标签、仪表盘最近5条），不需要动
 - 验证：build ✓
+
+### 27.10 – DocumentView 预览表格没有框线（scoped CSS 隔离坑，用户实测对比 SearchView 后反馈）
+- **现象**：同一份带表格的文档，在 SearchView 预览有完整框线，DocumentView 预览没有
+- **根因**：`DocumentView.vue` 的 `.markdown-content table { border: 1px solid #d0d7de }` 在 `<style scoped>` 里，被编译为 `.markdown-content[data-v-xxx] table`，但 `v-html` 注入的子元素没有 `data-v` 属性 → 选择器不命中 → 表格样式完全失效。SearchView 已用 `:deep()` 穿透，没踩坑
+- **修复**：把 DocumentView 的所有 `.markdown-content X`（X是 v-html 子元素：h1-h6/p/ul/ol/li/table/th/td/code/pre/blockquote/hr/mark）改成 `.markdown-content :deep(X)`，与 SearchView 写法对齐
+- **方法教训**：vue `<style scoped>` + `v-html` 经典坑——运行时注入的 DOM 不带 data-v 属性，所有作用于子元素的选择器必须 `:deep()` 穿透；项目里 8 处这种选择器都改齐了（覆盖了 ul/li 缩进、pre 灰色背景、blockquote 左竖线、mark 高亮、表格框线等所有 markdown 渲染样式）
+- 验证：build ✓；dist 产物 index css 含 d0d7de（DocumentView 表格边框生效）✓
