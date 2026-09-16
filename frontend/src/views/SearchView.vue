@@ -1179,20 +1179,38 @@ watch(previewMode, async (newMode) => {
 .markdown-content :deep(li) { margin: 4px 0; }
 
 .markdown-content :deep(table) {
+  /* 27.11：表格自适应优化（与 DocumentView 对齐） */
   border-collapse: collapse;
   margin: 16px 0;
-  width: auto;
-  max-width: 100%;
+  width: min(100%, 900px);
+  table-layout: auto;
   font-size: 13px;
 }
 .markdown-content :deep(table th),
 .markdown-content :deep(table td) {
   border: 1px solid #d0d7de;
-  padding: 6px 12px;
+  padding: 8px 14px;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.6;
+  min-width: 80px;
 }
-.markdown-content :deep(table th) { background-color: #f6f8fa; font-weight: 600; }
+.markdown-content :deep(table th) {
+  background-color: #f6f8fa;
+  font-weight: 600;
+  min-width: 120px;
+}
+.markdown-content :deep(table tbody tr:nth-child(even) td) {
+  background-color: #fbfcfd;
+}
+.markdown-content :deep(table tbody tr:hover td) {
+  background-color: #f0f7ff;
+}
+.markdown-content :deep(table code) {
+  word-break: normal;
+}
 
 .markdown-content :deep(code) {
   background-color: #f6f8fa;

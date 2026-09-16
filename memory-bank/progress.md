@@ -1319,3 +1319,14 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **修复**：把 DocumentView 的所有 `.markdown-content X`（X是 v-html 子元素：h1-h6/p/ul/ol/li/table/th/td/code/pre/blockquote/hr/mark）改成 `.markdown-content :deep(X)`，与 SearchView 写法对齐
 - **方法教训**：vue `<style scoped>` + `v-html` 经典坑——运行时注入的 DOM 不带 data-v 属性，所有作用于子元素的选择器必须 `:deep()` 穿透；项目里 8 处这种选择器都改齐了（覆盖了 ul/li 缩进、pre 灰色背景、blockquote 左竖线、mark 高亮、表格框线等所有 markdown 渲染样式）
 - 验证：build ✓；dist 产物 index css 含 d0d7de（DocumentView 表格边框生效）✓
+
+### 27.11 – 预览表格单元格"自适应不好"CSS 优化（用户实测：阅读难受）
+- **根因**：`width: auto + max-width: 100%` 让短列被压扁、长列撑爆、长文本溢出撑破单元格
+- **修复**（DocumentView + SearchView 双同步）：
+  - 表格 `width: min(100%, 900px)`（上限防超宽，下限跟随内容）
+  - td 加 `overflow-wrap: break-word + word-break: break-word`（长文本自动换行不撑破）
+  - td `min-width: 80px` / th `min-width: 120px`（短列不再被压成一字一行）
+  - 斑马纹（偶数行 #fbfcfd）+ hover 行高亮（#f0f7ff）——横向跨行阅读不跟丢
+  - td padding 6/12 → 8/14、line-height 1.6
+- **不动**：`table-layout` 保持 auto（fixed 会让列宽均匀但内容长短差异大的表格反而难看）；preview-container 已有 overflow:auto 兜底横向滚动
+- 验证：build ✓

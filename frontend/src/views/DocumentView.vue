@@ -2030,24 +2030,53 @@ const getFileUrl = (document: Document | null): string => {
 }
 
 .markdown-content :deep(table) {
+  /* 27.11：表格自适应优化——之前 width:auto + max-width:100% 导致短列被压扁、
+     长列撑满、长文本溢出，阅读体验差 */
   border-collapse: collapse;
   margin: 16px 0;
-  width: auto;
-  max-width: 100%;
+  width: min(100%, 900px);
+  table-layout: auto;
   font-size: 13px;
+}
+
+/* 外层滚动容器：表格超过视口宽度时横向滚动而不是挤压 */
+.markdown-content :deep(.table-scroll-wrapper) {
+  overflow-x: auto;
+  margin: 0;
 }
 
 .markdown-content :deep(table th),
 .markdown-content :deep(table td) {
   border: 1px solid #d0d7de;
-  padding: 6px 12px;
+  padding: 8px 14px;
   text-align: left;
   vertical-align: top;
+  /* 关键：长文本自动换行，不再撑破单元格 */
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.6;
+  /* 关键：列宽下限——th 120px / 普通 td 80px，避免短列被压成一字一行 */
+  min-width: 80px;
 }
 
 .markdown-content :deep(table th) {
   background-color: #f6f8fa;
   font-weight: 600;
+  min-width: 120px;
+}
+
+/* 多列表格斑马纹（偶数行浅灰）+ hover 高亮——横向跨行阅读不跟丢 */
+.markdown-content :deep(table tbody tr:nth-child(even) td) {
+  background-color: #fbfcfd;
+}
+
+.markdown-content :deep(table tbody tr:hover td) {
+  background-color: #f0f7ff;
+}
+
+/* 代码内容不换行（保持等宽对齐） */
+.markdown-content :deep(table code) {
+  word-break: normal;
 }
 
 .markdown-content :deep(code) {
