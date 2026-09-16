@@ -168,7 +168,8 @@
   </PageLayout>
 
     <!-- 文档预览模态框 -->
-    <n-modal v-model:show="showPreviewModal" preset="card" style="width: 90%; height: 85%; max-width: 1200px;" :title="previewTitle">
+    <!-- 27.12：预览弹窗尺寸对齐 DocumentView（原 90%/85%/max-1200 偏小） -->
+    <n-modal v-model:show="showPreviewModal" preset="card" style="width: 98%; height: 95%; max-width: none; min-width: 1200px;" :title="previewTitle">
       <div v-if="previewContent">
         <!-- 文档信息行 -->
         <n-space justify="space-between" align="center" style="margin-bottom: 12px;">
