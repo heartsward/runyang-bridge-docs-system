@@ -7,6 +7,9 @@ export interface UploadFileData {
   description?: string
   category_id?: number
   tags?: string
+  // 27.13 覆盖上传：True 时后端先级联删除 overwrite_ids 指定的旧文档再上传
+  overwrite?: boolean
+  overwrite_ids?: number[]
 }
 
 class UploadService {
@@ -22,6 +25,12 @@ class UploadService {
     
     if (data.category_id) {
       formData.append('category_id', data.category_id.toString())
+    }
+
+    // 27.13 覆盖上传参数
+    if (data.overwrite) {
+      formData.append('overwrite', 'true')
+      formData.append('overwrite_ids', (data.overwrite_ids || []).join(','))
     }
 
     return await apiService.upload<Document>('/upload/', formData)

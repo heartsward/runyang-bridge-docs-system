@@ -952,14 +952,22 @@ const uploadDocument = async () => {
       
       console.log(`单文件上传: 原始名称="${fileItem.file.name}", 重命名="${fileItem.renamedName}", 最终标题="${title}"`)
       
+      // 27.13 覆盖上传：取该文件的既有文档 id（来自冲突弹窗 check-filename）
+      let overwriteIds: number[] | undefined
+      if (fileItem.overwriteMode) {
+        const conflict = conflictFiles.value.find(c => c.originalName === fileItem.file.name)
+        overwriteIds = conflict?.existingIds
+      }
       const result = await uploadService.uploadFile({
         file: fileItem.file,
         title: title,
         description: uploadForm.value.description,
-        tags: uploadForm.value.tags.join(',')
+        tags: uploadForm.value.tags.join(','),
+        overwrite: fileItem.overwriteMode || false,
+        overwrite_ids: overwriteIds
       })
-      
-      message.success('文档上传成功，正在提取内容...')
+
+      message.success(fileItem.overwriteMode ? '覆盖上传成功，正在提取内容...' : '文档上传成功，正在提取内容...')
       
       // 开始监控提取状态
       if (result && result.id) {
@@ -983,12 +991,21 @@ const uploadDocument = async () => {
           const titleWithoutExt = fileName.replace(/\.[^/.]+$/, '')
           
           console.log(`上传文件: 原始名称="${file.name}", 处理后名称="${fileName}", 标题="${titleWithoutExt}"`)
-          
+
+          // 27.13 覆盖上传：取该文件的既有文档 id（来自冲突弹窗 check-filename）
+          let overwriteIds: number[] | undefined
+          if (fileItem?.overwriteMode) {
+            const conflict = conflictFiles.value.find(c => c.originalName === file.name)
+            overwriteIds = conflict?.existingIds
+          }
+
           const result = await uploadService.uploadFile({
             file: file,
             title: titleWithoutExt, // 使用处理后的标题
             description: uploadForm.value.description,
-            tags: uploadForm.value.tags.join(',')
+            tags: uploadForm.value.tags.join(','),
+            overwrite: fileItem?.overwriteMode || false,
+            overwrite_ids: overwriteIds
           })
           
           results.push(result)
@@ -1568,7 +1585,9 @@ const checkFilenameConflicts = async () => {
           conflictingFiles.push({
             filename,
             count: result.count,
-            existingDocuments: result.existing_documents
+            existingDocuments: result.existing_documents,
+            // 27.13 既有文档 id 列表（覆盖上传时传给后端级联删除）
+            existingIds: (result.existing_documents || []).map((d: any) => d.id)
           })
         } else {
           console.log(`无冲突: "${filename}" 不存在`)
@@ -1597,6 +1616,7 @@ const showFilenameConflictDialog = async (conflictingFiles) => {
       originalName: conflict.filename,
       count: conflict.count,
       existingDocuments: conflict.existingDocuments,
+      existingIds: conflict.existingIds || [], // 27.13 覆盖上传用
       action: 'auto', // 默认选择自动重命名
       newName: '',
       nameError: ''

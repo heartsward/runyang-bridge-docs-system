@@ -10,6 +10,7 @@ from app.core.deps import get_db, get_current_active_user, get_optional_user
 from app.crud import document as crud_document
 from app.crud.asset import asset as asset_crud
 from app.models.user import User
+from app.models.document import Document as DocumentModel
 from app.models.asset import AssetStatus, AssetType, NetworkLocation
 from app.schemas.document import Document, DocumentCreate
 from app.schemas.asset import AssetCreate
@@ -291,6 +292,8 @@ async def upload_file(
     description: Optional[str] = Form(None),
     category_id: Optional[int] = Form(None),
     tags: Optional[str] = Form(None),  # 逗号分隔的标签字符串
+    overwrite: bool = Form(False),  # 27.13 覆盖上传：True 时先级联删除同名旧文档再上传
+    overwrite_ids: Optional[str] = Form(None),  # 27.13 逗号分隔的既有文档 id（来自 check-filename）
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -312,7 +315,46 @@ async def upload_file(
     # 检查权限：只有管理员才能上传文档
     if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="只有管理员可以上传文档")
-    
+
+    # ---- 覆盖上传（27.13）：先级联删除旧文档，再走正常上传流程（天然触发新提取）----
+    # overwrite_ids 是前端冲突弹窗 check-filename 返回的既有同 file_name 文档 id 列表，
+    # 由用户确认"覆盖上传"后传入。逐个 delete_with_file：物理文件 + DB + wiki 三件套全清。
+    # 防误删：这些 id 来自 check-filename 按 file_name 精确命中的结果，只可能是同名旧文档。
+    if overwrite:
+        if not overwrite_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="覆盖上传必须提供 overwrite_ids（前端冲突弹窗的既有文档 id）"
+            )
+        try:
+            id_list = [int(x) for x in str(overwrite_ids).split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="overwrite_ids 格式错误（需逗号分隔的数字）")
+        if not id_list:
+            raise HTTPException(status_code=400, detail="覆盖上传必须提供 overwrite_ids")
+
+        existing = db.query(DocumentModel).filter(DocumentModel.id.in_(id_list)).all()
+        if not existing:
+            raise HTTPException(
+                status_code=400,
+                detail="覆盖上传失败：未找到指定的既有文档（可能已被删除），请刷新列表重试"
+            )
+        # 二次确认：命中的文档数必须与传入 id 数一致（防止部分 id 失效仍继续删）
+        if len(existing) != len(id_list):
+            raise HTTPException(
+                status_code=400,
+                detail=f"覆盖上传失败：传入 {len(id_list)} 个 id 但只找到 {len(existing)} 个文档，状态已变化，请刷新列表重试"
+            )
+        for doc in existing:
+            del_result = crud_document.delete_with_file(db=db, id=doc.id)
+            if not del_result.get("success"):
+                db.rollback()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"覆盖上传失败：删除旧文档 {doc.id}（{doc.title}）出错：{del_result.get('error')}"
+                )
+        print(f"[INFO] 覆盖上传：已级联删除旧文档 {existing[0].file_name}（id={[d.id for d in existing]}）")
+
     # 检查文件类型和安全性
     if not allowed_file(file.filename):
         raise HTTPException(

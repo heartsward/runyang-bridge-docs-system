@@ -1330,3 +1330,20 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   - td padding 6/12 → 8/14、line-height 1.6
 - **不动**：`table-layout` 保持 auto（fixed 会让列宽均匀但内容长短差异大的表格反而难看）；preview-container 已有 overflow:auto 兜底横向滚动
 - 验证：build ✓
+
+### 27.12 – SearchView 预览弹窗尺寸对齐 DocumentView（用户实测：搜索预览框比文档管理预览小）
+- **现象**：SearchView 预览弹窗（90%/85%/max-1200）明显比 DocumentView 预览弹窗（98%/95%/min-1200）小，视觉观感差
+- **修复**：`SearchView.vue` L172 弹窗 `style` 由 `width:90%; height:85%; max-width:1200px` 改为 `width:98%; height:95%; max-width:none; min-width:1200px`，与 DocumentView L197 完全一致
+- 验证：build ✓
+
+### 27.13 – "覆盖上传"真覆盖（用户实测：选覆盖后仍多出新文件）
+- **现象**：上传同名文件选"覆盖上传"后，列表多了一个新文件而不是覆盖旧文件
+- **根因**："覆盖上传"是假动作——前端只设 `fileItem.overwriteMode=true` 标记，但该标记只在 `validateFinalFileNames` 里跳过复检；调 `uploadService.uploadFile()` 时**根本没传**，FormData 无 overwrite 字段；后端 `POST /upload/` **没有 overwrite 参数**，同名一律走"自动加 _1 后缀"分支
+- **修复**：
+  - 后端 `upload.py`：`POST /upload/` 加 `overwrite: bool` + `overwrite_ids: str`（逗号分隔）两个 Form 参数。overwrite=true 时先逐个 `crud_document.delete_with_file` 级联删旧文档（物理文件 + DB + wiki 三件套，复用 27.8 能力），再走正常上传流程 → 天然触发一次新提取
+  - 防误删校验：ids 解析为 int 列表；命中数必须与传入数一致（部分 id 失效即 400，防止状态变化误删）；ids 本身来自前端 check-filename 按 file_name 精确命中的结果，只可能是同名旧文档
+  - 前端 `upload.ts`：`UploadFileData` 加 `overwrite?`/`overwrite_ids?`，FormData 追加两字段
+  - 前端 `DocumentView.vue`：`checkFilenameConflicts` 采集 `existingIds`（check-filename 返回的 existing_documents 的 id 列表）→ `showFilenameConflictDialog` 透传 → 单文件/多文件两条上传分支在 overwriteMode 时把 `overwrite: true` + `overwrite_ids` 传给 `uploadService.uploadFile`
+- **设计取舍**：覆盖 = 删旧建新（新文档新 id、created_at 刷新、下载/浏览次数归零、标签用本次上传值），不做"原地替换文件字节"。理由：文档是"内容+元数据+wiki 索引"整体，删旧建新最干净，且自动级联清理 wiki 三件套，无需额外处理
+- **e2e（本地 8002 真实后端）**：v1 上传（id=11，提取 True）→ v2 覆盖上传（日志 `[INFO] 覆盖上传：已级联删除旧文档 覆盖上传测试.md（id=[11]）`）→ 新记录 created_at 晚于 v1 ✓ → 新提取 True 且 wiki 内容为 v2 ✓ → 清理 ✓
+- **注意**：空库时 SQLite 删除后新插入可能复用同一 id（max+1），真实库 id 递增；前端提示语区分"覆盖上传成功"
