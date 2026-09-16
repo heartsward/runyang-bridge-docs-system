@@ -8,7 +8,12 @@ import os
 class Settings(BaseSettings):
     model_config = ConfigDict(
         env_file=".env",
-        case_sensitive=True
+        # utf-8-sig：容忍 Windows 记事本保存的 UTF-8 BOM（否则首个键带 ﻿ 前缀直接校验失败）
+        env_file_encoding="utf-8-sig",
+        case_sensitive=True,
+        # ignore：容忍旧版 .env 残留字段（如阶段十九已移除的 AI_ALL_FORMATS_AI），
+        # 换机/跨版本部署时拷贝来的旧 .env 不至于让后端起不来（27.7 真实踩坑）
+        extra="ignore",
     )
     
     # 项目基本信息
