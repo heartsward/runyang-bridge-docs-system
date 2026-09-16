@@ -37,12 +37,15 @@ class Settings(BaseSettings):
     # 阶段二十六：扩展为 16 种（11 → 16）；新增 .docm/.xlsm/.xlsb/.epub/.json
     ALLOWED_EXTENSIONS: str = "doc,docx,docm,xls,xlsx,xlsm,xlsb,ppt,pptx,pptm,pps,ppsx,ppsm,pot,epub,csv,pdf,jpg,jpeg,png,txt,md"
 
-    # 阶段二十七：OnlyOffice Document Server 集成（在线编辑 Office 类文档）
+    # 阶段二十七：OnlyOffice Document Server 集成（Office 类文档只读在线预览）
     # DS 服务地址（容器/服务器已部署），前端 + 后端回调均使用此地址
     ONLYOFFICE_DS_URL: str = "http://192.168.66.234:9090"
     # JWT 秘钥（必须与 DS 容器 /etc/onlyoffice/documentserver/local.json 中 services.CoAuthoring.secret 一致）
     ONLYOFFICE_JWT_SECRET: str = "Rydq@12345"
-    # 后端对外可达地址（DS 回调用；按部署环境改 .env）
+    # ⚠️ 后端对外可达地址 —— 每次换机器部署必须在 .env 里改成【本机局域网 IP】！
+    # DS 服务器靠它反向访问本后端下载文件；若指向别的机器且那台后端也开着、
+    # JWT 密钥又相同，DS 会"成功"下载到别台机器上同 id 的另一份文件，
+    # 报"文件内容与文件扩展名不匹配"（27.6 真实踩坑）
     ONLYOFFICE_CALLBACK_BASE_URL: str = "http://192.168.66.99:8002"
     # 编辑时下载/保存文件的临时目录（.gitignore）
     ONLYOFFICE_STORAGE_PATH: str = os.path.abspath(
