@@ -666,13 +666,16 @@ interface PdfConvertItem {
 }
 
 const allTags = computed(() => {
-  const tagSet = new Set<string>()
+  const tagCount = new Map<string, number>()
   documents.value.forEach(doc => {
     if (doc.tags && Array.isArray(doc.tags)) {
-      doc.tags.forEach(tag => tagSet.add(tag))
+      doc.tags.forEach(tag => tagCount.set(tag, (tagCount.get(tag) || 0) + 1))
     }
   })
-  return Array.from(tagSet).sort()
+  // 27.14：按命中数量从多到少排列（并列时按标签名中文序）
+  return Array.from(tagCount.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'))
+    .map(([tag]) => tag)
 })
 
 const tagOptions = computed(() => {
