@@ -1331,6 +1331,12 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **不动**：`table-layout` 保持 auto（fixed 会让列宽均匀但内容长短差异大的表格反而难看）；preview-container 已有 overflow:auto 兜底横向滚动
 - 验证：build ✓
 
+### 27.14 – 文档管理标签筛选按命中数量降序排列（用户要求）
+- **改动**：`DocumentView.vue` `allTags` computed 由字母序 `.sort()` 改为统计每个 tag 的文档数 → 按数量降序，并列时 `localeCompare(..., 'zh')` 中文序；模板 `{{ tag }} ({{ getTagCount(tag) }})` 已有计数显示，无需改
+- 验证：build ✓（7.27s）
+- 注：本次会话 WorkBuddy 的 bash shim 环境损坏（dirname/cd 全部 not found），build/git 全程走 PowerShell + 输出重定向文件兜底；已清理临时验证文件
+- 待推送：70e332f（本地 main 领先远端 1 个提交，用户自行 push）
+
 ### 27.12 – SearchView 预览弹窗尺寸对齐 DocumentView（用户实测：搜索预览框比文档管理预览小）
 - **现象**：SearchView 预览弹窗（90%/85%/max-1200）明显比 DocumentView 预览弹窗（98%/95%/min-1200）小，视觉观感差
 - **修复**：`SearchView.vue` L172 弹窗 `style` 由 `width:90%; height:85%; max-width:1200px` 改为 `width:98%; height:95%; max-width:none; min-width:1200px`，与 DocumentView L197 完全一致
