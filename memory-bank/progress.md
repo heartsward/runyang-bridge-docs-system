@@ -1331,6 +1331,23 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **不动**：`table-layout` 保持 auto（fixed 会让列宽均匀但内容长短差异大的表格反而难看）；preview-container 已有 overflow:auto 兜底横向滚动
 - 验证：build ✓
 
+### 27.15 – 文档总数字卡在 100（用户实测：上传超过 100 个就不增加）
+- **现象**：上传到第 101 个文档，"总文档数"卡片和分页总数都卡在 100 不动
+- **根因（双重）**：
+  1. `DocumentView.vue loadDocuments` 硬编码 `limit: 100`——后端一次最多返回最新 100 条，统计一直基于这 100 条
+  2. `documentService.getDocuments` 只 `return response.items`——把后端的 `total` 字段丢了，前端拿不到真实总数
+- **修复**：
+  - `document.ts`：getDocuments 返回类型从 `Promise<Document[]>` 改为 `Promise<{items, total}>`，透传 total
+  - `DocumentView.vue`：
+    - loadDocuments 改为 `getDocuments({ limit: 2000 })`（后端 limit 无上限校验，2000 足够）
+    - 新增 `serverTotalCount` ref 存服务端真实总数
+    - `updateStatistics`：`statistics.total_count` 与 `pagination.itemCount` 都用 `serverTotalCount.value`（兜底 `documents.value.length`）
+    - 删除文档时 `serverTotalCount.value -= 1`（前端 splice 后总数也得同步降，否则下次拉前可能偏差）
+    - 上传后会自动 loadDocuments 拉新的 serverTotalCount，无需手动改
+- **未做**：本次只改"统计卡 100"，没改"表格只显示 100 条窗口"——表格仍拉取前 2000 条一次渲染（文档量小可行；>2000 再接真分页 + skip）
+- 验证：build ✓（9.12s）
+- 待推送：dde4811（本地 main 领先 origin/main 1 个 commit，用户自行 push）
+
 ### 27.14 – 文档管理标签筛选按命中数量降序排列（用户要求）
 - **改动**：`DocumentView.vue` `allTags` computed 由字母序 `.sort()` 改为统计每个 tag 的文档数 → 按数量降序，并列时 `localeCompare(..., 'zh')` 中文序；模板 `{{ tag }} ({{ getTagCount(tag) }})` 已有计数显示，无需改
 - 验证：build ✓（7.27s）
