@@ -636,6 +636,9 @@ const statistics = ref({
   total_count: 0
 })
 
+// 27.15：服务端返回的真实总数（用于分页总条数与总文档卡片），不再依赖 items.length
+const serverTotalCount = ref(0)
+
 const uploadForm = ref({
   title: '',
   description: '',
@@ -1158,13 +1161,13 @@ const handlePageSizeChange = (pageSize: number) => {
 
 // 更新统计数据
 const updateStatistics = () => {
-  const docs = documents.value
+  // 27.15：总文档数用服务端 total（不受前端 limit 限制），分页总数也是
   statistics.value = {
-    total_count: docs.length
+    total_count: serverTotalCount.value || documents.value.length
   }
-  
+
   // 更新分页总数
-  pagination.itemCount = filteredDocuments.value.length
+  pagination.itemCount = serverTotalCount.value || filteredDocuments.value.length
 }
 
 // 显示文档详情
@@ -1519,13 +1522,17 @@ const deleteDocument = (document: Document) => {
       try {
         await documentService.deleteDocument(document.id)
         message.success('文档删除成功')
-        
+
         // 从本地列表中移除
         const index = documents.value.findIndex(doc => doc.id === document.id)
         if (index !== -1) {
           documents.value.splice(index, 1)
         }
-        
+        // 27.15：删除后服务端 total -1，否则下次更新统计会从旧 total 算
+        if (serverTotalCount.value > 0) {
+          serverTotalCount.value -= 1
+        }
+
         // 更新统计
         updateStatistics()
       } catch (error: any) {
@@ -1539,19 +1546,16 @@ const deleteDocument = (document: Document) => {
 const loadDocuments = async () => {
   loading.value = true
   try {
-    const response = await documentService.getDocuments({ limit: 100 })
-    // 检查响应格式，如果是对象且包含items数组，则提取items
-    if (response && typeof response === 'object' && 'items' in response) {
-      documents.value = (response as any).items || []
-    } else if (Array.isArray(response)) {
-      documents.value = response
-    } else {
-      documents.value = []
-    }
+    // 27.15：拉够多的文档（不限则统计卡在 100）。后端 limit 无上限校验，传 2000 即可；
+    // 若未来文档数 >2000 再考虑接真正的分页 + 后端 total 计数
+    const response = await documentService.getDocuments({ limit: 2000 })
+    documents.value = response.items || []
+    serverTotalCount.value = response.total || 0
     updateStatistics()
   } catch (error: any) {
     console.error('加载文档失败:', error)
     documents.value = []
+    serverTotalCount.value = 0
     message.error('加载文档失败，请检查后端服务是否正常运行')
   } finally {
     loading.value = false

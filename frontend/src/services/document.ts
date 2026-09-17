@@ -18,16 +18,19 @@ class DocumentService {
     limit?: number
     category_id?: number
     status?: string
-  }): Promise<Document[]> {
+  }): Promise<{items: Document[], total: number}> {
     const queryParams = new URLSearchParams()
     if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString())
     if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString())
     if (params?.category_id) queryParams.append('category_id', params.category_id.toString())
     if (params?.status) queryParams.append('status', params.status)
-    
+
     const url = `/documents/?${queryParams.toString()}`
-    const response = await apiService.get<{items: Document[], total: number}>(url)
-    return response.items || []
+    const response = await apiService.get<{items: Document[], total: number, page?: number, per_page?: number, pages?: number}>(url)
+    return {
+      items: response.items || [],
+      total: response.total || 0,
+    }
   }
 
   // 获取所有文档
