@@ -134,6 +134,8 @@ test_*.py
 *_test.py
 test/
 tests/__pycache__/
+# 例外：后端回归测试要入库（27.16 起随 bug 修复一起沉淀）
+!backend/tests/test_*.py
 
 # 证书和密钥
 *.pem

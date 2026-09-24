@@ -1370,3 +1370,50 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **设计取舍**：覆盖 = 删旧建新（新文档新 id、created_at 刷新、下载/浏览次数归零、标签用本次上传值），不做"原地替换文件字节"。理由：文档是"内容+元数据+wiki 索引"整体，删旧建新最干净，且自动级联清理 wiki 三件套，无需额外处理
 - **e2e（本地 8002 真实后端）**：v1 上传（id=11，提取 True）→ v2 覆盖上传（日志 `[INFO] 覆盖上传：已级联删除旧文档 覆盖上传测试.md（id=[11]）`）→ 新记录 created_at 晚于 v1 ✓ → 新提取 True 且 wiki 内容为 v2 ✓ → 清理 ✓
 - **注意**：空库时 SQLite 删除后新插入可能复用同一 id（max+1），真实库 id 递增；前端提示语区分"覆盖上传成功"
+
+### 27.16 – MD 编辑保存两个 bug（用户实测：保存后预览不变 + 每保存一次多一段 frontmatter）
+- **现象**（两条同时出现）：
+  1. 预览弹窗点"编辑"→ 改 MD → 保存成功 → 再预览还是**老内容**
+  2. 每保存一次，文件开头就多一段一模一样的 `title / source_file / doc_type / extracted_at / tags`
+- **根因（两个独立缺陷，恰好都在这条链路上）**：
+  1. **预览不同步**：预览走 `GET /search/preview/{id}`（前端 `source=auto`）→ 后端命中
+     `document.content_extracted and document.content` 分支 → 读的是**数据库里提取时的 content**；
+     编辑/保存走的是 `GET|PUT /wiki/doc/{id}/markdown` → 读写 **`backend/wiki/{id}.md`**。
+     `save_markdown` 只写了 md + 重建 FTS 索引，**没回写 documents.content** → 预览永远看老内容。
+  2. **frontmatter 重复**：`GET .../markdown` 返回的是**全文（含 frontmatter）**，编辑器把它全量显示；
+     保存时前端原样传回全文，而 `storage.update()` 又把**磁盘上的 frontmatter 再拼一次**
+     → `FM + (FM + 正文)`，每保存一次多一段。
+     附带伤害：`index.py` 的正文提取用 `FRONTMATTER_PATTERN.sub(..., count=1)` **只剥一段**，
+     多出来的那段元信息被当正文塞进 FTS5 → 污染检索结果。
+- **修复**：
+  - `storage.py`：新增 `FRONTMATTER_RE`（`\A` 锚定 + 兼容 `\r\n`）/ `split_frontmatter()` /
+    `strip_frontmatter_blocks()`（剥离**连续多段**，只认第一段）/ `join_frontmatter()`（统一版式
+    `---\n<yaml>---\n\n<正文>\n`）/ `read_body()`。
+    `update()` 改为**幂等**：先把传回内容里所有 meta 块剥掉，frontmatter 以磁盘为准
+    （元信息由系统维护，不让编辑器写坏），再拼一份。顺带删掉原实现里那段
+    `re.search(r"^#\s+.+")` 的 heading 拆分——它是恒等变换（`heading + rest == 传入内容`），
+    只在带 frontmatter 时才"意外"把 meta 并进 heading，本身就是 bug 的一部分。
+  - `index.py`：正文改用 `strip_frontmatter_blocks()`，历史脏文件的多段 meta 不再进 FTS；
+    `extract_links_and_tags()` 也改喂纯正文（元信息里不该有链接/标签）。
+  - `wiki.py`：`get_markdown` 只返回**正文**（`content`），frontmatter 另用 `frontmatter` 字段返回；
+    `save_markdown` 保存后**回写 `documents.content`**（`content_extracted=True`、
+    清 `content_extraction_error`）并返回 `content_synced`，让 预览/检索/MCP 三处读同一份内容。
+  - `DocumentView.vue`：编辑模式加元信息提示条（说明元信息由系统维护）；
+    保存成功后**重新调预览接口**拉取（此前是本地 `previewContent = previewEditContent` 回填，
+    正好掩盖了"后端没同步"这个 bug）。
+- **数据修复**：新增 `scripts/fix_wiki_frontmatter.py`（默认 dry-run，`--apply` 才落盘，
+  先整份备份到 `backend/wiki/_fm_backup/<时间戳>/`，内置"正文逐字节不变"断言；
+  `--sync-db` 可选回写 documents.content）。本地开发库命中 2 个：`73.md` 3 段→1 段、`86.md` 2 段→1 段。
+  **线上 192.168.66.126 扫描 122 篇：frontmatter 重复 0 篇、DB content 与 MD 正文 122 篇全一致**
+  （说明线上还没人从这个入口保存过，未被污染）→ 线上无需数据修复。
+- **回归测试**：新增 `backend/tests/test_wiki_markdown_roundtrip.py`（13 例，全绿）：
+  带 frontmatter 的全文保存不重复、连续保存 5 次块数恒为 1、只传正文、历史脏文件被顺手修回、
+  正文逐字节、空输入不清空、缺文件返回 None、`\r\n` 兼容、正文里的 `---` 不被误判。
+  为此在 `.gitignore` 加 `!backend/tests/test_*.py` 例外（原 `test_*.py` 规则会把回归测试挡在库外）。
+- **e2e（本地 8012 真实后端）**：取 doc 1 → `GET markdown` 只回正文 983 字符（frontmatter 单独 139 字符）
+  → 连续 PUT 3 次，每次 `content_synced=True` 且 MD 恒为 1 段 → `GET /search/preview`
+  `content_source=extracted` 且能看到改动 → 正文逐字节一致 ✓ → 已还原原始数据。
+- 验证：pytest 13 passed ✓ / build ✓（11.57s）/ e2e ✓
+- **部署提示**：`backend/wiki/`、`*.db` 都在 .gitignore 里，`update.sh` 的 `git pull` 不会碰线上数据；
+  线上直接 `./update.sh` 即可（会重启后端）。
+

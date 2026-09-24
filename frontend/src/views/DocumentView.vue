@@ -267,14 +267,20 @@
         ></div>
 
         <!-- W4：编辑模式 textarea -->
-        <n-input
-          v-if="previewEditMode"
-          v-model:value="previewEditContent"
-          type="textarea"
-          :autosize="{ minRows: 15, maxRows: 30 }"
-          placeholder="编辑 Markdown 内容..."
-          style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
-        />
+        <div v-if="previewEditMode">
+          <!-- 27.16：元信息段已从编辑器剥离，这里明确告知，避免用户以为"保存后标题丢了" -->
+          <div class="edit-meta-tip">
+            只编辑正文。标题 / 来源文件 / 文档类型 / 标签等元信息由系统维护，
+            不在此处显示，保存时也不会被改动。
+          </div>
+          <n-input
+            v-model:value="previewEditContent"
+            type="textarea"
+            :autosize="{ minRows: 15, maxRows: 30 }"
+            placeholder="编辑 Markdown 正文..."
+            style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
+          />
+        </div>
         
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
         <div v-else-if="shouldShowViewToggle(currentDocument) && previewMode === 'original'" class="original-file-preview">
@@ -1262,7 +1268,7 @@ const cancelPreviewEdit = () => {
   previewEditContent.value = ''
 }
 
-// W4：保存编辑（调后端 PUT → 自动重建索引）
+// W4：保存编辑（调后端 PUT → 回写 DB content + 自动重建索引）
 const savePreviewEdit = async () => {
   if (!currentDocument.value) return
   savingPreviewEdit.value = true
@@ -1273,9 +1279,10 @@ const savePreviewEdit = async () => {
     )
     if (result.success) {
       message.success('已保存并重建索引')
-      // 刷新预览内容
-      previewContent.value = previewEditContent.value
       cancelPreviewEdit()
+      // 27.16：保存后重新从后端拉预览内容——看到的就是落库结果，
+      // 而不是本地字符串（此前本地回填会掩盖"后端没同步"的问题）
+      await previewDocument(currentDocument.value)
     } else {
       message.error('保存失败')
     }
@@ -1934,6 +1941,18 @@ const getFileUrl = (document: Document | null): string => {
 
 <style scoped>
 /* DocumentView specific styles can be added here if needed */
+
+/* 27.16：编辑模式的元信息提示条 */
+.edit-meta-tip {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #8a6d3b;
+  background-color: #fcf8e3;
+  border: 1px solid #faebcc;
+  border-radius: 4px;
+}
 
 .preview-content {
   font-family: 'Courier New', monospace;

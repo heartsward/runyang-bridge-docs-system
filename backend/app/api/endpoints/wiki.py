@@ -15,11 +15,13 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_active_user
+from app.core.deps import get_current_active_user, get_db
+from app.models.document import Document
 from app.models.user import User
 from app.services.wiki.index import WikiIndex
-from app.services.wiki.storage import WikiStorage
+from app.services.wiki.storage import WikiStorage, strip_frontmatter_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -366,29 +368,45 @@ async def get_markdown(
     doc_id: int,
     current_user: User = Depends(get_current_active_user),
 ):
-    """前端编辑器加载内容用"""
+    """前端编辑器加载内容用
+
+    27.16 修复：只返回**正文**（剥离 frontmatter）。
+    title / source_file / doc_type / tags 这类元信息由系统维护，
+    出现在编辑器里既没意义，用户一改还会在保存时被再拼一次，
+    导致每保存一次就多一段重复的 frontmatter。
+    frontmatter 原文仍随响应返回，需要展示"来源/标签"时可直接用。
+    """
     storage = _storage()
     content = storage.read(doc_id)
     if not content:
         raise HTTPException(status_code=404, detail="MD 副本不存在")
-    return {"doc_id": doc_id, "content": content}
+    frontmatter, body = strip_frontmatter_blocks(content)
+    return {"doc_id": doc_id, "content": body, "frontmatter": frontmatter}
 
 
 @router.put("/doc/{doc_id}/markdown", summary="保存 MD 副本内容")
 async def save_markdown(
     doc_id: int,
     payload: dict = Body(...),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """前端编辑器保存用
 
-    Body: {"content": "...新的 MD 全文..."}
+    Body: {"content": "...新的 MD 正文..."}
+
+    27.16 修复：
+    1. `storage.update()` 幂等化——无论传回纯正文还是带 frontmatter 的全文，
+       落盘后只保留一段 frontmatter（此前每保存一次多一段）；
+    2. 保存后**回写 `documents.content`**——预览端点
+       `GET /search/preview`（source=auto）读的是数据库里的 content，
+       只写 MD 副本不回写 DB，就会出现"保存成功但再预览还是老内容"。
     """
     if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="仅管理员可保存")
 
     new_content = payload.get("content", "")
-    if not new_content:
+    if not new_content.strip():
         raise HTTPException(status_code=400, detail="content 不能为空")
 
     storage = _storage()
@@ -396,10 +414,24 @@ async def save_markdown(
     if not path:
         raise HTTPException(status_code=404, detail="MD 副本不存在")
 
+    # 27.16：MD 副本是"可编辑真源"，回写 DB，保证 预览 / 检索 / MCP 三处读到同一份内容
+    content_synced = False
+    body = storage.read_body(doc_id)
+    if body is not None:
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc is not None:
+            doc.content = body
+            doc.content_extracted = True
+            doc.content_extraction_error = None
+            db.commit()
+            content_synced = True
+        else:
+            logger.warning(f"doc {doc_id} 在 documents 表里不存在，跳过 content 回写")
+
     # 重建索引（内容变了）
     try:
         _index().index_doc(doc_id, str(path))
     except Exception as e:
         logger.exception(f"重建索引失败: {e}")
 
-    return {"success": True, "path": str(path)}
+    return {"success": True, "path": str(path), "content_synced": content_synced}

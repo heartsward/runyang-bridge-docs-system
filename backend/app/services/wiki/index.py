@@ -10,6 +10,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Set, Tuple
 
+from app.services.wiki.storage import strip_frontmatter_blocks
+
 logger = logging.getLogger(__name__)
 
 # 索引 DB 路径（与 MD 副本同树）
@@ -168,10 +170,11 @@ class WikiIndex:
 
         content = path.read_text(encoding="utf-8")
         fm = self.parse_frontmatter(content)
-        wikilinks, hashtags = self.extract_links_and_tags(content)
 
-        # 正文（去掉 frontmatter）
-        body = FRONTMATTER_PATTERN.sub("", content, count=1)
+        # 正文（剥离开头**全部** frontmatter 块；历史脏文件里可能有多段重复，
+        # 只剥一段会把重复的 title/source_file 当正文塞进 FTS 索引 → 污染检索）
+        _fm_text, body = strip_frontmatter_blocks(content)
+        wikilinks, hashtags = self.extract_links_and_tags(body)
 
         title = fm.get("title", "")
         tags = fm.get("tags", []) or []

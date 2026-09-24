@@ -8,7 +8,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import yaml
 
@@ -18,6 +18,51 @@ logger = logging.getLogger(__name__)
 # storage.py 路径：backend/app/services/wiki/storage.py
 # parent.parent.parent.parent = backend/
 WIKI_DIR = Path(__file__).parent.parent.parent.parent / "wiki"
+
+# 匹配**文件开头**的一段 YAML frontmatter（非贪婪：遇到第一个结束分隔线就停）
+# 兼容 \r\n 与分隔线后的空白；用 \A 锚定开头，避免匹配到正文里的 --- 分隔线
+FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.DOTALL)
+
+
+def split_frontmatter(text: str) -> Tuple[str, str]:
+    """切成 (frontmatter 原文, 正文)。
+
+    frontmatter 原文含首尾 `---` 分隔线和结尾换行；正文已去掉紧随其后的空行。
+    没有 frontmatter 时返回 ("", 原文)。
+    """
+    text = text or ""
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return "", text
+    return m.group(0), text[m.end():].lstrip("\r\n")
+
+
+def strip_frontmatter_blocks(text: str) -> Tuple[str, str]:
+    """剥离开头**连续多段** frontmatter，返回 (第一段原文, 纯正文)。
+
+    历史脏数据里同一个文件可能存在多段（保存一次多一段）。正文只保留
+    最后一段之后的内容，frontmatter 只认第一段。
+    """
+    first_fm = ""
+    rest = text or ""
+    while True:
+        fm, body = split_frontmatter(rest)
+        if not fm:
+            break
+        if not first_fm:
+            first_fm = fm
+        rest = body
+    return first_fm, rest
+
+
+def join_frontmatter(frontmatter: str, body: str) -> str:
+    """按统一版式拼回文件：`---\\n<yaml>---\\n\\n<正文>\\n`"""
+    body = (body or "").strip("\r\n")
+    if not frontmatter:
+        return body + "\n" if body else ""
+    if not frontmatter.endswith("\n"):
+        frontmatter += "\n"
+    return f"{frontmatter}\n{body}\n"
 
 
 def build_frontmatter(
@@ -144,6 +189,14 @@ class WikiStorage:
         logger.info(f"已写入 MD 副本: {path} ({len(full_content)} chars)")
         return path
 
+    def read_body(self, doc_id: int) -> Optional[str]:
+        """读取 MD 正文（剥离全部 frontmatter，保留 `# 标题` 行）"""
+        content = self.read(doc_id)
+        if content is None:
+            return None
+        _fm, body = strip_frontmatter_blocks(content)
+        return body
+
     def update(
         self,
         doc_id: int,
@@ -151,32 +204,35 @@ class WikiStorage:
     ) -> Optional[Path]:
         """更新 MD 副本（用户从预览编辑器保存时调用）
 
-        保留原 frontmatter，只替换正文（heading 之后）。
+        幂等保证（27.16 修复）：无论传进来的是"纯正文"还是"带 frontmatter 的全文"，
+        落盘后文件里**只会有一段** frontmatter。
+
+        历史 bug：`GET /wiki/doc/{id}/markdown` 返回的是全文（含 frontmatter），
+        编辑器保存时把全文原样传回，这里又把磁盘上的 frontmatter 再拼一次
+        → 每保存一次就多一段重复的 title/source_file/doc_type；
+        多出来的那段还会被当成正文进 FTS 索引（污染检索）。
+
         如 MD 不存在返回 None。
         """
         path = self.get_path(doc_id)
         if not path.exists():
             return None
+
         existing = path.read_text(encoding="utf-8")
-        # 提取 frontmatter（保留）
-        m = re.match(r"^---\n(.*?)\n---\n", existing, re.DOTALL)
-        if not m:
-            # 旧文件无 frontmatter，覆盖写
-            frontmatter = ""
-        else:
-            frontmatter = existing[: m.end()]
+        disk_fm, disk_body = strip_frontmatter_blocks(existing)
 
-        # 保留 heading
-        body_match = re.search(r"^#\s+.+\n+", new_markdown_body, re.MULTILINE)
-        if body_match:
-            heading = new_markdown_body[: body_match.end()]
-            rest = new_markdown_body[body_match.end():]
-        else:
-            heading = ""
-            rest = new_markdown_body
+        # 传回的内容可能自带 meta（历史行为），先剥离**全部** meta 块（含已累积的多段）
+        incoming_fm, incoming_body = strip_frontmatter_blocks(new_markdown_body)
 
-        path.write_text(frontmatter + heading + rest, encoding="utf-8")
-        logger.info(f"已更新 MD 副本: {path}")
+        # frontmatter 以磁盘为准：元信息由系统维护，不让编辑器写坏；
+        # 磁盘上没有（旧文件）才退回用传入的
+        frontmatter = disk_fm or incoming_fm
+        body = incoming_body if incoming_body.strip() else disk_body
+
+        path.write_text(join_frontmatter(frontmatter, body), encoding="utf-8")
+        logger.info(
+            f"已更新 MD 副本: {path}（frontmatter 1 段，正文 {len(body)} 字符）"
+        )
         return path
 
     def list_all(self) -> List[Path]:
