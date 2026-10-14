@@ -74,6 +74,7 @@ export interface Asset {
   // 备注和标签
   notes?: string
   tags?: string[]
+  groups?: string[]
   
   // 数据来源
   source_file?: string
@@ -123,6 +124,7 @@ export interface AssetCreate {
   next_maintenance?: string
   notes?: string
   tags?: string[]
+  groups?: string[]
   source_file?: string
   source_document_id?: number
   confidence_score?: number
@@ -161,6 +163,7 @@ export interface AssetUpdate {
   next_maintenance?: string
   notes?: string
   tags?: string[]
+  groups?: string[]
   confidence_score?: number
 }
 
@@ -171,6 +174,7 @@ export interface AssetSearchQuery {
   ip_address?: string
   department?: string
   network_location?: string
+  group?: string
   tags?: string[]
   sort_by?: string
   sort_order?: 'asc' | 'desc'

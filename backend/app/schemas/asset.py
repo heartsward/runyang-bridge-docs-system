@@ -55,6 +55,7 @@ class AssetBase(BaseModel):
     # 备注和标签
     notes: Optional[str] = Field(None, description="备注")
     tags: Optional[List[str]] = Field(None, description="标签")
+    groups: Optional[List[str]] = Field(None, description="自定义分组")
     
     # 数据来源
     source_file: Optional[str] = Field(None, description="数据来源文件")
@@ -67,6 +68,23 @@ class AssetBase(BaseModel):
     def parse_tags(cls, v):
         if isinstance(v, str):
             return [tag.strip() for tag in v.split(',') if tag.strip()]
+        return v
+
+    @validator('groups', pre=True)
+    def parse_groups(cls, v):
+        # 兼容三种输入：JSON 字符串（DB 列原值）、逗号分隔串、已是 list
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith('['):
+                import json
+                try:
+                    parsed = json.loads(s)
+                    return parsed if isinstance(parsed, list) else []
+                except json.JSONDecodeError:
+                    return []
+            return [g.strip() for g in s.split(',') if g.strip()]
         return v
 
 
@@ -109,6 +127,7 @@ class AssetUpdate(BaseModel):
     next_maintenance: Optional[datetime] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
+    groups: Optional[List[str]] = None
     confidence_score: Optional[int] = None
 
 

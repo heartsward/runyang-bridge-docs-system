@@ -124,6 +124,14 @@
             style="width: 120px"
             @update:value="handleSearch"
           />
+          <n-select
+            v-model:value="filters.group"
+            placeholder="分组"
+            :options="groupOptionsForSelect"
+            clearable
+            style="width: 150px"
+            @update:value="handleSearch"
+          />
         </n-space>
         
         <!-- 第二行：排序选项 -->
@@ -251,6 +259,17 @@
           <n-grid-item>
             <n-form-item label="状态" path="status">
               <n-select v-model:value="assetForm.status" :options="assetStatusOptions" placeholder="请选择状态" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="分组" path="groups">
+              <n-select
+                v-model:value="assetForm.groups"
+                :options="groupOptionsForSelect"
+                placeholder="可多选分组"
+                multiple
+                clearable
+              />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
@@ -597,6 +616,12 @@
                   <span v-if="viewingAsset.commissioning_date">{{ formatDate(viewingAsset.commissioning_date) }}</span>
                   <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
+                <n-descriptions-item label="分组">
+                  <n-space v-if="viewingAsset.groups && viewingAsset.groups.length" size="small">
+                    <n-tag v-for="g in viewingAsset.groups" :key="g" size="small" type="info" :bordered="false">{{ g }}</n-tag>
+                  </n-space>
+                  <n-text depth="3" v-else>未分组</n-text>
+                </n-descriptions-item>
                 <n-descriptions-item label="维保到期">
                   <span v-if="viewingAsset.warranty_expiry" :style="{ color: warrantyColor(viewingAsset.warranty_expiry), fontWeight: warrantyColor(viewingAsset.warranty_expiry) === '#d03050' ? 600 : 400 }">
                     {{ formatDate(viewingAsset.warranty_expiry) }}
@@ -798,6 +823,34 @@
           </n-space>
         </n-tab-pane>
 
+        <!-- 自定义分组管理 -->
+        <n-tab-pane name="assetGroups" tab="分组">
+          <n-space vertical>
+            <n-space>
+              <n-input v-model:value="newAssetGroup" placeholder="输入新分组名称" style="width: 250px;" />
+              <n-button type="primary" @click="handleAddAssetGroup" :disabled="!newAssetGroup">
+                添加
+              </n-button>
+            </n-space>
+            <n-text depth="3" style="font-size: 12px;">
+              删除分组仅移除分组定义；已挂该分组的设备需在各设备的编辑表单中自行调整。
+            </n-text>
+            <n-list>
+              <n-list-item v-for="grp in editableAssetGroupOptions" :key="grp">
+                <n-space justify="space-between" style="width: 100%;">
+                  <n-space>
+                    <n-tag type="info" :bordered="false">{{ grp }}</n-tag>
+                    <n-text depth="3">{{ groupUsageCount(grp) }} 台设备</n-text>
+                  </n-space>
+                  <n-button size="tiny" type="error" ghost @click="handleDeleteAssetGroup(grp)">
+                    删除
+                  </n-button>
+                </n-space>
+              </n-list-item>
+            </n-list>
+          </n-space>
+        </n-tab-pane>
+
         <!-- 所处网络管理 -->
         <n-tab-pane name="networkLocations" tab="所处网络">
           <n-space vertical>
@@ -894,7 +947,7 @@ import {
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { assetService, documentService, authService } from '@/services'
-import { getAssetTypes, updateAssetTypes, getDepartments, updateDepartments } from '@/services/system-config'
+import { getAssetTypes, updateAssetTypes, getDepartments, updateDepartments, getAssetGroups, updateAssetGroups } from '@/services/system-config'
 import apiService from '@/services/api'
 import type { Asset, AssetCreate, AssetExtractRequest, AssetExtractResult, AssetStatistics } from '@/types/asset'
 import { AssetType, AssetStatus } from '@/types/asset'
@@ -1007,7 +1060,8 @@ const filters = reactive({
   asset_type: null as AssetType | null,
   status: null as AssetStatus | null,
   department: null as string | null,
-  network_location: null as string | null
+  network_location: null as string | null,
+  group: null as string | null
 })
 
 // 排序配置
@@ -1034,6 +1088,7 @@ const assetForm = reactive<AssetFormModel>({
   status: AssetStatus.ACTIVE,
   commissioning_date: null,
   warranty_expiry: null,
+  groups: [] as string[],
   notes: ''
 })
 
@@ -1289,6 +1344,87 @@ const handleDeleteDepartment = async (dept: string) => {
   }
 }
 
+// ===== 自定义分组 =====
+const editableAssetGroupOptions = ref<string[]>([])
+
+// 加载分组
+const loadAssetGroups = async () => {
+  try {
+    const grps = await getAssetGroups()
+    editableAssetGroupOptions.value = grps
+  } catch (error) {
+    console.error('加载分组失败:', error)
+    // 加载失败时从现有资产提取
+    const set = new Set<string>()
+    assets.value.forEach(a => (a.groups || []).forEach(g => g && set.add(g)))
+    editableAssetGroupOptions.value = Array.from(set).sort()
+  }
+}
+
+// 分组下拉选项（筛选器与表单共用）
+const groupOptionsForSelect = computed(() =>
+  editableAssetGroupOptions.value.map(g => ({ label: g, value: g }))
+)
+
+// 新分组输入
+const newAssetGroup = ref('')
+
+// 分组使用台数（基于当前已加载资产）
+const groupUsageCount = (grp: string) =>
+  assets.value.filter(a => (a.groups || []).includes(grp)).length
+
+// 添加分组
+const handleAddAssetGroup = async () => {
+  const name = newAssetGroup.value.trim()
+  if (!name) return
+  if (editableAssetGroupOptions.value.includes(name)) {
+    message.warning('该分组已存在')
+    return
+  }
+  try {
+    const updated = [...editableAssetGroupOptions.value, name]
+    editableAssetGroupOptions.value = await updateAssetGroups(updated)
+    newAssetGroup.value = ''
+    message.success('添加成功')
+  } catch (error) {
+    console.error('添加分组失败:', error)
+    message.error('添加失败')
+  }
+}
+
+// 删除分组（只删定义，不动设备上的挂载）
+const handleDeleteAssetGroup = async (grp: string) => {
+  const used = groupUsageCount(grp)
+  if (used > 0) {
+    dialog.warning({
+      title: '确认删除分组',
+      content: `分组 "${grp}" 当前有 ${used} 台设备挂载（按已加载数据统计）。删除仅移除分组定义，设备上的挂载需在各设备编辑表单中自行调整。确定删除？`,
+      positiveText: '确定删除',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        try {
+          const updated = editableAssetGroupOptions.value.filter(g => g !== grp)
+          editableAssetGroupOptions.value = await updateAssetGroups(updated)
+          if (filters.group === grp) filters.group = null
+          message.success('删除成功')
+        } catch (error) {
+          console.error('删除分组失败:', error)
+          message.error('删除失败')
+        }
+      }
+    })
+    return
+  }
+  try {
+    const updated = editableAssetGroupOptions.value.filter(g => g !== grp)
+    editableAssetGroupOptions.value = await updateAssetGroups(updated)
+    message.success('删除成功')
+  } catch (error) {
+    console.error('删除分组失败:', error)
+    message.error('删除失败')
+  }
+}
+
 const assetStatusOptions = computed(() =>
   Object.values(AssetStatus).map(status => ({
     label: assetService.getAssetStatusName(status),
@@ -1426,6 +1562,18 @@ const columns: DataTableColumns<Asset> = [
     title: '部门',
     key: 'department',
     width: 100
+  },
+  {
+    title: '分组',
+    key: 'groups',
+    width: 160,
+    render: (row) => {
+      const gs = row.groups || []
+      if (!gs.length) return h('span', { style: { color: '#999' } }, '—')
+      return h(NSpace, { size: 4 }, {
+        default: () => gs.map(g => h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => g }))
+      })
+    }
   },
   {
     title: '启用日期',
@@ -1701,7 +1849,8 @@ const debouncedSearch = debounce(async (resetPage = true) => {
     const hasSearchQuery = searchQuery.value && searchQuery.value.trim() !== ''
     const hasFilters = filters.asset_type || filters.status || 
                      filters.department || 
-                     filters.network_location
+                     filters.network_location ||
+                     filters.group
     
     const query = {
       query: searchQuery.value || '',
@@ -1709,6 +1858,7 @@ const debouncedSearch = debounce(async (resetPage = true) => {
       status: filters.status || undefined,
       department: filters.department || undefined,
       network_location: filters.network_location || undefined,
+      group: filters.group || undefined,
       sort_by: sortConfig.sortBy,
       sort_order: sortConfig.sortOrder,
       page: 1,
@@ -1775,6 +1925,7 @@ const resetForm = () => {
     status: AssetStatus.ACTIVE,
     commissioning_date: null,
     warranty_expiry: null,
+    groups: [],
     notes: ''
   })
   editingAsset.value = null
@@ -1818,6 +1969,7 @@ const handleSubmit = async () => {
         status: assetForm.status,
         commissioning_date: timestampToISO(assetForm.commissioning_date) ?? null,
         warranty_expiry: timestampToISO(assetForm.warranty_expiry) ?? null,
+        groups: assetForm.groups || [],
         notes: assetForm.notes
       }
       await assetService.updateAsset(editingAsset.value.id, updateData)
@@ -1866,6 +2018,7 @@ const editAsset = async (asset: Asset) => {
       status: fullAsset.status,
       commissioning_date: dateToTimestamp(fullAsset.commissioning_date),
       warranty_expiry: dateToTimestamp(fullAsset.warranty_expiry),
+      groups: fullAsset.groups || [],
       notes: fullAsset.notes,
       tags: fullAsset.tags || []
     })
@@ -2724,6 +2877,7 @@ onMounted(async () => {
     loadAssetTypes(),
     loadDepartments(),
     loadNetworkLocations(),
+    loadAssetGroups(),
   ])
 })
 </script>

@@ -1494,3 +1494,28 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   避免升序时 78 台空白设备挤在最前；其余字段行为不变。
   （`hasattr(AssetModel, sort_by)` 动态白名单已天然接受新列，无注入面。）
 - **验证**：pytest 28 passed；SQLite 语义实测 asc/desc 均 nulls-last ✓；vite build ✓。
+
+## 28.4 — 设备资产自定义分组（多选 + 管理选项 + 筛选）（2026-10-15）
+
+- **需求**：设备可挂多个自定义分组；分组名在「管理选项」里自助增删；资产页加按分组筛选的下拉。
+- **数据模型**：`Asset` 新增 `groups = Column(Text)`（JSON 字符串数组，与 tags 同构）。
+  迁移脚本 `backend/add_asset_groups.py`（幂等 ALTER TABLE，groups 加引号防关键字）。本地库已执行 ✓。**126 需手动跑一次。**
+- **后端**：
+  - `schemas/asset.py`：`AssetBase`/`AssetUpdate` 补 `groups: Optional[List[str]]`；
+    新增 `parse_groups` validator（兼容 JSON 串/逗号串/list/空，DB 原值→list）。
+  - `api/endpoints/assets.py`：create/update 时 groups（顺带 tags）列表 → `json.dumps` 落 Text 列；
+    列表端点新增 `group=` 查询参数，用 `EXISTS(SELECT 1 FROM json_each(assets.groups) WHERE value=:grp)` **精确匹配**
+    （实测"区"不会误命中"核心区"，比 LIKE 稳）；导出 field_mapping + groups JSON→逗号串分支。
+  - `api/endpoints/system_config.py`：新增 `GET/PUT /asset-groups`（分组名列表存 SystemConfig key=custom_asset_groups）；
+    GET 合并"配置定义 + 资产实际用到的分组名"去重排序；PUT 去空白去重。
+- **前端**：
+  - `types/asset.ts`：Asset/AssetCreate/AssetUpdate 补 `groups?: string[]`；AssetSearchQuery 补 `group?`。
+  - `services/asset.ts`：searchAssets 透传 `group`；`services/system-config.ts`：getAssetGroups/updateAssetGroups。
+  - `AssetView.vue`：筛选行加「分组」单选下拉（clearable）；表格加「分组」列（NTag 列表）；
+    创建/编辑表单加 `n-select multiple` 分组多选；详情弹窗加「分组」；管理选项弹窗加「分组」tab
+    （增删 + 显示每台分组挂载数，删除有挂载时弹确认，仅删定义不动设备挂载）。
+- **skill**：`wiki_client.py` `ASSET_UPDATABLE_FIELDS` 补 `groups`。
+- **测试**：`backend/tests/test_asset_groups.py` 6 例（schema 变体 + create/update 往返 + group 精确筛选 + 配置 CRUD）全绿；
+  全量 pytest 34 passed。⚠️ 踩坑：override 依赖必须是端点实际引用的 `deps.get_db`（非 app.db.database.get_db），
+  否则打到真实库——已修正并清理误写的 8 行测试数据（id 85-92）。内存 SQLite 需 StaticPool+check_same_thread=False。
+- **验证**：vite build ✓；vue-tsc 无分组相关新错。

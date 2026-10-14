@@ -86,6 +86,8 @@ async def list_assets(
 
     department: Optional[str] = Query(None, description="部门筛选"),
 
+    group: Optional[str] = Query(None, description="自定义分组筛选（分组名，JSON数组包含匹配）"),
+
     sort_by: str = Query("created_at", description="排序字段"),
 
     sort_order: str = Query("desc", description="排序顺序 asc/desc"),
@@ -157,6 +159,20 @@ async def list_assets(
         if department:
 
             query = query.filter(AssetModel.department == department)
+
+        
+
+        # 自定义分组过滤（groups 列存 JSON 数组字符串，按 JSON 元素精确匹配）
+
+        if group:
+
+            from sqlalchemy import text as sa_text
+
+            query = query.filter(
+
+                sa_text("EXISTS (SELECT 1 FROM json_each(assets.groups) WHERE json_each.value = :grp)")
+
+            ).params(grp=group)
 
         
 
@@ -438,9 +454,21 @@ async def create_asset(
 
         # 创建资产
 
+        asset_data = asset.dict()
+
+        # groups/tags 列表序列化为 JSON 字符串（Text 列）
+
+        if isinstance(asset_data.get('groups'), list):
+
+            asset_data['groups'] = json.dumps(asset_data['groups'], ensure_ascii=False)
+
+        if isinstance(asset_data.get('tags'), list):
+
+            asset_data['tags'] = json.dumps(asset_data['tags'], ensure_ascii=False)
+
         db_asset = AssetModel(
 
-            **asset.dict(),
+            **asset_data,
 
             creator_id=current_user.id
 
@@ -519,6 +547,14 @@ async def update_asset(
         # 更新字段
 
         update_data = asset_update.dict(exclude_unset=True)
+
+        # groups/tags 列表序列化为 JSON 字符串（Text 列）
+
+        for json_field in ('groups', 'tags'):
+
+            if isinstance(update_data.get(json_field), list):
+
+                update_data[json_field] = json.dumps(update_data[json_field], ensure_ascii=False)
 
         for field, value in update_data.items():
 
@@ -914,6 +950,8 @@ async def export_assets(
 
             "notes": "备注",
 
+            "groups": "自定义分组",
+
             "created_at": "创建时间",
 
             "updated_at": "更新时间"
@@ -1017,6 +1055,20 @@ async def export_assets(
                             tags = json.loads(value) if value else []
 
                             value = ', '.join(tags) if isinstance(tags, list) else str(value)
+
+                        except:
+
+                            value = str(value) if value else ''
+
+                    elif field == 'groups':
+
+                        # 处理JSON字段（自定义分组）
+
+                        try:
+
+                            groups_list = json.loads(value) if value else []
+
+                            value = ', '.join(groups_list) if isinstance(groups_list, list) else str(value)
 
                         except:
 

@@ -90,6 +90,7 @@ class Asset(Base):
     # 备注和标签
     notes = Column(Text, comment="备注")
     tags = Column(Text, comment="标签(JSON格式)")
+    groups = Column(Text, comment="自定义分组(JSON格式,字符串数组)")
     
     # 数据来源
     source_file = Column(String(255), comment="数据来源文件")

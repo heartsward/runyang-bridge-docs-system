@@ -40,3 +40,15 @@ export const updateDepartments = async (departments: string[]): Promise<string[]
   const response = await apiService.put<string[]>('/system-config/departments', departments)
   return response
 }
+
+// 获取自定义分组列表
+export const getAssetGroups = async (): Promise<string[]> => {
+  const response = await apiService.get<string[]>('/system-config/asset-groups')
+  return response
+}
+
+// 更新自定义分组列表
+export const updateAssetGroups = async (groups: string[]): Promise<string[]> => {
+  const response = await apiService.put<string[]>('/system-config/asset-groups', groups)
+  return response
+}

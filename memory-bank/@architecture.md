@@ -109,6 +109,17 @@ runyang-bridge-docs-system/
 > - 前端约定：`NDatePicker` 用毫秒时间戳，提交经 `timestampToISO` 转**本地零点 ISO**（防时区串天），回填经 `dateToTimestamp`；维保到期高亮 过期红/90天内橙/正常绿。
 > - skill `ASSET_UPDATABLE_FIELDS` 白名单同步 `commissioning_date`。
 
+> **2026-10-15 变更（阶段二十八·28.3 — 资产排序新增日期字段）**：排序下拉加「启用日期」「维保到期」。后端列表端点日期类字段（5 个维护日期）排序升级为 `order_by(col.is_(None), order_func(col))`——**空值升/降序都排最后**（SQLite 默认升序 NULL 在最前，会挤占视野）。其余字段行为不变。`hasattr(AssetModel, sort_by)` 动态白名单天然接受新列，无注入面。
+
+> **2026-10-15 变更（阶段二十八·28.4 — 设备资产自定义分组）**：设备可挂**多个**自定义分组；分组名在「管理选项」自助增删；资产页加按分组筛选下拉。
+> - **数据模型**：`Asset` 新增 `groups = Column(Text)`（JSON 字符串数组，与 `tags` 同构）。迁移脚本 `backend/add_asset_groups.py`（幂等 ALTER TABLE，`groups` 加引号防 SQL 关键字）。**每台存量库（本地/126）部署新代码后须手动跑一次。**
+> - **分组定义**存 `SystemConfig`（key=`custom_asset_groups`，字符串数组）；设备侧存自己挂载的分组名数组（冗余，不引用定义表）。`GET /asset-groups` 合并"配置定义 + 资产实际用到的分组名"去重排序；`PUT` 去空白去重。
+> - **分组筛选**：列表端点 `group=` 用 `EXISTS(SELECT 1 FROM json_each(assets.groups) WHERE value=:grp)` **精确匹配**（实测"区"不误命中"核心区"，优于 LIKE）。
+> - **schema**：`AssetBase`/`AssetUpdate` 补 `groups: Optional[List[str]]`；`parse_groups` validator 兼容 JSON 串/逗号串/list/空。端点 create/update 时 groups（顺带 tags）列表 → `json.dumps` 落 Text 列。
+> - **前端**：筛选行「分组」单选下拉；表格「分组」列（NTag）；创建/编辑 `n-select multiple`；详情弹窗「分组」；管理选项「分组」tab（增删 + 挂载台数统计，删除有挂载弹确认，仅删定义不动设备挂载）。
+> - **测试踩坑（重要）**：TestClient 里 `dependency_overrides` 的键必须是端点**实际引用**的 `deps.get_db`（不是 `app.db.database.get_db`）——两者是不同函数对象，override 错对象会打到真实库污染数据。内存 SQLite 需 `StaticPool` + `check_same_thread=False`。
+> - skill `ASSET_UPDATABLE_FIELDS` 白名单同步 `groups`。
+
 ---
 
 ## 1. backend/ — FastAPI 后端

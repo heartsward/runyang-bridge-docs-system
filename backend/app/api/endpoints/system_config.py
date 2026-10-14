@@ -25,6 +25,7 @@ router = APIRouter()
 ASSET_TYPES_KEY = "custom_asset_types"
 DEPARTMENTS_KEY = "custom_departments"
 NETWORK_LOCATIONS_KEY = "custom_network_locations"
+ASSET_GROUPS_KEY = "custom_asset_groups"
 
 # 默认设备类型
 DEFAULT_ASSET_TYPES = [
@@ -180,3 +181,52 @@ async def update_network_locations(
     db.commit()
     db.refresh(config)
     return json.loads(config.value)
+
+
+# 自定义分组API（设备可挂多个分组；分组名列表存 SystemConfig，设备侧存 JSON 数组）
+def _collect_existing_groups(db: Session) -> List[str]:
+    """从现有资产的 groups 列（JSON 数组字符串）提取已用分组名"""
+    import json as _json
+    rows = db.query(Asset.groups).filter(
+        Asset.groups.isnot(None),
+        Asset.groups != "",
+        Asset.groups != "[]"
+    ).all()
+    found = set()
+    for (raw,) in rows:
+        try:
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                for g in parsed:
+                    if isinstance(g, str) and g.strip():
+                        found.add(g.strip())
+        except (ValueError, TypeError):
+            continue
+    return list(found)
+
+
+@router.get("/asset-groups", response_model=List[str], summary="获取自定义分组列表")
+async def get_asset_groups(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取自定义分组列表（配置 + 资产实际使用的分组合并去重）"""
+    config = get_system_config(db, ASSET_GROUPS_KEY)
+    custom_groups = json.loads(config.value) if config.value else []
+    all_groups = list(set(custom_groups + _collect_existing_groups(db)))
+    return sorted(all_groups)
+
+
+@router.put("/asset-groups", response_model=List[str], summary="更新自定义分组列表")
+async def update_asset_groups(
+    groups: List[str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """更新自定义分组列表"""
+    cleaned = sorted({g.strip() for g in groups if g and g.strip()})
+    config = get_system_config(db, ASSET_GROUPS_KEY)
+    config.value = json.dumps(cleaned, ensure_ascii=False)
+    db.commit()
+    db.refresh(config)
+    return cleaned
