@@ -118,3 +118,25 @@ def test_asset_groups_config_crud(client):
     _mk(client, "dev3", groups=["收费网专项"])
     r2 = client.get("/api/v1/system-config/asset-groups")
     assert "机房" in r2.json() and "收费网专项" in r2.json()
+
+
+def test_delete_group_cascades_to_assets(client):
+    # 建两个分组，两台设备分别挂载（其中一台挂两个）
+    client.put("/api/v1/system-config/asset-groups", json=["机房", "核心区"])
+    a1 = _mk(client, "devA", groups=["机房", "核心区"])
+    a2 = _mk(client, "devB", groups=["核心区"])
+    a3 = _mk(client, "devC", groups=["机房"])
+
+    r = client.delete("/api/v1/system-config/asset-groups/核心区")
+    assert r.status_code == 200, r.text
+    assert r.json()["removed_from_assets"] == 2  # devA + devB
+
+    # 设备挂载已级联清理
+    assert client.get(f"/api/v1/assets/{a1['id']}").json()["groups"] == ["机房"]
+    assert client.get(f"/api/v1/assets/{a2['id']}").json()["groups"] == []
+    assert client.get(f"/api/v1/assets/{a3['id']}").json()["groups"] == ["机房"]
+    # 分组定义也移除
+    assert client.get("/api/v1/system-config/asset-groups").json() == ["机房"]
+    # 筛选不再命中
+    r2 = client.get("/api/v1/assets/", params={"group": "核心区"})
+    assert r2.json()["total"] == 0

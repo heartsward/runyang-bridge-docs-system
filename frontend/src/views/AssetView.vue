@@ -242,6 +242,11 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
+            <n-form-item label="系统型号及版本" path="system_version">
+              <n-input v-model:value="assetForm.system_version" placeholder="如 V6.0.0.1.2.B090" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
             <n-form-item label="所处网络" path="network_location">
               <n-select v-model:value="assetForm.network_location" :options="networkLocationOptions" placeholder="请选择所处网络" />
             </n-form-item>
@@ -601,6 +606,9 @@
                 <n-descriptions-item label="设备型号">
                   {{ viewingAsset.device_model || '未设置' }}
                 </n-descriptions-item>
+                <n-descriptions-item label="系统型号及版本">
+                  {{ viewingAsset.system_version || '未设置' }}
+                </n-descriptions-item>
                 <n-descriptions-item label="所处网络">
                   {{ getNetworkLocationLabel(viewingAsset.network_location) }}
                 </n-descriptions-item>
@@ -709,44 +717,8 @@
             </div>
             <n-checkbox-group v-model:value="exportFields">
               <n-grid cols="2" responsive="screen" :x-gap="8" :y-gap="4">
-                <n-grid-item>
-                  <n-checkbox value="name">设备名称</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="asset_type">设备类型</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="ip_address">IP地址</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="hostname">主机名</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="username">用户名</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="password">密码</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="device_model">设备型号</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="network_location">所处网络</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="department">所属部门</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="status">状态</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="notes">备注</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="created_at">创建时间</n-checkbox>
-                </n-grid-item>
-                <n-grid-item>
-                  <n-checkbox value="updated_at">更新时间</n-checkbox>
+                <n-grid-item v-for="f in exportFieldDefs" :key="f.key">
+                  <n-checkbox :value="f.key">{{ f.label }}</n-checkbox>
                 </n-grid-item>
               </n-grid>
             </n-checkbox-group>
@@ -833,7 +805,7 @@
               </n-button>
             </n-space>
             <n-text depth="3" style="font-size: 12px;">
-              删除分组仅移除分组定义；已挂该分组的设备需在各设备的编辑表单中自行调整。
+              删除分组时，所有设备上挂载的该分组标签会被自动移除。
             </n-text>
             <n-list>
               <n-list-item v-for="grp in editableAssetGroupOptions" :key="grp">
@@ -947,7 +919,7 @@ import {
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import { assetService, documentService, authService } from '@/services'
-import { getAssetTypes, updateAssetTypes, getDepartments, updateDepartments, getAssetGroups, updateAssetGroups } from '@/services/system-config'
+import { getAssetTypes, updateAssetTypes, getDepartments, updateDepartments, getAssetGroups, updateAssetGroups, deleteAssetGroup } from '@/services/system-config'
 import apiService from '@/services/api'
 import type { Asset, AssetCreate, AssetExtractRequest, AssetExtractResult, AssetStatistics } from '@/types/asset'
 import { AssetType, AssetStatus } from '@/types/asset'
@@ -1079,6 +1051,7 @@ const assetForm = reactive<AssetFormModel>({
   name: '',
   asset_type: AssetType.SERVER,
   device_model: '',
+  system_version: '',
   ip_address: '',
   hostname: '',
   username: '',
@@ -1392,37 +1365,30 @@ const handleAddAssetGroup = async () => {
   }
 }
 
-// 删除分组（只删定义，不动设备上的挂载）
+// 删除分组（后端级联：同时从所有设备的分组标签里摘掉该分组）
 const handleDeleteAssetGroup = async (grp: string) => {
   const used = groupUsageCount(grp)
-  if (used > 0) {
-    dialog.warning({
-      title: '确认删除分组',
-      content: `分组 "${grp}" 当前有 ${used} 台设备挂载（按已加载数据统计）。删除仅移除分组定义，设备上的挂载需在各设备编辑表单中自行调整。确定删除？`,
-      positiveText: '确定删除',
-      negativeText: '取消',
-      onPositiveClick: async () => {
-        try {
-          const updated = editableAssetGroupOptions.value.filter(g => g !== grp)
-          editableAssetGroupOptions.value = await updateAssetGroups(updated)
-          if (filters.group === grp) filters.group = null
-          message.success('删除成功')
-        } catch (error) {
-          console.error('删除分组失败:', error)
-          message.error('删除失败')
-        }
+  dialog.warning({
+    title: '确认删除分组',
+    content: used > 0
+      ? `将删除分组 "${grp}"，并自动从 ${used} 台设备（按已加载数据统计）上移除该分组标签。此操作不可撤销，确定删除？`
+      : `确定删除分组 "${grp}" 吗？`,
+    positiveText: '确定删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const result = await deleteAssetGroup(grp)
+        editableAssetGroupOptions.value = await getAssetGroups()
+        if (filters.group === grp) filters.group = null
+        // 设备上的挂载已被后端清理，重新拉取列表保持一致
+        await handleSearch(false)
+        message.success(`删除成功${result.removed_from_assets ? `，已从 ${result.removed_from_assets} 台设备移除该分组` : ''}`)
+      } catch (error: any) {
+        console.error('删除分组失败:', error)
+        message.error(error.detail || '删除失败')
       }
-    })
-    return
-  }
-  try {
-    const updated = editableAssetGroupOptions.value.filter(g => g !== grp)
-    editableAssetGroupOptions.value = await updateAssetGroups(updated)
-    message.success('删除成功')
-  } catch (error) {
-    console.error('删除分组失败:', error)
-    message.error('删除失败')
-  }
+    }
+  })
 }
 
 const assetStatusOptions = computed(() =>
@@ -1536,6 +1502,15 @@ const columns: DataTableColumns<Asset> = [
     key: 'device_model',
     width: 120,
     ellipsis: true
+  },
+  {
+    title: '系统型号及版本',
+    key: 'system_version',
+    width: 140,
+    ellipsis: true,
+    render: (row) => row.system_version
+      ? h('span', {}, row.system_version)
+      : h('span', { style: { color: '#999' } }, '—')
   },
   {
     title: '所处网络',
@@ -1916,6 +1891,7 @@ const resetForm = () => {
     name: '',
     asset_type: AssetType.SERVER,
     device_model: '',
+    system_version: '',
     ip_address: '',
     hostname: '',
     username: '',
@@ -1960,6 +1936,7 @@ const handleSubmit = async () => {
         name: assetForm.name,
         asset_type: assetForm.asset_type,
         device_model: assetForm.device_model,
+        system_version: assetForm.system_version,
         ip_address: assetForm.ip_address,
         hostname: assetForm.hostname,
         username: assetForm.username,
@@ -2009,6 +1986,7 @@ const editAsset = async (asset: Asset) => {
       name: fullAsset.name,
       asset_type: fullAsset.asset_type,
       device_model: fullAsset.device_model,
+      system_version: fullAsset.system_version,
       ip_address: fullAsset.ip_address,
       hostname: fullAsset.hostname,
       username: fullAsset.username,
@@ -2843,17 +2821,43 @@ const warrantyColor = (dateString: string) => {
   return '#18a058'                            // 绿：正常
 }
 
-// 导出字段选择辅助方法（仅包含编辑表单中的字段和时间戳）
-const allExportFields = [
-  'name', 'asset_type', 'ip_address', 'hostname', 'username', 'password',
-  'device_model', 'network_location', 'department', 'status',
-  'commissioning_date', 'warranty_expiry', 'notes',
-  'created_at', 'updated_at'
+// 导出字段选择辅助方法（覆盖前端资产页可见的全部字段）
+const exportFieldDefs: Array<{ key: string; label: string }> = [
+  { key: 'name', label: '设备名称' },
+  { key: 'asset_type', label: '设备类型' },
+  { key: 'ip_address', label: 'IP地址' },
+  { key: 'hostname', label: '主机名' },
+  { key: 'username', label: '用户名' },
+  { key: 'password', label: '密码' },
+  { key: 'device_model', label: '设备型号' },
+  { key: 'system_version', label: '系统型号及版本' },
+  { key: 'network_location', label: '所处网络' },
+  { key: 'department', label: '所属部门' },
+  { key: 'groups', label: '分组' },
+  { key: 'commissioning_date', label: '启用日期' },
+  { key: 'warranty_expiry', label: '维保到期' },
+  { key: 'status', label: '状态' },
+  { key: 'manufacturer', label: '制造商' },
+  { key: 'serial_number', label: '序列号' },
+  { key: 'mac_address', label: 'MAC地址' },
+  { key: 'location', label: '物理位置' },
+  { key: 'rack_position', label: '机柜位置' },
+  { key: 'os_version', label: '操作系统' },
+  { key: 'purchase_date', label: '采购日期' },
+  { key: 'last_maintenance', label: '上次维护时间' },
+  { key: 'next_maintenance', label: '下次维护时间' },
+  { key: 'purpose', label: '用途说明' },
+  { key: 'notes', label: '备注' },
+  { key: 'created_at', label: '创建时间' },
+  { key: 'updated_at', label: '更新时间' }
 ]
 
+const allExportFields = exportFieldDefs.map(f => f.key)
+
 const basicExportFields = [
-  'name', 'asset_type', 'ip_address', 'hostname', 'device_model',
-  'network_location', 'department', 'status', 'created_at'
+  'name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'system_version',
+  'network_location', 'department', 'groups', 'commissioning_date', 'warranty_expiry',
+  'status', 'created_at'
 ]
 
 const selectAllFields = () => {

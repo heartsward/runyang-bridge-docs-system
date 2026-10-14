@@ -120,6 +120,11 @@ runyang-bridge-docs-system/
 > - **测试踩坑（重要）**：TestClient 里 `dependency_overrides` 的键必须是端点**实际引用**的 `deps.get_db`（不是 `app.db.database.get_db`）——两者是不同函数对象，override 错对象会打到真实库污染数据。内存 SQLite 需 `StaticPool` + `check_same_thread=False`。
 > - skill `ASSET_UPDATABLE_FIELDS` 白名单同步 `groups`。
 
+> **2026-10-15 变更（阶段二十八·28.5 — 系统型号及版本 + 导出补全 + 分组级联删除）**：
+> - `Asset` 新增 `system_version`（String(255)，系统型号及版本）；迁移脚本 `backend/add_system_version.py`（幂等）。**存量库部署新代码后须手动跑。**
+> - 导出字段选择器由硬编码 13 项改为 `exportFieldDefs` 数组（27 项，覆盖前端可见字段）；新增字段时只需改这一个数组 + 后端 `field_mapping`。
+> - 分组删除语义变更：`DELETE /system-config/asset-groups/{name}` **级联**——删定义 + 从所有设备 groups JSON 摘标签（返回 removed_from_assets）。前端确认弹窗明示影响台数。
+
 ---
 
 ## 1. backend/ — FastAPI 后端

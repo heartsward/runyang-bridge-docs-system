@@ -922,6 +922,8 @@ async def export_assets(
 
             "os_version": "操作系统",
 
+            "system_version": "系统型号及版本",
+
             "cpu": "CPU信息",
 
             "memory": "内存信息", 

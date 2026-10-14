@@ -32,6 +32,7 @@ class AssetBase(BaseModel):
     
     # 配置信息
     os_version: Optional[str] = Field(None, description="操作系统版本")
+    system_version: Optional[str] = Field(None, description="系统型号及版本")
     cpu: Optional[str] = Field(None, description="CPU信息")
     memory: Optional[str] = Field(None, description="内存信息")
     storage: Optional[str] = Field(None, description="存储信息")
@@ -112,6 +113,7 @@ class AssetUpdate(BaseModel):
     rack_position: Optional[str] = None
     datacenter: Optional[str] = None
     os_version: Optional[str] = None
+    system_version: Optional[str] = None
     cpu: Optional[str] = None
     memory: Optional[str] = None
     storage: Optional[str] = None

@@ -1519,3 +1519,23 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   全量 pytest 34 passed。⚠️ 踩坑：override 依赖必须是端点实际引用的 `deps.get_db`（非 app.db.database.get_db），
   否则打到真实库——已修正并清理误写的 8 行测试数据（id 85-92）。内存 SQLite 需 StaticPool+check_same_thread=False。
 - **验证**：vite build ✓；vue-tsc 无分组相关新错。
+
+## 28.5 — 系统型号及版本字段 + 导出字段补全 + 分组级联删除（2026-10-15）
+
+- **需求**（陈工三条）：①新增「系统型号及版本」字段端到端；②导出字段选择器覆盖前端全部显示字段（此前只有 13 个）；③删除分组时自动摘掉所有设备上的该分组标签（原来是"只删定义不动挂载"）。
+- **后端**：
+  - `models/asset.py`：新增 `system_version = Column(String(255), comment="系统型号及版本")`；
+    `schemas/asset.py` AssetBase/AssetUpdate 同步；导出 field_mapping 补中文名。
+  - `add_system_version.py`（新）：幂等 ALTER TABLE。本地已执行 ✓，**126 需手动跑**。
+  - `system_config.py`：新增 `DELETE /asset-groups/{group_name}`——从定义列表移除 + 遍历设备
+    groups JSON 摘标签，返回 `removed_from_assets` 台数。
+- **前端**：
+  - 表格加「系统型号及版本」列（设备型号后）；详情弹窗、创建/编辑表单、assetForm/resetForm/
+    editAsset/updateData 全链路同步。
+  - 导出弹窗字段改为 `exportFieldDefs` 数组渲染（27 个字段，覆盖前端可见全部），
+    basicExportFields 同步扩充；后端 field_mapping 全部有对应中文名。
+  - 分组删除改调 DELETE 端点：确认弹窗写明"将自动从 N 台设备移除该分组标签"，
+    删除后重新 GET 分组列表 + 刷新资产列表保持一致。
+- **skill**：`ASSET_UPDATABLE_FIELDS` 补 `system_version`。
+- **验证**：pytest 35 passed（新增级联删除用例：2 台挂载清理/定义移除/筛选不再命中）；
+  vite build ✓；vue-tsc 无本次改动相关报错。

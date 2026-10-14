@@ -52,3 +52,11 @@ export const updateAssetGroups = async (groups: string[]): Promise<string[]> => 
   const response = await apiService.put<string[]>('/system-config/asset-groups', groups)
   return response
 }
+
+// 删除分组（后端会级联移除所有设备上的该分组标签）
+export const deleteAssetGroup = async (groupName: string): Promise<{ ok: boolean; removed_from_assets: number }> => {
+  const response = await apiService.delete<{ ok: boolean; removed_from_assets: number }>(
+    `/system-config/asset-groups/${encodeURIComponent(groupName)}`
+  )
+  return response
+}

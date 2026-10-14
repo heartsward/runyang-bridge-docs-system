@@ -51,6 +51,7 @@ export interface Asset {
   
   // 配置信息
   os_version?: string
+  system_version?: string
   cpu?: string
   memory?: string
   storage?: string
@@ -109,6 +110,7 @@ export interface AssetCreate {
   rack_position?: string
   datacenter?: string
   os_version?: string
+  system_version?: string
   cpu?: string
   memory?: string
   storage?: string
@@ -148,6 +150,7 @@ export interface AssetUpdate {
   rack_position?: string
   datacenter?: string
   os_version?: string
+  system_version?: string
   cpu?: string
   memory?: string
   storage?: string

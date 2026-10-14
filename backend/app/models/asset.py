@@ -67,6 +67,7 @@ class Asset(Base):
     
     # 配置信息
     os_version = Column(String(255), comment="操作系统版本")
+    system_version = Column(String(255), comment="系统型号及版本")
     cpu = Column(String(255), comment="CPU信息")
     memory = Column(String(255), comment="内存信息")
     storage = Column(String(255), comment="存储信息")

@@ -230,3 +230,45 @@ async def update_asset_groups(
     db.commit()
     db.refresh(config)
     return cleaned
+
+
+@router.delete("/asset-groups/{group_name}", summary="删除分组（同时移除所有设备上的该分组标签）")
+async def delete_asset_group(
+    group_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """删除分组定义，并自动从所有设备的 groups 中摘掉该分组标签。
+
+    返回 {ok, removed_from_assets: N}——N 为被清理挂载的设备台数。
+    """
+    name = group_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="分组名不能为空")
+
+    # 1) 从分组定义列表移除
+    config = get_system_config(db, ASSET_GROUPS_KEY)
+    defined = json.loads(config.value) if config.value else []
+    defined = [g for g in defined if g.strip() != name]
+    config.value = json.dumps(sorted(set(defined)), ensure_ascii=False)
+
+    # 2) 从所有设备的 groups JSON 数组里摘掉该标签
+    affected = 0
+    rows = db.query(Asset).filter(
+        Asset.groups.isnot(None),
+        Asset.groups != "",
+        Asset.groups != "[]"
+    ).all()
+    for asset in rows:
+        try:
+            parsed = json.loads(asset.groups)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(parsed, list) or name not in parsed:
+            continue
+        cleaned = [g for g in parsed if g != name]
+        asset.groups = json.dumps(cleaned, ensure_ascii=False)
+        affected += 1
+
+    db.commit()
+    return {"ok": True, "removed_from_assets": affected}
