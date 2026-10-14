@@ -164,13 +164,21 @@ async def list_assets(
 
         if hasattr(AssetModel, sort_by):
 
-            if sort_order.lower() == "asc":
+            col = getattr(AssetModel, sort_by)
 
-                query = query.order_by(asc(getattr(AssetModel, sort_by)))
+            order_func = asc if sort_order.lower() == "asc" else desc
+
+            # 日期类字段：空值（未设置）统一排最后，避免升序时空白设备挤在最前
+
+            if sort_by in ('purchase_date', 'commissioning_date', 'warranty_expiry',
+
+                           'last_maintenance', 'next_maintenance'):
+
+                query = query.order_by(col.is_(None), order_func(col))
 
             else:
 
-                query = query.order_by(desc(getattr(AssetModel, sort_by)))
+                query = query.order_by(order_func(col))
 
         
 

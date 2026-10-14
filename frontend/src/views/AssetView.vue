@@ -1305,7 +1305,9 @@ const sortByOptions = computed(() => [
   { label: '所属部门', value: 'department' },
   { label: '所处网络', value: 'network_location' },
   { label: 'IP地址', value: 'ip_address' },
-  { label: '状态', value: 'status' }
+  { label: '状态', value: 'status' },
+  { label: '启用日期', value: 'commissioning_date' },
+  { label: '维保到期', value: 'warranty_expiry' }
 ])
 
 // 排序顺序选项

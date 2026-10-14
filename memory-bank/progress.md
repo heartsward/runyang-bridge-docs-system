@@ -1483,3 +1483,14 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   （`update_asset 21 --set commissioning_date=2024-04-01T00:00:00` 可用）。
 - **验证**：后端 pytest 28 passed 无回归；schema/模型/DB 列断言 ✓；vite build ✓；
   vue-tsc 无新字段相关报错（存量 SearchView/SettingsView 类型错与本改动无关）。
+
+## 28.3 — 资产排序新增「启用日期」「维保到期」（2026-10-15）
+
+- **需求**：排序方式下拉加启用日期、维保到期两个选项。
+- **前端**：`AssetView.vue` `sortByOptions` 补 `commissioning_date` / `warranty_expiry` 两项。
+  搜索链路 `searchAssets` 本就透传 `sort_by/sort_order` 到 `GET /assets/`，无需改 service。
+- **后端**：`assets.py` 列表端点排序分支升级——日期类字段（5 个维护日期）
+  `order_by(col.is_(None), order_func(col))`：**空值（未设置）升/降序都排最后**，
+  避免升序时 78 台空白设备挤在最前；其余字段行为不变。
+  （`hasattr(AssetModel, sort_by)` 动态白名单已天然接受新列，无注入面。）
+- **验证**：pytest 28 passed；SQLite 语义实测 asc/desc 均 nulls-last ✓；vite build ✓。
