@@ -1457,3 +1457,29 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **启用步骤**：`python init_api_service_user.py` → `--gen-token` 填 `.env`（`API_TOKEN_ENABLED=true`）→ 重启后端 →
   脚本侧 `export WIKI_API_TOKEN=...`。默认关闭，按需开启。
 - **风险**：固定令牌永不过期，资产接口吐明文设备密码——令牌只放 .env，泄露即换值+重启撤销。
+
+## 28.2 — 设备资产：维保到期 + 设备启用日期端到端新增（2026-10-15）
+
+- **需求**：前端资产页看不到维保到期时间（数据库 `warranty_expiry` 已有但界面没展示）；
+  另新增「设备启用日期」字段（数据库没有，需端到端加列）。
+- **后端**：
+  - `models/asset.py`：`Asset` 新增 `commissioning_date = Column(DateTime, comment="设备启用日期")`。
+  - `schemas/asset.py`：`AssetBase` / `AssetUpdate` 补 `commissioning_date`；
+    `convert_maintenance_dates` validator 字段列表加入该字段（北京时间转换一致）。
+  - `api/endpoints/assets.py`：导出 `field_mapping` 补 5 个日期字段中文名；
+    导出循环新增日期分支（`purchase_date/commissioning_date/warranty_expiry/last_maintenance/next_maintenance` → `%Y-%m-%d`）。
+  - `add_commissioning_date.py`（新）：幂等 ALTER TABLE 加列脚本（项目无 alembic 迁移习惯，
+    create_all 不给存量表加列）。本地库已执行 ✓（41 列含 commissioning_date）。**126 生产需手动跑一次。**
+- **前端**：
+  - `types/asset.ts`：`Asset`/`AssetCreate`/`AssetUpdate` 三接口补 `commissioning_date`（Update 允许 null=清空）。
+  - `AssetView.vue`：
+    - 表格列新增「启用日期」「维保到期」（部门与状态之间）；维保到期高亮：
+      已过期红(#d03050 加粗) / 90 天内橙(#f0a020) / 正常绿(#18a058)，空显示灰色"未设置"。
+    - 详情弹窗基本信息 tab 补「启用日期」「维保到期」（同款高亮）。
+    - 创建/编辑弹窗加两个 `NDatePicker`（type=date，clearable）；表单日期用时间戳，
+      提交经 `timestampToISO` 转本地零点 ISO（避免时区串天），回填经 `dateToTimestamp`。
+    - 导出字段列表 `allExportFields` 补两字段。
+- **skill**：`wiki_client.py` `ASSET_UPDATABLE_FIELDS` 白名单补 `commissioning_date`
+  （`update_asset 21 --set commissioning_date=2024-04-01T00:00:00` 可用）。
+- **验证**：后端 pytest 28 passed 无回归；schema/模型/DB 列断言 ✓；vite build ✓；
+  vue-tsc 无新字段相关报错（存量 SearchView/SettingsView 类型错与本改动无关）。

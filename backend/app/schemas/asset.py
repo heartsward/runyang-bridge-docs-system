@@ -47,6 +47,7 @@ class AssetBase(BaseModel):
     
     # 维护信息
     purchase_date: Optional[datetime] = Field(None, description="采购日期")
+    commissioning_date: Optional[datetime] = Field(None, description="设备启用日期")
     warranty_expiry: Optional[datetime] = Field(None, description="保修到期日期")
     last_maintenance: Optional[datetime] = Field(None, description="上次维护时间")
     next_maintenance: Optional[datetime] = Field(None, description="下次维护时间")
@@ -102,6 +103,7 @@ class AssetUpdate(BaseModel):
     application: Optional[str] = None
     purpose: Optional[str] = None
     purchase_date: Optional[datetime] = None
+    commissioning_date: Optional[datetime] = None
     warranty_expiry: Optional[datetime] = None
     last_maintenance: Optional[datetime] = None
     next_maintenance: Optional[datetime] = None
@@ -143,7 +145,7 @@ class Asset(AssetBase):
             return v
         return v
     
-    @validator('purchase_date', 'warranty_expiry', 'last_maintenance', 'next_maintenance', pre=True, always=True)
+    @validator('purchase_date', 'commissioning_date', 'warranty_expiry', 'last_maintenance', 'next_maintenance', pre=True, always=True)
     def convert_maintenance_dates(cls, v):
         """维护日期时间转换为北京时间"""
         if v is None:

@@ -66,6 +66,7 @@ export interface Asset {
   
   // 维护信息
   purchase_date?: string
+  commissioning_date?: string
   warranty_expiry?: string
   last_maintenance?: string
   next_maintenance?: string
@@ -116,6 +117,7 @@ export interface AssetCreate {
   application?: string
   purpose?: string
   purchase_date?: string
+  commissioning_date?: string
   warranty_expiry?: string
   last_maintenance?: string
   next_maintenance?: string
@@ -153,7 +155,8 @@ export interface AssetUpdate {
   application?: string
   purpose?: string
   purchase_date?: string
-  warranty_expiry?: string
+  commissioning_date?: string | null
+  warranty_expiry?: string | null
   last_maintenance?: string
   next_maintenance?: string
   notes?: string

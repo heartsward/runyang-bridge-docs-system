@@ -253,6 +253,28 @@
               <n-select v-model:value="assetForm.status" :options="assetStatusOptions" placeholder="请选择状态" />
             </n-form-item>
           </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="启用日期" path="commissioning_date">
+              <n-date-picker
+                v-model:value="assetForm.commissioning_date"
+                type="date"
+                clearable
+                style="width: 100%"
+                placeholder="请选择设备启用日期"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="维保到期" path="warranty_expiry">
+              <n-date-picker
+                v-model:value="assetForm.warranty_expiry"
+                type="date"
+                clearable
+                style="width: 100%"
+                placeholder="请选择维保到期日期"
+              />
+            </n-form-item>
+          </n-grid-item>
         </n-grid>
         <n-form-item label="备注" path="notes">
           <n-input v-model:value="assetForm.notes" type="textarea" placeholder="请输入备注" :rows="3" />
@@ -571,6 +593,16 @@
                     {{ getAssetStatusLabel(viewingAsset.status) }}
                   </n-tag>
                 </n-descriptions-item>
+                <n-descriptions-item label="启用日期">
+                  <span v-if="viewingAsset.commissioning_date">{{ formatDate(viewingAsset.commissioning_date) }}</span>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
+                <n-descriptions-item label="维保到期">
+                  <span v-if="viewingAsset.warranty_expiry" :style="{ color: warrantyColor(viewingAsset.warranty_expiry), fontWeight: warrantyColor(viewingAsset.warranty_expiry) === '#d03050' ? 600 : 400 }">
+                    {{ formatDate(viewingAsset.warranty_expiry) }}
+                  </span>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
                 <n-descriptions-item label="备注信息" span="2">
                   <div v-if="viewingAsset.notes && viewingAsset.notes.trim()" style="white-space: pre-wrap; word-break: break-word; max-width: 100%;">
                     {{ viewingAsset.notes }}
@@ -838,6 +870,7 @@ import {
   NThing,
   NDivider,
   NScrollbar,
+  NDatePicker,
   useMessage,
   useDialog,
   type DataTableColumns,
@@ -983,8 +1016,12 @@ const sortConfig = reactive({
   sortOrder: 'desc' as 'asc' | 'desc'
 })
 
-// 表单数据
-const assetForm = reactive<AssetCreate>({
+// 表单数据（日期字段用 NDatePicker 的时间戳，提交时转 ISO 字符串）
+type AssetFormModel = Omit<AssetCreate, 'commissioning_date' | 'warranty_expiry'> & {
+  commissioning_date?: number | null
+  warranty_expiry?: number | null
+}
+const assetForm = reactive<AssetFormModel>({
   name: '',
   asset_type: AssetType.SERVER,
   device_model: '',
@@ -995,6 +1032,8 @@ const assetForm = reactive<AssetCreate>({
   network_location: 'office',
   department: '',
   status: AssetStatus.ACTIVE,
+  commissioning_date: null,
+  warranty_expiry: null,
   notes: ''
 })
 
@@ -1387,6 +1426,30 @@ const columns: DataTableColumns<Asset> = [
     width: 100
   },
   {
+    title: '启用日期',
+    key: 'commissioning_date',
+    width: 110,
+    render: (row) => row.commissioning_date
+      ? h('span', {}, formatDate(row.commissioning_date))
+      : h('span', { style: { color: '#999' } }, '未设置')
+  },
+  {
+    title: '维保到期',
+    key: 'warranty_expiry',
+    width: 120,
+    render: (row) => {
+      if (!row.warranty_expiry) {
+        return h('span', { style: { color: '#999' } }, '未设置')
+      }
+      return h('span', {
+        style: {
+          color: warrantyColor(row.warranty_expiry),
+          fontWeight: warrantyState(row.warranty_expiry) === 'expired' ? 600 : 400
+        }
+      }, formatDate(row.warranty_expiry))
+    }
+  },
+  {
     title: '状态',
     key: 'status',
     width: 80,
@@ -1708,9 +1771,27 @@ const resetForm = () => {
     network_location: 'office',
     department: '',
     status: AssetStatus.ACTIVE,
+    commissioning_date: null,
+    warranty_expiry: null,
     notes: ''
   })
   editingAsset.value = null
+}
+
+// 日期工具：ISO 字符串 → 时间戳（NDatePicker 用）；时间戳 → ISO 字符串（后端用）
+const dateToTimestamp = (v?: string | null): number | null => {
+  if (!v) return null
+  const t = new Date(v).getTime()
+  return Number.isNaN(t) ? null : t
+}
+const timestampToISO = (v?: number | null): string | undefined => {
+  if (v === null || v === undefined) return undefined
+  const d = new Date(v)
+  // 按本地日期取当天零点，避免时区偏移导致日期串天
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}T00:00:00`
 }
 
 const handleSubmit = async () => {
@@ -1733,13 +1814,20 @@ const handleSubmit = async () => {
         network_location: assetForm.network_location,
         department: assetForm.department,
         status: assetForm.status,
+        commissioning_date: timestampToISO(assetForm.commissioning_date) ?? null,
+        warranty_expiry: timestampToISO(assetForm.warranty_expiry) ?? null,
         notes: assetForm.notes
       }
       await assetService.updateAsset(editingAsset.value.id, updateData)
       message.success('设备更新成功')
     } else {
       // For creation, send the full form
-      await assetService.createAsset(assetForm)
+      const createData: AssetCreate = {
+        ...assetForm,
+        commissioning_date: timestampToISO(assetForm.commissioning_date),
+        warranty_expiry: timestampToISO(assetForm.warranty_expiry)
+      }
+      await assetService.createAsset(createData)
       message.success('设备创建成功')
     }
     
@@ -1774,6 +1862,8 @@ const editAsset = async (asset: Asset) => {
       network_location: fullAsset.network_location,
       department: fullAsset.department,
       status: fullAsset.status,
+      commissioning_date: dateToTimestamp(fullAsset.commissioning_date),
+      warranty_expiry: dateToTimestamp(fullAsset.warranty_expiry),
       notes: fullAsset.notes,
       tags: fullAsset.tags || []
     })
@@ -2570,10 +2660,39 @@ const formatDateTime = (dateString: string) => {
   })
 }
 
+// 仅日期（YYYY-MM-DD），用于启用日期/维保到期
+const formatDate = (dateString?: string | null) => {
+  if (!dateString) return '未设置'
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return dateString
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+// 维保到期状态：expired(已过期) / soon(90天内) / ok
+const warrantyState = (dateString: string): 'expired' | 'soon' | 'ok' => {
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return 'ok'
+  const now = new Date()
+  const diffDays = (date.getTime() - now.getTime()) / 86400000
+  if (diffDays < 0) return 'expired'
+  if (diffDays <= 90) return 'soon'
+  return 'ok'
+}
+const warrantyColor = (dateString: string) => {
+  const state = warrantyState(dateString)
+  if (state === 'expired') return '#d03050'   // 红：已过期
+  if (state === 'soon') return '#f0a020'      // 橙：90天内到期
+  return '#18a058'                            // 绿：正常
+}
+
 // 导出字段选择辅助方法（仅包含编辑表单中的字段和时间戳）
 const allExportFields = [
   'name', 'asset_type', 'ip_address', 'hostname', 'username', 'password',
-  'device_model', 'network_location', 'department', 'status', 'notes',
+  'device_model', 'network_location', 'department', 'status',
+  'commissioning_date', 'warranty_expiry', 'notes',
   'created_at', 'updated_at'
 ]
 

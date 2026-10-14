@@ -103,6 +103,12 @@ runyang-bridge-docs-system/
 > - **长期约束**：固定令牌永不过期，资产接口会吐明文设备密码——令牌只放 `.env`，泄露即换值+重启撤销；默认保持 `API_TOKEN_ENABLED=false`，按需开启
 > - 配置（`config.py`）：`ONLYOFFICE_DS_URL` / `ONLYOFFICE_JWT_SECRET` / `ONLYOFFICE_CALLBACK_BASE_URL`（必须 DS 反向可达）/ `ONLYOFFICE_ENABLED`
 
+> **2026-10-15 变更（阶段二十八·28.2 — 资产日期字段端到端）**：`Asset` 新增 `commissioning_date`（设备启用日期，DateTime）；前端资产表格/详情/创建编辑弹窗展示并可录入「启用日期」「维保到期」（`warranty_expiry` 数据库早有但界面此前未展示）。
+> - **加列方式**：项目无 alembic 迁移流程（`create_all` 不给存量表加列）→ 幂等脚本 `backend/add_commissioning_date.py`（PRAGMA 检查 + ALTER TABLE）。**每台存量库（本地/126）部署新代码后须手动跑一次。**
+> - schema 三处同步：`AssetBase`/`AssetUpdate` 字段 + `convert_maintenance_dates` validator 列表；导出 `field_mapping` 与日期格式化分支同步 5 个日期字段。
+> - 前端约定：`NDatePicker` 用毫秒时间戳，提交经 `timestampToISO` 转**本地零点 ISO**（防时区串天），回填经 `dateToTimestamp`；维保到期高亮 过期红/90天内橙/正常绿。
+> - skill `ASSET_UPDATABLE_FIELDS` 白名单同步 `commissioning_date`。
+
 ---
 
 ## 1. backend/ — FastAPI 后端

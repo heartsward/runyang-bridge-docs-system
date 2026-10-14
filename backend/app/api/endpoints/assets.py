@@ -894,6 +894,16 @@ async def export_assets(
 
             "purpose": "用途说明",
 
+            "purchase_date": "采购日期",
+
+            "commissioning_date": "设备启用日期",
+
+            "warranty_expiry": "保修到期日期",
+
+            "last_maintenance": "上次维护时间",
+
+            "next_maintenance": "下次维护时间",
+
             "notes": "备注",
 
             "created_at": "创建时间",
@@ -1025,6 +1035,10 @@ async def export_assets(
                         else:
 
                             value = ''
+
+                    elif field in ['purchase_date', 'commissioning_date', 'warranty_expiry', 'last_maintenance', 'next_maintenance']:
+
+                        value = value.strftime('%Y-%m-%d') if value else ''
 
                     else:
 

@@ -82,6 +82,7 @@ class Asset(Base):
     
     # 维护信息
     purchase_date = Column(DateTime, comment="采购日期")
+    commissioning_date = Column(DateTime, comment="设备启用日期")
     warranty_expiry = Column(DateTime, comment="保修到期日期")
     last_maintenance = Column(DateTime, comment="上次维护时间")
     next_maintenance = Column(DateTime, comment="下次维护时间")
