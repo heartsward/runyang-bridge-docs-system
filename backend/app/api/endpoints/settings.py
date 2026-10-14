@@ -2,13 +2,14 @@
 """
 用户设置API端点
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from passlib.context import CryptContext
 
 from app.core.deps import get_db, get_current_active_user
+from app.core.config import settings
 from app.models.user import User
 
 router = APIRouter()
@@ -41,13 +42,13 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: str
-    full_name: str = None
-    department: str = None
-    position: str = None
-    phone: str = None
+    full_name: Optional[str] = None
+    department: Optional[str] = None
+    position: Optional[str] = None
+    phone: Optional[str] = None
     is_active: bool
     is_superuser: bool
-    created_at: str = None
+    created_at: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -98,6 +99,13 @@ async def create_user(
 ):
     """创建新用户 - 仅管理员可访问"""
     check_admin_permission(current_user)
+    
+    # API 服务账号保留名：不允许手工创建同名账号冒名（真实映射按用户名查库，先到先得）
+    if user_data.username == settings.API_SERVICE_USERNAME:
+        raise HTTPException(
+            status_code=400,
+            detail=f"用户名 {settings.API_SERVICE_USERNAME} 为 API 服务账号保留名，请使用 init_api_service_user.py 初始化。"
+        )
     
     # 检查用户名是否已存在
     if db.query(User).filter(User.username == user_data.username).first():
@@ -151,6 +159,38 @@ async def update_user(
     db_user = db.query(User).filter(User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    
+    # ===== API 服务账号保护 =====
+    # api_client（settings.API_SERVICE_USERNAME）是固定令牌通道的映射账号，
+    # 其随机密码不落盘 = 密码登录封死，这是"脚本 vs 人工"审计隔离的保险栓。
+    is_service_account = db_user.username == settings.API_SERVICE_USERNAME
+    if is_service_account:
+        # 拒绝修改密码：设了可知的密码等于把账号变成可交互登录，破坏隔离
+        if user_data.password and user_data.password.strip():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"API 服务账号（{settings.API_SERVICE_USERNAME}）不允许修改密码。"
+                    "该账号专用于固定令牌（API_TOKEN）调用，密码登录通道刻意封死。"
+                    "如需撤销 API 访问：禁用该账号，或在 .env 中置 API_TOKEN_ENABLED=false 后重启后端。"
+                )
+            )
+        # 拒绝改名：改名后 deps.py 按 API_SERVICE_USERNAME 将找不到服务账号，令牌通道静默失效
+        if user_data.username and user_data.username != db_user.username:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"API 服务账号（{settings.API_SERVICE_USERNAME}）不允许改名。"
+                    "改名会使固定令牌通道找不到映射账号而失效；"
+                    "如需更换服务账号名，请同步修改 .env 的 API_SERVICE_USERNAME 并重跑 init 脚本。"
+                )
+            )
+    # 拒绝把其他账号改名成服务账号名（绕过保护制造冒名账号）
+    elif user_data.username == settings.API_SERVICE_USERNAME:
+        raise HTTPException(
+            status_code=400,
+            detail=f"用户名 {settings.API_SERVICE_USERNAME} 为 API 服务账号保留名，不能用于其他账号。"
+        )
     
     # 更新用户信息
     for field, value in user_data.dict(exclude_unset=True).items():

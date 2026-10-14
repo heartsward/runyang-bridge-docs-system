@@ -1539,3 +1539,18 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **skill**：`ASSET_UPDATABLE_FIELDS` 补 `system_version`。
 - **验证**：pytest 35 passed（新增级联删除用例：2 台挂载清理/定义移除/筛选不再命中）；
   vite build ✓；vue-tsc 无本次改动相关报错。
+
+## 28.6 — API 服务账号（api_client）用户管理防护（2026-10-15）
+
+- **背景**：陈工问"用户编辑里能不能改 api_client 的密码"。现状是能改——设了可知的密码等于把
+  刻意封死的密码登录通道重新打开，破坏"脚本 vs 人工"审计隔离。陈工要求加防护。
+- **改动（`settings.py` 用户端点）**：
+  - `update_user`：目标账号 username == `settings.API_SERVICE_USERNAME` 时——
+    ① 提交非空 password → 400（提示走令牌撤销：禁用账号或 API_TOKEN_ENABLED=false）；
+    ② 改名 → 400（改名会让 deps.py 按用户名查不到服务账号，令牌通道静默失效）；
+    ③ 其他字段（full_name/department/is_active 等）放行。
+  - 防冒名：其他账号改名成保留名 api_client → 400；`create_user` 用保留名 → 400。
+  - 顺带修既有 bug：`UserResponse` 的 full_name 等字段声明 `str = None`（Pydantic v2 下 None 值
+    直接 ValidationError 500）→ 改 `Optional[str] = None`。
+- **测试**：`tests/test_service_account_guard.py` 6 例（拒改密/拒改名/拒冒名改名/拒冒名创建/
+  备注放行/普通账号改密不误伤）；全量 pytest 41 passed。
