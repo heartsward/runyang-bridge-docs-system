@@ -1417,3 +1417,20 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
 - **部署提示**：`backend/wiki/`、`*.db` 都在 .gitignore 里，`update.sh` 的 `git pull` 不会碰线上数据；
   线上直接 `./update.sh` 即可（会重启后端）。
 
+
+## 27.17 — 修复：智能搜索预览宽表格无法横向滚动（2026-10-14）
+
+- **现象**：预览「资产排查情况统计表（总）」这类多列宽表格——
+  文档管理预览弹窗左右可拖看到全部内容 ✓；智能搜索结果点预览只能上下拖，左右不能 ✗。
+- **根因**：两处预览的表格 CSS 完全一致（27.11 对齐过），差异在外层滚动容器：
+  - `DocumentView.vue`：`.preview-container`（原生 `overflow:auto`）→ scrollWidth 包含溢出后代，横向滚动条正常出现。
+  - `SearchView.vue`：`<n-scrollbar max-height:60vh>` → NScrollbar 按**内容盒宽度**测量溢出；
+    宽表格溢出的是块级 `.markdown-content`（盒宽仍 = 容器宽），NScrollbar 认为无横向溢出 → 横向 rail 永不出现。
+  - 附带发现：DocumentView 里 `.table-scroll-wrapper` 是**死 CSS**（全仓无任何代码生成该元素），未清理（不影响功能，留待后续）。
+- **修复**（仅 `SearchView.vue`，零后端改动）：
+  1. 提取内容模式外层 `<n-scrollbar>` → `<div class="preview-container">`（原生 `overflow:auto`，
+     `max-height:60vh` 保持原观感），与文档管理同款机制；
+  2. 删除未用 import `NScrollbar`；
+  3. `.markdown-content` 补 `width:100%; min-width:800px`（对齐 DocumentView 同名规则）。
+- **影响面**：仅智能搜索预览弹窗"提取内容"模式；高亮导航 `scrollIntoView` 在原生滚动容器下行为不变。
+- **验证**：`npm run build`（vue-tsc + vite）✓ 5.98s。

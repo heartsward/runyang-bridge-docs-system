@@ -315,13 +315,16 @@
           placeholder="编辑 Markdown 内容..."
           style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
         />
-        <!-- 提取内容模式（20.6：markdown-it 渲染，观感对齐文档管理预览；previewHtml 已含高亮注入+sanitize） -->
-        <n-scrollbar
+        <!-- 提取内容模式（20.6：markdown-it 渲染，观感对齐文档管理预览；previewHtml 已含高亮注入+sanitize）
+             27.17：n-scrollbar → 原生 overflow:auto 容器（与文档管理 .preview-container 一致）。
+             根因：NScrollbar 按内容盒宽度测量溢出，宽表格溢出块级 .markdown-content 时盒宽不变
+             → 横向 rail 永不出现，只能上下滚。原生 overflow:auto 的 scrollWidth 含溢出后代，横向可拖。 -->
+        <div
           v-else-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
-          style="max-height: 60vh;"
+          class="preview-container"
         >
           <div v-html="displayPreviewHtml" class="markdown-content"></div>
-        </n-scrollbar>
+        </div>
         
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
         <div v-else-if="shouldShowViewToggle(previewDocumentData) && previewMode === 'original'" class="original-file-preview" style="height: 60vh;">
@@ -406,7 +409,6 @@ import {
   NRadio,
   NModal,
   NDivider,
-  NScrollbar,
   NDescriptions,
   NDescriptionsItem,
   NSpin,
@@ -1140,6 +1142,16 @@ watch(previewMode, async (newMode) => {
 
 /* 资产相关样式已移除 */
 
+/* 27.17：预览滚动容器——与文档管理 .preview-container 同款原生 overflow:auto，
+   宽表格（资产排查统计表这类多列表）超出容器时出现横向滚动条 */
+.preview-container {
+  width: 100%;
+  max-height: 60vh;
+  overflow: auto;
+  background-color: #ffffff;
+  border-radius: 6px;
+}
+
 /* 20.6：搜索预览内容区（Markdown 渲染，观感对齐文档管理 .markdown-content）
    .markdown-content 在模板内（scoped 生效），内部 v-html 注入内容用 :deep 穿透 */
 .markdown-content {
@@ -1152,6 +1164,8 @@ watch(previewMode, async (newMode) => {
   border-radius: 6px;
   border: 1px solid #e9ecef;
   margin: 0;
+  width: 100%;
+  min-width: 800px;
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
