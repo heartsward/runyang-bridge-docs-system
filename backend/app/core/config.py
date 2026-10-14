@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "REQUIRED_SET_IN_ENV_FILE"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
+    # 阶段二十八：API 固定令牌（服务账号通道，与账号密码登录区分）
+    # 用途：AI 工作台 / 脚本（runyang-wiki-mcp-client skill 等）走 Bearer <API_TOKEN>
+    #       直接认证，映射到专用服务账号（默认 api_client），不再用 admin 密码换 JWT。
+    # 开关：false=通道关闭（默认），所有 Bearer 仍走 JWT。
+    API_TOKEN_ENABLED: bool = False
+    # 固定令牌值——用强随机串生成：python -c "import secrets; print(secrets.token_urlsafe(32))"
+    # 🔴 资产接口会明文返回设备密码，此令牌永不过期，泄露=永久后门；只放 .env，不进 git。
+    API_TOKEN: str = ""
+    # 令牌映射的服务账号用户名（需先用 init_api_service_user.py 创建）
+    API_SERVICE_USERNAME: str = "api_client"
     
     # 文件上传配置
     UPLOAD_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'uploads'))

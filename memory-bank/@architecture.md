@@ -90,6 +90,17 @@ runyang-bridge-docs-system/
 > - 新增 `backend/app/services/onlyoffice.py`（JWT 签发/校验用独立 `ONLYOFFICE_JWT_SECRET`；扩展名→fileType 映射；`build_editor_config` 构造 SDK config）+ `backend/app/api/endpoints/onlyoffice.py`（4 端点：`GET /onlyoffice/config`、`POST /onlyoffice/documents/{id}/preview-url`、`GET /onlyoffice/file/{id}`、`POST /onlyoffice/callback`）
 > - **27.2**：编辑能力整体移除（用户决策：不需要编辑 Office，只在线预览）——`build_editor_config` 默认 `mode='view'` 且 `permissions.edit/review/comments/autosave` 全 False；端点由 `/url` 改名 `/preview-url`；callback 改为**只读心跳**（只验 token + 记日志 + 回 `error=0`，**永不下载/覆盖文件**，保留仅为 DS 协议应答兼容）；`download_edited_file_from_ds` 及 `STATUS_*` 常量已删。前端：列表表格 ✏在线编辑按钮删除；预览弹窗底部删 [编辑]+[✏在线编辑]（普通模式仅 [关闭][下载]）；预览工具栏 ✏编辑（MD 编辑入口）旁边新增 👁在线预览（`EyeOutline` 图标，仅 Office 类显示）；`OfficeEditor.vue` 页面标题/文案全部改"在线预览/只读预览"，删 `saveStatus` 死代码；路由 `name: 'office-edit'` 保留（内部标识，避免断链）
 > - **27.3**：修复 DS 报"文档安全令牌的格式不正确"——DS 开 JWT 校验时 `config.token` 的 payload **必须是整个 config 对象**（官方约定：DS 逐字段比对），之前只签 `{document_id, file_type}`。现 `build_editor_config` 先构造完整 config 再 `sign_jwt(dict(config))`。注意：后端 `ONLYOFFICE_JWT_SECRET` 必须与 DS 的 local.json `jwt_secret` **完全一致**
+
+> **2026-10-14 变更（阶段二十八·28.1 — API 固定令牌 + 专用服务账号）**：脚本/AI 工作台写操作（上传/改台账/改文档/下载）不再用 admin 账号密码换 JWT，改用**固定 Bearer 令牌**，映射到专用服务账号（默认 `api_client`），实现"脚本操作 vs 人工登录"审计隔离 + 单独撤销。
+> - `config.py` 新增 3 键：`API_TOKEN_ENABLED`（默认 false）/ `API_TOKEN`（默认空）/ `API_SERVICE_USERNAME`（默认 `api_client`）——全部走 `.env`
+> - **认证收口单点**：`deps.py` 新增 `_authenticate_api_token()`（`hmac.compare_digest` 防时序攻击），`get_current_user` / `get_optional_user` 前置该通道（命中→服务账号；不命中→原 JWT 流程零改动）。全仓端点均经 deps.py 四依赖（已 grep 确认无裸调 `verify_token`），一处改动全覆盖
+> - 边界行为：令牌命中但服务账号缺失/禁用 → **直接 401**（不回落 JWT，错误信息明确指向 `init_api_service_user.py`）；开关关闭 → 通道完全透明
+> - 新增 `backend/init_api_service_user.py`：幂等建服务账号（**随机密码不落盘=密码登录路径封死**，只能走令牌）；`--gen-token` 生成强随机令牌；`--check` 只查不建；`--no-superuser` 降级（能改台账不能上传）
+> - `.env.template` 补「API 固定令牌」配置段（含 🔴 永不过期泄露风险警示）
+> - 测试：`backend/tests/test_api_token_auth.py` 15 例（单元 + 真实 HTTP Bearer e2e）；隔离临时库 e2e 实测：固定令牌 PUT 资产 200（by=api_client）/ 错误令牌 401 / 回读写生效 / 服务账号密码登录被封死 ✓
+> - **skill 侧**（`~/.workbuddy/skills/runyang-wiki-mcp-client` v2.6）：`WikiClient` 自动读环境变量 `WIKI_API_TOKEN`（优先级：显式参数 > env > login()），配好即全程免登录
+> - **启用步骤**：`python init_api_service_user.py` → `--gen-token` 生成值填 `.env`（`API_TOKEN_ENABLED=true`）→ 重启后端 → 脚本侧 `export WIKI_API_TOKEN=...`
+> - **长期约束**：固定令牌永不过期，资产接口会吐明文设备密码——令牌只放 `.env`，泄露即换值+重启撤销；默认保持 `API_TOKEN_ENABLED=false`，按需开启
 > - 配置（`config.py`）：`ONLYOFFICE_DS_URL` / `ONLYOFFICE_JWT_SECRET` / `ONLYOFFICE_CALLBACK_BASE_URL`（必须 DS 反向可达）/ `ONLYOFFICE_ENABLED`
 
 ---
@@ -119,7 +130,7 @@ runyang-bridge-docs-system/
 ### 1.2 `backend/app/core/` — 核心基础设施
 - `config.py` — Settings（Pydantic BaseSettings，DB/JWT/CORS/上传大小等）
 - `security.py` — JWT 签发与校验、密码哈希（Bcrypt）
-- `deps.py` — FastAPI Depends（current_user、db session 等）
+- `deps.py` — FastAPI Depends（current_user、db session 等）。**认证收口单点**（阶段二十八）：`get_current_user`/`get_optional_user` 支持两条通道——① API 固定令牌（`_authenticate_api_token`，`hmac.compare_digest` 比对 `settings.API_TOKEN`，命中映射服务账号）② JWT（账号密码登录）。全仓端点均经此文件四依赖，无裸调 `verify_token`
 - `cache.py` — 内存缓存
 - `search_engine.py` — 搜索引擎实现（内容 > 标题 > 描述的权重排序）
 - `nlp_processor.py` — NLP 预处理

@@ -1434,3 +1434,26 @@ _维护规则：每完成一个里程碑或重要决策后追加；不要覆盖�
   3. `.markdown-content` 补 `width:100%; min-width:800px`（对齐 DocumentView 同名规则）。
 - **影响面**：仅智能搜索预览弹窗"提取内容"模式；高亮导航 `scrollIntoView` 在原生滚动容器下行为不变。
 - **验证**：`npm run build`（vue-tsc + vite）✓ 5.98s。
+
+## 28.1 — API 固定令牌 + 专用服务账号（2026-10-14）
+
+- **需求**：脚本/AI 工作台做写操作（上传/改台账/改文档/下载）此前都要用 admin 账号密码换 JWT，
+  与人工登录混在同一身份，审计分不清"人还是脚本"，且默认密码一改脚本全断。
+  陈工要求改成"固定 token + 环境变量"，与账号密码登录区别开。选定**方案 B**（固定令牌 + 专用服务账号）。
+- **改动（后端）**：
+  - `config.py`：新增 `API_TOKEN_ENABLED`(默认 false) / `API_TOKEN`(默认空) / `API_SERVICE_USERNAME`(默认 api_client)。
+  - `deps.py`：新增 `_authenticate_api_token()`（`hmac.compare_digest` 防时序攻击），
+    `get_current_user` / `get_optional_user` 前置该通道。命中→服务账号；不命中→原 JWT 流程零改动。
+    令牌命中但账号缺失/禁用→直接 401（不回落 JWT，错误信息指向 init 脚本）。
+    **认证收口单点**：grep 确认全仓端点均经 deps.py 四依赖，无裸调 verify_token，一处改全覆盖。
+  - `init_api_service_user.py`（新）：幂等建服务账号，**随机密码不落盘=密码登录路径封死**（只能走令牌）；
+    `--gen-token` 生成强随机令牌；`--check` 只查；`--no-superuser` 降级（能改台账不能上传）。
+  - `.env.template`：补「API 固定令牌」配置段 + 🔴 永不过期泄露风险警示。
+- **改动（skill 客户端 v2.6）**：`WikiClient.__init__` 的 image_token 缺省时自动读环境变量 `WIKI_API_TOKEN`；
+  非空则所有"缺 token 自动 login()"分支自然跳过，全程免登录。优先级：显式参数 > env > login()。旧行为完全兼容。
+- **测试**：`backend/tests/test_api_token_auth.py` 15 例（单元 + 真实 HTTP Bearer e2e）全绿；
+  全量 pytest 28 passed 无回归。隔离临时库 e2e：固定令牌 PUT 资产 200(by=api_client) / 错误令牌 401 /
+  回读写生效 creator=服务账号 / 服务账号密码登录被封死 ✓。
+- **启用步骤**：`python init_api_service_user.py` → `--gen-token` 填 `.env`（`API_TOKEN_ENABLED=true`）→ 重启后端 →
+  脚本侧 `export WIKI_API_TOKEN=...`。默认关闭，按需开启。
+- **风险**：固定令牌永不过期，资产接口吐明文设备密码——令牌只放 .env，泄露即换值+重启撤销。
