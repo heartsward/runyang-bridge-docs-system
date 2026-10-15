@@ -15,17 +15,27 @@
           上传的每一份文档自动沉淀为结构化 Markdown，设备台账可被智能体直接查询与回填，
           让人工与 AI 协作维护同一份可信知识。
         </p>
-        <n-space size="large" justify="center" align="center" class="hero-actions">
-          <n-button type="primary" size="large" class="cta-primary" @click="handleStartUse">
-            开始使用
-          </n-button>
-          <n-button size="large" class="cta-ghost" @click="handleSearch">
-            <template #icon>
-              <n-icon :component="SearchOutline" />
-            </template>
-            智能搜索
-          </n-button>
-        </n-space>
+        <div class="hero-actions">
+          <button class="cta-btn cta-primary" type="button" @click="handleStartUse">
+            <span class="cta-shine" aria-hidden="true"></span>
+            <span class="cta-label">
+              <svg class="cta-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 3l14 9-14 9V3z" />
+              </svg>
+              开始使用
+            </span>
+          </button>
+          <button class="cta-btn cta-ghost" type="button" @click="handleSearch">
+            <span class="cta-icon-wrap">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M20 20l-3.5-3.5" />
+              </svg>
+            </span>
+            <span class="cta-label">智能搜索</span>
+            <span class="cta-arrow">→</span>
+          </button>
+        </div>
         <div class="hero-divider"></div>
         <div class="hero-stats">
           <div class="stat">
@@ -245,46 +255,155 @@ const handleStartUse = () => {
   line-height: 1.9;
   color: rgba(255, 255, 255, 0.92);
 }
+/* ===== Hero 按钮（科技感双形态） ===== */
 .hero-actions {
   display: flex;
   justify-content: center;
   align-items: center;
+  gap: 18px;
   width: 100%;
+  flex-wrap: wrap;
 }
-.cta-primary {
-  border-radius: 10px;
-  padding: 0 32px;
-  height: 48px;
-  font-size: 16px;
+.cta-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 50px;
+  padding: 0 28px;
+  font-size: 15.5px;
   font-weight: 600;
-  background: #ffffff !important;
-  color: #5b3aa1 !important;
-  border: none !important;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  letter-spacing: 0.5px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.22s ease, box-shadow 0.22s ease, background 0.22s ease, border-color 0.22s ease;
+  overflow: hidden;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.cta-btn:focus { outline: none; }
+.cta-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 3px;
+}
+.cta-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
+}
+
+/* 主按钮：白底玻璃 + 紫渐变文字 + 顶部光带扫过 + 紫色光晕 */
+.cta-primary {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  box-shadow:
+    0 10px 30px rgba(91, 58, 161, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.cta-primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #ffffff 0%, #f0e6ff 100%);
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.25s ease;
 }
 .cta-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+  box-shadow:
+    0 16px 36px rgba(91, 58, 161, 0.5),
+    0 0 0 4px rgba(255, 255, 255, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
+.cta-primary:hover::before { opacity: 1; }
+.cta-primary .cta-icon { color: #5b3aa1; transition: transform 0.25s ease; }
+.cta-primary:hover .cta-icon { transform: translateX(3px); }
+.cta-primary .cta-label { color: #5b3aa1; }
+.cta-shine {
+  position: absolute;
+  top: 0;
+  left: -75%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.55) 50%, transparent 100%);
+  transform: skewX(-20deg);
+  z-index: 3;
+  pointer-events: none;
+  animation: ctaShine 3.6s ease-in-out infinite;
+}
+@keyframes ctaShine {
+  0%, 12%   { left: -75%; }
+  55%, 100% { left: 130%; }
+}
+
+/* 次按钮：透明 + 渐变描边 + 悬停注入渐变背景 + 右箭头位移 */
 .cta-ghost {
-  border-radius: 10px;
-  padding: 0 26px;
-  height: 48px;
-  font-size: 16px;
-  font-weight: 500;
-  color: #ffffff !important;
-  background: rgba(255, 255, 255, 0.12) !important;
-  border: 1px solid rgba(255, 255, 255, 0.45) !important;
-  backdrop-filter: blur(6px);
-  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 6px 18px rgba(31, 19, 65, 0.18);
+}
+.cta-ghost::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 0.25s ease;
 }
 .cta-ghost:hover {
   transform: translateY(-2px);
-  background: rgba(255, 255, 255, 0.22) !important;
-  border-color: rgba(255, 255, 255, 0.7) !important;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 10px 24px rgba(31, 19, 65, 0.3),
+    0 0 18px rgba(167, 139, 250, 0.35);
 }
-.cta-ghost .n-icon { color: #ffffff !important; }
+.cta-ghost:hover::before { opacity: 1; }
+.cta-ghost .cta-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  transition: background 0.22s ease, transform 0.22s ease;
+}
+.cta-ghost:hover .cta-icon-wrap {
+  background: rgba(255, 255, 255, 0.32);
+  transform: rotate(-8deg);
+}
+.cta-ghost .cta-arrow {
+  font-size: 17px;
+  line-height: 1;
+  margin-left: 2px;
+  transition: transform 0.22s ease;
+}
+.cta-ghost:hover .cta-arrow { transform: translateX(4px); }
+
+@media (max-width: 480px) {
+  .cta-btn { height: 46px; padding: 0 22px; font-size: 14.5px; }
+  .hero-actions { gap: 12px; }
+}
 .hero-divider {
   width: 60px;
   height: 1px;
