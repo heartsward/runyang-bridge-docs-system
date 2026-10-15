@@ -15,7 +15,7 @@
           上传的每一份文档自动沉淀为结构化 Markdown，设备台账可被智能体直接查询与回填，
           让人工与 AI 协作维护同一份可信知识。
         </p>
-        <n-space size="large" class="hero-actions">
+        <n-space size="large" justify="center" align="center" class="hero-actions">
           <n-button type="primary" size="large" class="cta-primary" @click="handleStartUse">
             开始使用
           </n-button>
@@ -245,7 +245,12 @@ const handleStartUse = () => {
   line-height: 1.9;
   color: rgba(255, 255, 255, 0.92);
 }
-.hero-actions { justify-content: center; }
+.hero-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
 .cta-primary {
   border-radius: 10px;
   padding: 0 32px;
