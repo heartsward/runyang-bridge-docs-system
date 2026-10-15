@@ -17,7 +17,13 @@
         </p>
         <n-space size="large" class="hero-actions">
           <n-button type="primary" size="large" class="cta-primary" @click="handleStartUse">
-            登录并开始使用
+            开始使用
+          </n-button>
+          <n-button size="large" class="cta-ghost" @click="handleSearch">
+            <template #icon>
+              <n-icon :component="SearchOutline" />
+            </template>
+            智能搜索
           </n-button>
         </n-space>
         <div class="hero-divider"></div>
@@ -256,6 +262,24 @@ const handleStartUse = () => {
   transform: translateY(-2px);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
 }
+.cta-ghost {
+  border-radius: 10px;
+  padding: 0 26px;
+  height: 48px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(6px);
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+.cta-ghost:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-color: rgba(255, 255, 255, 0.7) !important;
+}
+.cta-ghost .n-icon { color: #ffffff !important; }
 .hero-divider {
   width: 60px;
   height: 1px;
