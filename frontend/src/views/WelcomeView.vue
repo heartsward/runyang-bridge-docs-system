@@ -187,6 +187,14 @@ const handleStartUse = () => {
     router.push('/login')
   }
 }
+
+const handleSearch = () => {
+  if (authService.isAuthenticated()) {
+    router.push('/search')
+  } else {
+    router.push('/login')
+  }
+}
 </script>
 
 <style scoped>
