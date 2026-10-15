@@ -1,47 +1,26 @@
 <template>
   <div class="welcome-view">
-    <!-- 顶部导航条 -->
-    <header class="topbar">
-      <div class="topbar-inner">
-        <div class="brand">
-          <n-icon :component="LayersOutline" size="26" color="#38bdf8" />
-          <span class="brand-name">润扬大桥运维知识库</span>
-        </div>
-        <div class="topbar-actions">
-          <n-button quaternary class="nav-btn" @click="handleStartUse">
-            {{ authService.isAuthenticated() ? '进入系统' : '登录' }}
-          </n-button>
-          <n-button type="primary" class="cta-btn-small" @click="handleStartUse">
-            开始使用
-          </n-button>
-        </div>
-      </div>
-    </header>
-
-    <!-- Hero 主视觉 -->
+    <!-- Hero 主视觉（紫渐变，保留原色） -->
     <section class="hero">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="hero-content">
-        <div class="hero-badge">AI Wiki · 运维知识底座</div>
-        <h1 class="hero-title">
-          文档、设备、知识<br />
-          <span class="hero-title-accent">一处管理，处处可查</span>
-        </h1>
-        <p class="hero-subtitle">
-          面向高速公路机电与信息化运维的一体化平台——文档在线预览、设备资产台账、
-          全文智能搜索，并以 AI Wiki 理念将知识沉淀为 Markdown，无缝接入智能体。
-        </p>
-        <div class="hero-actions">
-          <n-button type="primary" size="large" class="cta-btn" @click="handleStartUse">
-            {{ authService.isAuthenticated() ? '进入系统' : '登录并开始使用' }}
-          </n-button>
-          <n-button size="large" class="cta-btn-ghost" @click="handleSearch">
-            <template #icon>
-              <n-icon :component="SearchOutline" />
-            </template>
-            智能搜索
-          </n-button>
+        <n-icon class="hero-icon" :component="ServerOutline" :size="120" color="#ffffff" />
+        <h1 class="hero-title">润扬大桥运维资产管理系统</h1>
+        <div class="hero-subtitle">
+          <span class="subtitle-line">AI Wiki 运维知识库底座</span>
+          <span class="subtitle-divider">·</span>
+          <span class="subtitle-line">文档 · 资产 · 智能体一体化</span>
         </div>
+        <p class="hero-tagline">
+          上传的每一份文档自动沉淀为结构化 Markdown，设备台账可被智能体直接查询与回填，
+          让人工与 AI 协作维护同一份可信知识。
+        </p>
+        <n-space size="large" class="hero-actions">
+          <n-button type="primary" size="large" class="cta-primary" @click="handleStartUse">
+            登录并开始使用
+          </n-button>
+        </n-space>
+        <div class="hero-divider"></div>
         <div class="hero-stats">
           <div class="stat">
             <div class="stat-num">多格式</div>
@@ -85,22 +64,23 @@
     <section class="aiwiki">
       <div class="section-inner aiwiki-inner">
         <div class="aiwiki-text">
-          <h2 class="section-title left">AI Wiki 理念</h2>
+          <h2 class="section-title left">AI Wiki 运维知识库底座</h2>
           <p class="aiwiki-lead">
-            每一份上传的文档都会被自动提取为结构化 Markdown——标题、表格、图片全部保留，
-            知识不再是躺在网盘里的二进制文件，而是人和机器都能直接阅读、检索、引用的活文档。
+            不只是文档系统，更是智能体的运维知识源。
+            文档经自动提取后成为结构化 Markdown，AI 助手通过 MCP 接口与固定 API 令牌，
+            像同事一样查询台账、阅读资料、回填巡检结果。
           </p>
           <ul class="aiwiki-list">
             <li>
-              <n-icon :component="SparklesOutline" size="18" color="#0e7490" />
+              <n-icon :component="SparklesOutline" size="18" color="#7c3aed" />
               <span><b>知识 Markdown 化</b>——原文与提取内容双轨存储，预览、搜索、引用同一来源</span>
             </li>
             <li>
-              <n-icon :component="TerminalOutline" size="18" color="#0e7490" />
+              <n-icon :component="TerminalOutline" size="18" color="#7c3aed" />
               <span><b>智能体无缝接入</b>——MCP 工具接口 + 固定 API 令牌，AI 助手可直接查台账、读文档、写回结果</span>
             </li>
             <li>
-              <n-icon :component="ShieldCheckmarkOutline" size="18" color="#0e7490" />
+              <n-icon :component="ShieldCheckmarkOutline" size="18" color="#7c3aed" />
               <span><b>人机审计分离</b>——脚本走专用服务账号，人工走账号登录，每一次改动都可追溯</span>
             </li>
           </ul>
@@ -126,8 +106,8 @@
     <!-- 页脚 -->
     <footer class="footer">
       <div class="section-inner footer-inner">
-        <span>润扬大桥运维资产管理系统</span>
-        <span class="footer-dim">文档管理 · 资产管理 · 智能搜索 · AI Wiki</span>
+        <span>润扬大桥运维资产管理系统 · AI Wiki 运维知识库底座</span>
+        <span class="footer-dim">文档管理 · 资产管理 · 智能搜索 · 智能体协作</span>
       </div>
     </footer>
   </div>
@@ -135,9 +115,9 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { NButton, NIcon } from 'naive-ui'
+import { NButton, NIcon, NSpace } from 'naive-ui'
 import {
-  LayersOutline,
+  ServerOutline,
   SearchOutline,
   DocumentTextOutline,
   HardwareChipOutline,
@@ -191,14 +171,6 @@ const handleStartUse = () => {
     router.push('/login')
   }
 }
-
-const handleSearch = () => {
-  if (authService.isAuthenticated()) {
-    router.push('/search')
-  } else {
-    router.push('/login')
-  }
-}
 </script>
 
 <style scoped>
@@ -209,54 +181,20 @@ const handleSearch = () => {
   font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
 }
 
-/* ===== 顶部导航 ===== */
-.topbar {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  z-index: 10;
-}
-.topbar-inner {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 20px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.brand-name {
-  font-size: 17px;
-  font-weight: 600;
-  color: #f1f5f9;
-  letter-spacing: 0.5px;
-}
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.nav-btn { color: #cbd5e1 !important; }
-.cta-btn-small { border-radius: 8px; }
-
-/* ===== Hero ===== */
+/* ===== Hero（紫渐变，保留原色） ===== */
 .hero {
   position: relative;
-  padding: 140px 24px 90px;
+  padding: 110px 24px 90px;
   overflow: hidden;
-  background: linear-gradient(160deg, #0b1f3a 0%, #123356 55%, #0e4a5c 100%);
+  color: #ffffff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 .hero-bg {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 60% 45% at 75% 20%, rgba(56, 189, 248, 0.14), transparent 60%),
-    radial-gradient(ellipse 50% 40% at 15% 85%, rgba(14, 116, 144, 0.22), transparent 60%),
-    repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.05) 0 1px, transparent 1px 72px),
-    repeating-linear-gradient(0deg, rgba(148, 163, 184, 0.05) 0 1px, transparent 1px 72px);
+    radial-gradient(ellipse 60% 40% at 18% 20%, rgba(255, 255, 255, 0.18), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 85% 80%, rgba(255, 255, 255, 0.12), transparent 60%);
 }
 .hero-content {
   position: relative;
@@ -264,63 +202,67 @@ const handleSearch = () => {
   margin: 0 auto;
   text-align: center;
 }
-.hero-badge {
+.hero-icon {
   display: inline-block;
-  padding: 6px 16px;
-  border-radius: 999px;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  background: rgba(56, 189, 248, 0.1);
-  color: #7dd3fc;
-  font-size: 13px;
-  letter-spacing: 1px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.18));
 }
 .hero-title {
-  margin: 0 0 24px;
-  font-size: 46px;
-  line-height: 1.28;
+  margin: 0 0 14px;
+  font-size: 42px;
+  line-height: 1.3;
   font-weight: 700;
-  color: #f8fafc;
+  color: #ffffff;
   letter-spacing: 1px;
-}
-.hero-title-accent {
-  background: linear-gradient(90deg, #38bdf8, #34d399);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
 }
 .hero-subtitle {
-  margin: 0 auto 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px;
+  margin-bottom: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  font-size: 14px;
+  color: #f5f3ff;
+  letter-spacing: 0.5px;
+  backdrop-filter: blur(4px);
+}
+.subtitle-line { color: #ffffff; }
+.subtitle-divider { color: rgba(255, 255, 255, 0.5); }
+.hero-tagline {
+  margin: 0 auto 36px;
   max-width: 640px;
-  font-size: 16.5px;
+  font-size: 15.5px;
   line-height: 1.9;
-  color: #b6c5d8;
+  color: rgba(255, 255, 255, 0.92);
 }
-.hero-actions {
-  display: flex;
-  justify-content: center;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.cta-btn {
+.hero-actions { justify-content: center; }
+.cta-primary {
   border-radius: 10px;
-  padding: 0 28px;
-  height: 46px;
+  padding: 0 32px;
+  height: 48px;
   font-size: 16px;
-  background: linear-gradient(90deg, #2563eb, #0e7490);
-  border: none;
+  font-weight: 600;
+  background: #ffffff !important;
+  color: #5b3aa1 !important;
+  border: none !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.cta-btn-ghost {
-  border-radius: 10px;
-  padding: 0 24px;
-  height: 46px;
-  font-size: 16px;
-  color: #e2e8f0 !important;
-  border: 1px solid rgba(148, 163, 184, 0.4) !important;
-  background: rgba(148, 163, 184, 0.08) !important;
+.cta-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+}
+.hero-divider {
+  width: 60px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.35);
+  margin: 44px auto 28px;
 }
 .hero-stats {
-  margin-top: 56px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -330,17 +272,17 @@ const handleSearch = () => {
 .stat-num {
   font-size: 19px;
   font-weight: 700;
-  color: #e2e8f0;
+  color: #ffffff;
 }
 .stat-label {
   margin-top: 4px;
   font-size: 13px;
-  color: #8fa3bc;
+  color: rgba(255, 255, 255, 0.78);
 }
 .stat-divider {
   width: 1px;
-  height: 34px;
-  background: rgba(148, 163, 184, 0.25);
+  height: 30px;
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* ===== 通用 section ===== */
@@ -382,7 +324,7 @@ const handleSearch = () => {
 }
 .feature-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 14px 34px rgba(102, 126, 234, 0.16);
 }
 .feature-icon {
   width: 52px;
@@ -429,7 +371,7 @@ const handleSearch = () => {
 
 /* ===== AI Wiki ===== */
 .aiwiki {
-  background: linear-gradient(180deg, #eef4fa 0%, #f8fafc 100%);
+  background: linear-gradient(180deg, #f5f3ff 0%, #f8fafc 100%);
   padding: 76px 0;
 }
 .aiwiki-inner {
@@ -468,9 +410,9 @@ const handleSearch = () => {
 .mock-window {
   width: 100%;
   max-width: 420px;
-  background: #0f172a;
+  background: #1e1b4b;
   border-radius: 14px;
-  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.25);
+  box-shadow: 0 20px 44px rgba(102, 126, 234, 0.32);
   overflow: hidden;
 }
 .mock-titlebar {
@@ -501,7 +443,7 @@ const handleSearch = () => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.mock-line.h { color: #7dd3fc; font-weight: 700; }
+.mock-line.h { color: #a78bfa; font-weight: 700; }
 .mock-line.dim { color: #7c8ba1; }
 .mock-line.accent { color: #34d399; margin-top: 8px; }
 
