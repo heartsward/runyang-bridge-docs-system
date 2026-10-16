@@ -99,29 +99,23 @@ export function sanitizeHighlightHtml(html: string): string {
  * 29.1：内部锚链接（href^="#"）不加 target=_blank（不开新窗口，由容器级 click 拦截做 smooth scroll）
  *      外部链接保留 target=_blank + rel=noopener noreferrer 安全策略
  * 29.8：sentinel→mark 还原——后端在 markdown 源代码块/inline code 段内用 sentinel
- *      占位符（`__HL_<idx>__<text>__HL_END__`）替代 mark 标签（因为 markdown-it 渲染
- *      code 块会 escape `<` `>`）。前端 markdown-it 渲染**之后**、sanitize 之前,
- *      找到所有 <pre><code> 块,把块内的 sentinel 替换为真 <mark> 标签
+ *      占位符（`@@HL@@<idx>@@<text>@@HLEND@@`，29.8 改用 `@@` 分隔避开 markdown-it 的 `__` `**` delimiter 解析）
+ *      替代 mark 标签（因为 markdown-it 渲染 code 块会 escape `<` `>`）。前端 markdown-it
+ *      渲染**之后**、sanitize 之前,全文做 sentinel 替换为真 <mark> 标签
  *      → 实现"代码块内也能高亮" + "不显示字面 <mark>"
  * @param html - 文档内容HTML
  * @returns 安全的文档HTML
  */
 export function sanitizeDocumentHtml(html: string): string {
-  // 29.8：sentinel→mark 还原（在 sanitize 之前,DOMPurify 不会反转 escape）
-  // 模式:对 <pre><code>...</code></pre> 块内的 __HL_<idx>__<text>__HL_END__ 替换为 <mark data-term="<text>"><text></mark>
-  // 注意:sentinel 设计上不含 HTML 特殊字符(< > & " '),所以无需 unescape
+  // 29.8 修:陈工反馈 sentinel 在 inline code 内不还原 + `__` 被 markdown-it 当 bold delimiter
+  // 1) 改用 `@@` 分隔的 sentinel(避开 markdown-it 的 `__` `**` delimiter 解析)
+  // 2) 全文替换 sentinel(陈工实际场景 sentinel 在普通段 + fenced code + inline code 都出现)
+  // 普通段本来就没 sentinel(后端只在 code 段用 sentinel),所以全文替换安全
   const htmlWithCodeMarks = html.replace(
-    /<pre>(<code[^>]*>)([\s\S]*?)<\/code><\/pre>/g,
-    (_match, openTag: string, codeContent: string) => {
-      // 把 code 内的 sentinel 替换为 <mark>——<mark> 是已 sanitize 白名单标签,sanitize 通过
-      const replaced = codeContent.replace(
-        /__HL_(\d+)__([^_]+)__([^_]+)__HL_END__/g,
-        (_m: string, _idx: string, termAttr: string, matchedText: string) => {
-          // termAttr 已经 HTML-escape 过(text 里的引号/尖括号),matchedText 原样
-          return `<mark data-term="${termAttr}">${matchedText}</mark>`
-        }
-      )
-      return `<pre>${openTag}${replaced}</code></pre>`
+    /@@HL@@(\d+)@@([^@]+)@@([^@]+)@@HLEND@@/g,
+    (_m: string, _idx: string, termAttr: string, matchedText: string) => {
+      // termAttr 已经 HTML-escape 过(text 里的引号/尖括号),matchedText 原样
+      return `<mark data-term="${termAttr}">${matchedText}</mark>`
     }
   )
 

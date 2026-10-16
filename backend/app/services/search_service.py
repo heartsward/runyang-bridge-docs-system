@@ -219,10 +219,11 @@ class SearchService:
         - mark 带 data-term 属性，供前端按词分组做分别导航
         - 29.3：**markdown 链接保护**——`[text](url)` 的 text 段正常高亮，URL 段完全跳过
           （避免 `href="#xxx<mark>...</mark>"` 破坏 markdown 链接语法，导致浏览器 native 跳转失效）
-        - 29.6/29.8：**代码块 / 行内代码 段**用 sentinel 占位符（`__HL_<idx>__<text>__HL_END__`）
+        - 29.6/29.8：**代码块 / 行内代码 段**用 sentinel 占位符（`@@HL@@<idx>@@<term>@@<text>@@HLEND@@`）
           替代 `<mark>` 标签插入——markdown-it 渲染 fenced code 时会 escape `<` `>` 为 `&lt;` `&gt;` 字面字符，
-          直接插入 `<mark>` 会被 escape 成 `&lt;mark&gt;` 字面显示；sentinel 是不含 HTML 特殊字符
-          的纯 ASCII 字符串，markdown-it 不 escape，前端 markdown-it 渲染**之后**再做 sentinel→mark 还原
+          直接插入 `<mark>` 会被 escape 成 `&lt;mark&gt;` 字面显示；sentinel 是不含 markdown 特殊字符
+          的纯 ASCII 字符串，markdown-it 不解析（**关键**：`__` `**` 会被 markdown-it 当 bold delimiter
+          配对破坏 sentinel 结构，用 `@@` 分隔避开），前端 markdown-it 渲染**之后**再做 sentinel→mark 还原
           （在 `sanitizeDocumentHtml` 内部统一处理）——实现"代码块内也高亮" + "不显示字面 <mark>"
         - 29.7：**完整 q 串整体高亮**——若多词查询的完整 `q.strip()` 串在原文中连续出现，
           把整段作为**单一** mark 插入（不按分词拆开），实现陈工期望的"ufw allow from" 3 词一个高亮块
@@ -287,14 +288,14 @@ class SearchService:
             out.append(text[pos:start])
             matched_text = text[start:end]
             in_code = any(not (end <= s or start >= e) for s, e in code_ranges)
-            if in_code:
-                # 29.8：代码块/inline code 段用 sentinel 替代 <mark>
-                # 前端 markdown-it 渲染后,字符串里是 <pre><code>__HL_<idx>__ufw__HL_END__</code></pre>
-                # 还原在 sanitizeDocumentHtml 内部统一处理
-                # 属性值做 HTML 转义(虽然 sentinel 不含特殊字符,但保险起见)
-                term_attr = html_lib.escape(matched_text.lower(), quote=True)
-                out.append(f"__HL_{sentinel_idx}__{term_attr}__{matched_text}__HL_END__")
-                sentinel_idx += 1
+                if in_code:
+                    # 29.8 修:代码块/inline code 段用 @@ 分隔的 sentinel(避开 markdown 的 __** delimiter)
+                    # 前端 markdown-it 渲染后,字符串里是 <pre><code>@@HL@@<idx>@@<term>@@<text>@@HLEND@@</code></pre>
+                    # 还原在 sanitizeDocumentHtml 内部统一处理
+                    # 属性值做 HTML 转义(虽然 sentinel 不含特殊字符,但保险起见)
+                    term_attr = html_lib.escape(matched_text.lower(), quote=True)
+                    out.append(f"@@HL@@{sentinel_idx}@@{term_attr}@@{matched_text}@@HLEND@@")
+                    sentinel_idx += 1
             else:
                 # 普通段:用 <mark>
                 term_attr = html_lib.escape(matched_text.lower(), quote=True)
