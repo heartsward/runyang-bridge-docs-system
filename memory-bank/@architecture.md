@@ -125,6 +125,16 @@ runyang-bridge-docs-system/
 > - 导出字段选择器由硬编码 13 项改为 `exportFieldDefs` 数组（27 项，覆盖前端可见字段）；新增字段时只需改这一个数组 + 后端 `field_mapping`。
 > - 分组删除语义变更：`DELETE /system-config/asset-groups/{name}` **级联**——删定义 + 从所有设备 groups JSON 摘标签（返回 removed_from_assets）。前端确认弹窗明示影响台数。
 
+> **2026-10-16 变更（阶段二十九·29.1 — Markdown 预览观感全面优化）**：用户反馈 MD 文档预览 4 类问题：① 文档内跳转链接失效；② 代码块没有 IDE 直观的缩进、特殊字符；③ 字体忽大忽小；④ 整体观感差。一次性修根：
+> - **锚链接**：单例 markdown-it 装 `markdown-it-anchor`（heading 自动 id）+ `xss-protection.ts` 用 DOMPurify `afterSanitizeAttributes` 钩子对内部锚链接（`href^="#"`）去掉 `target=_blank`/`rel`，保留外部链接安全策略；`DocumentView`/`SearchView` 的 `.preview-container` 加 `@click="handlePreviewAnchorClick"` 代理 → `scrollIntoView({behavior:'smooth'})`
+> - **代码块 IDE 观感**：装 `highlight.js`（GitHub Dark 精简主题，CSS 写在 `assets/markdown.css` 的 `.hljs-*` 块）；`.markdown-content pre` 设 `tab-size:4`、字体栈 `'JetBrains Mono','Fira Code','Cascadia Code','SF Mono',Consolas,...`、`font-feature-settings: "liga" 0, "calt" 0` 防连字破坏等宽对齐、`white-space:pre` 保所有空白字符
+> - **字体忽大忽小**：markdown-it `breaks:false → true` 让单换行变 `<br>`（修"硬回车被合并成空格"）；标题梯度从原来 h4=1em=14px（与正文同字号）改为平滑梯度 h1=2.25rem / h2=1.75rem / h3=1.375rem / h4=1.125rem / h5=1rem / h6=0.875rem（基于 15px 基准）；`typographer` 关闭避免中文破折号/引号自动替换干扰阅读；字体栈中文优先 `'PingFang SC','Microsoft YaHei','Source Han Sans CN'` + 英文回退
+> - **重复 CSS 抽取**：`DocumentView`/`SearchView` 各 ~150 行近似重复的 `.markdown-content :deep(...)` 样式**全部删除**，新建 `frontend/src/assets/markdown.css`（296 行，全局无需 `:deep()` 穿透）；`main.ts` `import './assets/markdown.css'`；新增 `handlePreviewAnchorClick` 同时在两 view 注册（防重复则待日后抽 composable）。`SearchView.css` 从 ~5kB 缩到 2.19kB
+> - **死代码清理**：`.preview-content-table` 块（@architecture 27.17 已标"待清理"）一并删除
+> - **依赖**：`markdown-it-anchor@^9.2.1` + `highlight.js@^11.12.0`（均为 markdown-it 生态主流，不属于 `@tech-stack.md` 严禁清单的 UI 库/状态管理/HTTP 客户端；包体增量 ~50KB gzip）
+> - **不变**：`renderDocumentMarkdown` / `renderMarkdown` / `sanitizeDocumentHtml` 对外签名不变（向后兼容）；后端/数据库/鉴权/上传白名单/路由/OnlyOffice 配置 零改动
+> - **验证**：`npm run build` ✓ 4437 modules / 10.11s；`vue-tsc` 历史遗留 21 个错误无新增（已确认与本次改动无关，参考 progress.md 2026-10-15 28.6 段）
+
 ---
 
 ## 1. backend/ — FastAPI 后端

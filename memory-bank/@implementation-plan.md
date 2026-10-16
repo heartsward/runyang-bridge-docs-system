@@ -2493,3 +2493,33 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 能改：`services/wiki/index.py`（加 remove_doc）、`crud/document.py`（delete_with_file 尾部加级联）、`DocumentView.vue`（内容提取列加按钮 + retryExtraction 函数）
 - 不能改：retry-extraction 端点（已存在，复用）、删除端点签名、DB 表结构
 - 验证：index.remove_doc 单测（假 doc_id）；delete_with_file e2e（临时文档+临时文件）；前端 build
+
+## 阶段二十九：Markdown 文档预览观感全面优化（2026-10-16）
+
+> 用户反馈：① MD 文档预览时文档内的跳转链接失效；② 代码块没有 IDE 直观的缩进、特殊字符；③ 字体忽大忽小；④ 整体观感未达预期
+> 根因：① markdown-it 未装 anchor 插件，heading 没 id → 锚链接失效；② xss-protection 给所有 a 强制加 target=_blank，内部锚链接也开新窗口；③ 无 syntax highlight、pre/code 无 tab-size、无 IDE 友好字体；④ h4=1em 与正文同字号、字体栈英文优先；⑤ DocumentView/SearchView 两份近似重复 CSS
+
+### 步骤 29.1 — 全局 markdown.css + 渲染器升级 + 重复样式清理
+- **能改什么**：
+  - `frontend/package.json`（新增 `markdown-it-anchor` + `highlight.js`）
+  - `frontend/src/utils/markdown-renderer.ts`（单例 markdown-it 装 anchor + highlight 插件；breaks:true 让单换行换行）
+  - `frontend/src/utils/xss-protection.ts`（DOMPurify addHook 区分 internal/external 链接：内部锚链接不加 target=_blank）
+  - `frontend/src/assets/markdown.css`（**新建**：标题梯度/字体栈/pre-code-表格-列表-blockquote-a-hr-img-mark 全套 + scrollbar 美化）
+  - `frontend/src/main.ts`（import 新 CSS）
+  - `frontend/src/views/DocumentView.vue`（删 ~150 行重复 .markdown-content；.preview-container 加 @click 拦截 a[href^="#"] smooth scroll；清理 .table-scroll-wrapper 死 CSS）
+  - `frontend/src/views/SearchView.vue`（同上结构）
+- **不能改什么**：
+  - 后端 / 数据库 / 模型 / 鉴权 / 上传白名单 / 路由
+  - `renderDocumentMarkdown` / `renderMarkdown` 的对外签名
+  - `sanitizeDocumentHtml` / `sanitizeHighlightHtml` 的对外签名
+- **怎么验**：
+  1. `cd frontend && npm install`（装新依赖）
+  2. `npm run build`（TypeScript 检查 0 error）
+  3. dev server 5173 启起，登录后访问 `/documents`
+  4. 找一个含 `[text](#anchor)` 内链 + ``` ```js ``` 代码块 + h1-h6 多级标题的 md 文档点预览：
+     - 内链点击：同窗口 smooth scroll 跳到目标 heading（不开新窗口）
+     - 代码块：syntax highlight + 等宽字体 + tab 4 宽对齐
+     - h4 字号明显大于正文，h1-h6 平滑梯度
+  5. `/search` 智能搜索预览：观感与文档管理一致
+- **通过标准**：4 项反馈全部肉眼可感知改善；build 无新错；无 console error
+- **回退方案**：`git checkout HEAD -- frontend/src/utils/markdown-renderer.ts frontend/src/utils/xss-protection.ts frontend/src/main.ts frontend/src/views/DocumentView.vue frontend/src/views/SearchView.vue frontend/package.json && rm frontend/src/assets/markdown.css`

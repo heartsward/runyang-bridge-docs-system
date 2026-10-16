@@ -135,6 +135,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM 29.1：Markdown 预览观感依赖——29.1 装 markdown-it-anchor + highlight.js 实现
+REM 锚链接跳转 / 代码块语法高亮。装完断言一下，让脚本读者看到这俩是必须依赖。
+call node -e "require('markdown-it-anchor'); require('highlight.js'); console.log('OK markdown preview deps')" 2>nul
+if errorlevel 1 (
+    echo [WARN] markdown-it-anchor or highlight.js missing, installing...
+    call npm install markdown-it-anchor@^9.2.0 highlight.js@^11.10.0 --no-audit --no-fund -q
+)
+
 echo.
 echo Testing database connection...
 cd ..\backend

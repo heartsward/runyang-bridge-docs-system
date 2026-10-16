@@ -258,8 +258,9 @@
         </n-radio-group>
       </div>
 
-      <div class="preview-container">
-        <!-- 提取内容模式（阶段 3E：后端发 Markdown → 前端 markdown-it 渲染为 HTML → DOMPurify sanitize） -->
+      <div class="preview-container" @click="handlePreviewAnchorClick">
+        <!-- 提取内容模式（阶段 3E：后端发 Markdown → 前端 markdown-it 渲染为 HTML → DOMPurify sanitize）
+             29.1：@click 容器代理拦截内部锚链接 [text](#anchor)，平滑滚动到 heading（不开新窗口） -->
         <div
           v-if="(previewMode === 'extracted' || !shouldShowViewToggle(currentDocument)) && !previewEditMode"
           v-html="displayPreviewHtml"
@@ -1927,14 +1928,36 @@ const shouldShowViewToggle = (doc: Document | null): boolean => {
 const getFileUrl = (document: Document | null): string => {
   if (!document) return ''
   const baseUrl = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8002`
-  
+
   // 对于原文模式，使用search端点的original路径
   if (previewMode.value === 'original') {
     return `${baseUrl}/api/v1/search/original/${document.id}`
   }
-  
+
   // 对于内容提取模式，使用documents端点
   return `${baseUrl}/api/v1/documents/${document.id}/preview`
+}
+
+// 29.1：内部锚链接（[text](#anchor)）点击 → 同窗口 smooth scroll 跳转到目标 heading
+// 由 .preview-container 上的 @click 代理触发；xss-protection.ts 已对内部锚链接移除 target=_blank
+const handlePreviewAnchorClick = (e: MouseEvent): void => {
+  // 仅响应主鼠标左键（避免中键打开新标签、右键菜单等被误吞）
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  const anchor = target.closest('a') as HTMLAnchorElement | null
+  if (!anchor) return
+  const href = anchor.getAttribute('href') || ''
+  // 只拦截内部锚链接（href 以 # 开头）；外部链接（http://...）正常行为
+  if (!href.startsWith('#') || href === '#') return
+  e.preventDefault()
+  // 解码（兼容 markdown-it-anchor 对中文 heading 生成的 slug）
+  const id = decodeURIComponent(href.slice(1))
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // 更新 URL hash 但不触发滚动（scrollIntoView 已处理）
+  history.replaceState(null, '', href)
 }
 
 </script>
@@ -1985,195 +2008,14 @@ const getFileUrl = (document: Document | null): string => {
   border-radius: 6px;
 }
 
-/* 优化表格显示样式 */
-.preview-content-table {
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.6;
-  white-space: pre;  /* 保持空格和对齐 */
-  word-break: normal; /* 不破坏单词，保持对齐 */
-  background-color: #f8f9fa;
-  padding: 16px;
-  border-radius: 4px;
-  border: 1px solid #e9ecef;
-  margin: 0;
-  width: 100%;
-  min-width: 800px; /* 设置最小宽度，确保表格有足够空间 */
-  tab-size: 4; /* 设置制表符宽度 */
-  unicode-bidi: embed;
-  direction: ltr;
-}
+/* 29.1：删除 .preview-content-table 死 CSS（@architecture.md 阶段 27.17 遗留）——
+   早于 .markdown-content（v-html 渲染）使用，已无代码生成该元素 */
 
-
-/* 文本模式的高亮样式 */
-.preview-content-table mark {
-  background-color: #fff3cd;
-  color: #856404;
-  padding: 2px 4px;
-  border-radius: 2px;
-  font-weight: 500;
-  transition: all 0.3s ease;
-}
-
-.preview-content-table mark.active-highlight {
-  background-color: #ffc107;
-  color: #212529;
-  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
-  font-weight: bold;
-}
-
-/* 阶段 3E：Markdown 渲染样式（替代旧的 preview-content-table）
-   注意：v-html 注入的子元素不带 data-v 属性 → scoped 选择器无法命中；
-   参考 SearchView 写法，所有"作用于 v-html 子元素"的规则必须加 :deep() 穿透。
-   27.10：补齐 :deep() 让表格边框 / 列表样式 / pre 等都能渲染 */
-.markdown-content {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 14px;
-  line-height: 1.7;
-  color: #24292e;
-  background-color: #ffffff;
-  padding: 24px;
-  border-radius: 6px;
-  border: 1px solid #e9ecef;
-  margin: 0;
-  width: 100%;
-  min-width: 800px;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-
-.markdown-content :deep(h1),
-.markdown-content :deep(h2),
-.markdown-content :deep(h3),
-.markdown-content :deep(h4),
-.markdown-content :deep(h5),
-.markdown-content :deep(h6) {
-  margin-top: 24px;
-  margin-bottom: 16px;
-  font-weight: 600;
-  line-height: 1.25;
-  border-bottom: 1px solid #eaecef;
-  padding-bottom: 8px;
-}
-
-.markdown-content :deep(h1) { font-size: 2em; }
-.markdown-content :deep(h2) { font-size: 1.5em; }
-.markdown-content :deep(h3) { font-size: 1.25em; border-bottom: none; }
-.markdown-content :deep(h4) { font-size: 1em; border-bottom: none; }
-
-.markdown-content :deep(p) {
-  margin: 0 0 16px 0;
-}
-
-.markdown-content :deep(ul),
-.markdown-content :deep(ol) {
-  margin: 0 0 16px 0;
-  padding-left: 32px;
-}
-
-.markdown-content :deep(li) {
-  margin: 4px 0;
-}
-
-.markdown-content :deep(table) {
-  /* 27.11：表格自适应优化——之前 width:auto + max-width:100% 导致短列被压扁、
-     长列撑满、长文本溢出，阅读体验差 */
-  border-collapse: collapse;
-  margin: 16px 0;
-  width: min(100%, 900px);
-  table-layout: auto;
-  font-size: 13px;
-}
-
-/* 外层滚动容器：表格超过视口宽度时横向滚动而不是挤压 */
-.markdown-content :deep(.table-scroll-wrapper) {
-  overflow-x: auto;
-  margin: 0;
-}
-
-.markdown-content :deep(table th),
-.markdown-content :deep(table td) {
-  border: 1px solid #d0d7de;
-  padding: 8px 14px;
-  text-align: left;
-  vertical-align: top;
-  /* 关键：长文本自动换行，不再撑破单元格 */
-  overflow-wrap: break-word;
-  word-break: break-word;
-  line-height: 1.6;
-  /* 关键：列宽下限——th 120px / 普通 td 80px，避免短列被压成一字一行 */
-  min-width: 80px;
-}
-
-.markdown-content :deep(table th) {
-  background-color: #f6f8fa;
-  font-weight: 600;
-  min-width: 120px;
-}
-
-/* 多列表格斑马纹（偶数行浅灰）+ hover 高亮——横向跨行阅读不跟丢 */
-.markdown-content :deep(table tbody tr:nth-child(even) td) {
-  background-color: #fbfcfd;
-}
-
-.markdown-content :deep(table tbody tr:hover td) {
-  background-color: #f0f7ff;
-}
-
-/* 代码内容不换行（保持等宽对齐） */
-.markdown-content :deep(table code) {
-  word-break: normal;
-}
-
-.markdown-content :deep(code) {
-  background-color: #f6f8fa;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 0.9em;
-}
-
-.markdown-content :deep(pre) {
-  background-color: #f6f8fa;
-  padding: 16px;
-  border-radius: 6px;
-  overflow-x: auto;
-  line-height: 1.5;
-}
-
-.markdown-content :deep(pre code) {
-  background-color: transparent;
-  padding: 0;
-}
-
-.markdown-content :deep(blockquote) {
-  border-left: 4px solid #d0d7de;
-  padding-left: 16px;
-  color: #57606a;
-  margin: 16px 0;
-}
-
-.markdown-content :deep(hr) {
-  border: 0;
-  border-top: 2px solid #eaecef;
-  margin: 24px 0;
-}
-
-.markdown-content :deep(mark) {
-  background-color: #fff3cd;
-  color: #856404;
-  padding: 2px 4px;
-  border-radius: 2px;
-  font-weight: 500;
-  transition: all 0.3s ease;
-}
-
-.markdown-content :deep(mark.active-highlight) {
-  background-color: #ffc107;
-  color: #212529;
-  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
-  font-weight: bold;
-}
+/* 29.1：.markdown-content 样式已抽到全局 frontend/src/assets/markdown.css
+   原因：原样式在 DocumentView/SearchView 两份近似重复（各 ~150 行），
+   修改一边不会同步另一边。抽到全局后两边自动同步、新增样式只改一处。
+   同时支持：[text](#anchor) 内链跳转（anchor 插件 + 容器级 click 拦截）、
+   代码块语法高亮（highlight.js）、平滑标题梯度（h4-h6 不再缩成一团）。 */
 
 /* 显示模式控制样式 */
 .display-mode-controls {

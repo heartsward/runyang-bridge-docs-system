@@ -322,7 +322,9 @@
         <div
           v-else-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
           class="preview-container"
+          @click="handlePreviewAnchorClick"
         >
+          <!-- 29.1：@click 容器代理拦截 [text](#anchor) → smooth scroll 到 heading（不开新窗口） -->
           <div v-html="displayPreviewHtml" class="markdown-content"></div>
         </div>
         
@@ -1102,6 +1104,24 @@ watch(previewMode, async (newMode) => {
   }
 })
 
+// 29.1：内部锚链接（[text](#anchor)）点击 → 同窗口 smooth scroll 跳转到目标 heading
+// 由 .preview-container 上的 @click 代理触发；xss-protection.ts 已对内部锚链接移除 target=_blank
+const handlePreviewAnchorClick = (e: MouseEvent): void => {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  const anchor = target.closest('a') as HTMLAnchorElement | null
+  if (!anchor) return
+  const href = anchor.getAttribute('href') || ''
+  if (!href.startsWith('#') || href === '#') return
+  e.preventDefault()
+  const id = decodeURIComponent(href.slice(1))
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  history.replaceState(null, '', href)
+}
+
 </script>
 
 <style scoped>
@@ -1152,129 +1172,9 @@ watch(previewMode, async (newMode) => {
   border-radius: 6px;
 }
 
-/* 20.6：搜索预览内容区（Markdown 渲染，观感对齐文档管理 .markdown-content）
-   .markdown-content 在模板内（scoped 生效），内部 v-html 注入内容用 :deep 穿透 */
-.markdown-content {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 14px;
-  line-height: 1.7;
-  color: #24292e;
-  background-color: #ffffff;
-  padding: 24px;
-  border-radius: 6px;
-  border: 1px solid #e9ecef;
-  margin: 0;
-  width: 100%;
-  min-width: 800px;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
+/* 29.1：.markdown-content 样式已抽到全局 frontend/src/assets/markdown.css（与 DocumentView 共享） */
 
-.markdown-content :deep(h1),
-.markdown-content :deep(h2),
-.markdown-content :deep(h3),
-.markdown-content :deep(h4),
-.markdown-content :deep(h5),
-.markdown-content :deep(h6) {
-  margin-top: 24px;
-  margin-bottom: 16px;
-  font-weight: 600;
-  line-height: 1.25;
-  border-bottom: 1px solid #eaecef;
-  padding-bottom: 8px;
-}
-.markdown-content :deep(h1) { font-size: 2em; }
-.markdown-content :deep(h2) { font-size: 1.5em; }
-.markdown-content :deep(h3) { font-size: 1.25em; border-bottom: none; }
-.markdown-content :deep(h4) { font-size: 1em; border-bottom: none; }
-
-.markdown-content :deep(p) { margin: 0 0 16px 0; }
-.markdown-content :deep(ul),
-.markdown-content :deep(ol) { margin: 0 0 16px 0; padding-left: 32px; }
-.markdown-content :deep(li) { margin: 4px 0; }
-
-.markdown-content :deep(table) {
-  /* 27.11：表格自适应优化（与 DocumentView 对齐） */
-  border-collapse: collapse;
-  margin: 16px 0;
-  width: min(100%, 900px);
-  table-layout: auto;
-  font-size: 13px;
-}
-.markdown-content :deep(table th),
-.markdown-content :deep(table td) {
-  border: 1px solid #d0d7de;
-  padding: 8px 14px;
-  text-align: left;
-  vertical-align: top;
-  overflow-wrap: break-word;
-  word-break: break-word;
-  line-height: 1.6;
-  min-width: 80px;
-}
-.markdown-content :deep(table th) {
-  background-color: #f6f8fa;
-  font-weight: 600;
-  min-width: 120px;
-}
-.markdown-content :deep(table tbody tr:nth-child(even) td) {
-  background-color: #fbfcfd;
-}
-.markdown-content :deep(table tbody tr:hover td) {
-  background-color: #f0f7ff;
-}
-.markdown-content :deep(table code) {
-  word-break: normal;
-}
-
-.markdown-content :deep(code) {
-  background-color: #f6f8fa;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 0.9em;
-}
-.markdown-content :deep(pre) {
-  background-color: #f6f8fa;
-  padding: 16px;
-  border-radius: 6px;
-  overflow-x: auto;
-  line-height: 1.5;
-}
-.markdown-content :deep(pre code) { background-color: transparent; padding: 0; }
-
-.markdown-content :deep(blockquote) {
-  border-left: 4px solid #d0d7de;
-  padding-left: 16px;
-  color: #57606a;
-  margin: 16px 0;
-}
-.markdown-content :deep(hr) { border: 0; border-top: 2px solid #eaecef; margin: 24px 0; }
-.markdown-content :deep(img) { max-width: 100%; }
-
-/* 高亮 */
-.markdown-content :deep(mark) {
-  background-color: #fff3cd;
-  color: #856404;
-  padding: 2px 4px;
-  border-radius: 2px;
-  font-weight: 500;
-  transition: all 0.3s ease;
-}
-.markdown-content :deep(mark.active-highlight) {
-  background-color: #ffeb3b;
-  box-shadow: 0 0 0 2px #f57f17;
-}
-
-/* 多词分别导航：每个词独立色相（与导航卡片边框色一致） */
-.markdown-content :deep(mark.hl-term-0) { background-color: #ffe0b2; color: #e65100; }
-.markdown-content :deep(mark.hl-term-1) { background-color: #bbdefb; color: #0d47a1; }
-.markdown-content :deep(mark.hl-term-2) { background-color: #c8e6c9; color: #1b5e20; }
-.markdown-content :deep(mark.hl-term-3) { background-color: #e1bee7; color: #4a148c; }
-.markdown-content :deep(mark.hl-term-4) { background-color: #ffcdd2; color: #b71c1c; }
-.markdown-content :deep(mark.hl-term-5) { background-color: #b2dfdb; color: #004d40; }
-.markdown-content :deep(mark.hl-term-6) { background-color: #d1c4e9; color: #311b92; }
-.markdown-content :deep(mark.hl-term-7) { background-color: #fff9c4; color: #f57f17; }
+/* 27.17：搜索预览内 img 限宽——原 .markdown-content :deep(img) 规则，全局化后无需重复 */
 
 /* 多词导航卡片 */
 .term-nav-item {

@@ -95,11 +95,27 @@ export function sanitizeHighlightHtml(html: string): string {
 
 /**
  * 用于文档预览的安全净化（保留更多格式）
+ *
+ * 29.1：内部锚链接（href^="#"）不加 target=_blank（不开新窗口，由容器级 click 拦截做 smooth scroll）
+ *      外部链接保留 target=_blank + rel=noopener noreferrer 安全策略
  * @param html - 文档内容HTML
  * @returns 安全的文档HTML
  */
 export function sanitizeDocumentHtml(html: string): string {
-  return sanitizeHtml(html, {
+  // 29.1：钩子分流——内部锚链接（#anchor）不开新窗口、不加 rel
+  // addHook 是全局的，每次调用前注册、用完即移除，避免污染后续 sanitizeHtml 调用
+  DOMPurify.addHook('afterSanitizeAttributes', (node: Element) => {
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href') || ''
+      // 内部锚链接（#xxx）或纯锚点（#）→ 去掉外部链接的目标窗口属性
+      if (href.startsWith('#')) {
+        node.removeAttribute('target')
+        node.removeAttribute('rel')
+      }
+    }
+  })
+
+  const result = sanitizeHtml(html, {
     ALLOWED_TAGS: [
       'p', 'br', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'sub', 'sup',
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -112,15 +128,20 @@ export function sanitizeDocumentHtml(html: string): string {
     ],
     ALLOWED_ATTR: [
       'href', 'title', 'src', 'alt', 'width', 'height',
-      'class', 'colspan', 'rowspan',
+      'class', 'colspan', 'rowspan', 'id',  // 29.1：anchor 插件给 heading 加 id，需要保留
       'target', 'rel',
       // 搜索高亮导航（阶段二十·20.5）：按词分组 + 索引
       'data-term', 'data-highlight-index', 'data-highlight-term'
     ],
-    // 确保链接安全
+    // 外部链接安全策略：内部锚链接由钩子分流后移除
     ADD_ATTR: { 'a': { 'rel': 'noopener noreferrer', 'target': '_blank' } },
     SANITIZE_NAMED_PROPS: true
   })
+
+  // 用完即移除钩子，避免影响后续 sanitizeHtml / sanitizeHighlightHtml 调用
+  DOMPurify.removeHook('afterSanitizeAttributes')
+
+  return result
 }
 
 /**

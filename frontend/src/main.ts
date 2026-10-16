@@ -1,4 +1,5 @@
 import './assets/main.css'
+import './assets/markdown.css'  // 29.1：全局 Markdown 渲染样式（标题/字体/代码块/表格/链接等）
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'

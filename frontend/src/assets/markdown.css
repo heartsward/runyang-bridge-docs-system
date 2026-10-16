@@ -1,0 +1,296 @@
+/* ============================================================================
+ * Markdown 渲染全局样式（29.1：从 DocumentView/SearchView 抽出）
+ *
+ * 设计目标：
+ * - 标题梯度平滑（h1=2.25 / h2=1.75 / h3=1.375 / h4=1.125 / h5=1 / h6=0.875 rem）
+ *   → 修 27.x 时 h4=1em=14px 与正文同字号导致 h4-h6 缩成一团的问题
+ * - 中英混合字体栈：中文优先 PingFang SC / 微软雅黑 / 思源黑体，英文 -apple-system 兜底
+ * - pre/code IDE 友好：等宽字体栈 JetBrains Mono / Fira Code / SF Mono / Consolas，
+ *   tab-size:4（IDE 直观的 4 宽缩进），font-variant-ligatures:none 防连字破坏对齐
+ * - 配合 markdown-renderer.ts 装 highlight.js → GitHub Dark 风语法高亮
+ * - 表格改为 block+overflow:auto（避免之前 min-width 撑破容器）
+ * - scrollbar 美化（pre/table 横向滚动条浅灰胶囊）
+ *
+ * 适用：.markdown-content 容器内的 v-html 注入内容
+ * 由于 v-html 子元素不带 data-v，全局 CSS 无需 :deep() 穿透（抽取的收益）
+ * ========================================================================== */
+
+.markdown-content {
+  /* 字体栈：中文优先，英文回退到 system-ui */
+  font-family:
+    'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Source Han Sans CN',
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  font-size: 15px;
+  line-height: 1.75;
+  color: #24292f;
+  background-color: #ffffff;
+  padding: 28px 32px;
+  border-radius: 6px;
+  margin: 0;
+  width: 100%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  /* 滚动容器样式（如 .preview-container 包住） */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ───────── 标题 ───────── */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin-top: 24px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #1f2328;
+  /* anchor 跳转留白（避免标题被外层 sticky 头部挡住） */
+  scroll-margin-top: 16px;
+}
+.markdown-content h1:first-child,
+.markdown-content h2:first-child,
+.markdown-content h3:first-child,
+.markdown-content h4:first-child {
+  margin-top: 0;
+}
+.markdown-content h1 {
+  font-size: 2.25rem;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #d1d9e0;
+}
+.markdown-content h2 {
+  font-size: 1.75rem;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #d1d9e0;
+}
+.markdown-content h3 { font-size: 1.375rem; }
+.markdown-content h4 { font-size: 1.125rem; }
+.markdown-content h5 { font-size: 1rem; color: #57606a; }
+.markdown-content h6 { font-size: 0.875rem; color: #57606a; }
+
+/* ───────── 段落 ───────── */
+.markdown-content p { margin: 0 0 14px 0; }
+.markdown-content p:last-child { margin-bottom: 0; }
+
+/* ───────── 列表 ───────── */
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0 0 14px 0;
+  padding-left: 2em;
+}
+.markdown-content li { margin: 4px 0; }
+.markdown-content li > p { margin-bottom: 6px; }
+.markdown-content li > ul,
+.markdown-content li > ol { margin: 4px 0; }
+
+/* ───────── 引用 ───────── */
+.markdown-content blockquote {
+  margin: 14px 0;
+  padding: 0 1em;
+  color: #57606a;
+  border-left: 4px solid #d0d7de;
+}
+.markdown-content blockquote > :first-child { margin-top: 0; }
+.markdown-content blockquote > :last-child { margin-bottom: 0; }
+
+/* ───────── 水平线 ───────── */
+.markdown-content hr {
+  border: 0;
+  border-top: 2px solid #eaecef;
+  margin: 22px 0;
+  height: 0;
+}
+
+/* ───────── 链接 ───────── */
+.markdown-content a {
+  color: #0969da;
+  text-decoration: none;
+  background-color: transparent;
+  transition: color 0.15s ease;
+}
+.markdown-content a:hover {
+  color: #0550ae;
+  text-decoration: underline;
+}
+/* 内部锚链接（[text](#anchor)）：点击触发 smooth scroll，由 DocumentView/SearchView 容器级 @click 代理
+   这里只做 hover 视觉提示（浅蓝背景） */
+.markdown-content a[href^="#"]:hover {
+  text-decoration: none;
+  background-color: rgba(9, 105, 218, 0.08);
+  border-radius: 2px;
+}
+
+/* ───────── 行内代码 ───────── */
+.markdown-content code {
+  font-family:
+    'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
+    Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.875em;
+  background-color: rgba(175, 184, 193, 0.2);
+  padding: 0.2em 0.4em;
+  border-radius: 6px;
+  color: #1f2328;
+  /* 防连字干扰对齐（IDE 直观的等宽对齐） */
+  font-feature-settings: "liga" 0, "calt" 0;
+  font-variant-ligatures: none;
+}
+
+/* ───────── 代码块（GitHub Dark 风 + IDE 直观的 tab 对齐） ───────── */
+.markdown-content pre {
+  margin: 14px 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  font-family:
+    'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
+    Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.875em;
+  line-height: 1.6;
+  background-color: #24292e;
+  border-radius: 6px;
+  color: #e6edf3;
+  /* IDE 直观的 4 宽 tab 缩进 */
+  tab-size: 4;
+  -moz-tab-size: 4;
+  /* 保留所有空白字符 */
+  white-space: pre;
+  word-wrap: normal;
+}
+.markdown-content pre code {
+  background-color: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  white-space: pre;
+  display: block;
+  min-width: max-content;
+}
+
+/* ───────── highlight.js GitHub Dark 精简主题（29.1：随 markdown-renderer.ts 装 hljs 后生效） ───────── */
+.markdown-content .hljs { color: #e6edf3; background: transparent; }
+.markdown-content .hljs-comment,
+.markdown-content .hljs-quote { color: #8b949e; font-style: italic; }
+.markdown-content .hljs-keyword,
+.markdown-content .hljs-selector-tag,
+.markdown-content .hljs-literal,
+.markdown-content .hljs-section,
+.markdown-content .hljs-link { color: #ff7b72; }
+.markdown-content .hljs-string,
+.markdown-content .hljs-attr { color: #a5d6ff; }
+.markdown-content .hljs-number,
+.markdown-content .hljs-symbol { color: #79c0ff; }
+.markdown-content .hljs-built_in,
+.markdown-content .hljs-builtin-name { color: #ffa657; }
+.markdown-content .hljs-title,
+.markdown-content .hljs-class .hljs-title { color: #d2a8ff; font-weight: 600; }
+.markdown-content .hljs-variable,
+.markdown-content .hljs-template-variable { color: #ffa657; }
+.markdown-content .hljs-tag,
+.markdown-content .hljs-name { color: #7ee787; }
+.markdown-content .hljs-attribute { color: #79c0ff; }
+.markdown-content .hljs-meta { color: #8b949e; }
+.markdown-content .hljs-deletion { color: #ffa198; background-color: rgba(255, 129, 130, 0.1); }
+.markdown-content .hljs-addition { color: #7ee787; background-color: rgba(46, 160, 67, 0.1); }
+.markdown-content .hljs-emphasis { font-style: italic; }
+.markdown-content .hljs-strong { font-weight: 700; }
+
+/* ───────── 表格（block 模式 + 自适应横向滚动） ───────── */
+.markdown-content table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  margin: 14px 0;
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  font-size: 0.875em;
+}
+.markdown-content table th,
+.markdown-content table td {
+  padding: 6px 13px;
+  border: 1px solid #d0d7de;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.markdown-content table th {
+  font-weight: 600;
+  background-color: #f6f8fa;
+}
+.markdown-content table tr {
+  background-color: #ffffff;
+  border-top: 1px solid #eaecef;
+}
+.markdown-content table tr:nth-child(2n) {
+  background-color: #f6f8fa;
+}
+.markdown-content table tr:hover {
+  background-color: #f0f7ff;
+}
+
+/* ───────── 图片 ───────── */
+.markdown-content img {
+  max-width: 100%;
+  background-color: transparent;
+  border-radius: 4px;
+}
+
+/* ───────── 键盘输入 ───────── */
+.markdown-content kbd {
+  display: inline-block;
+  padding: 3px 5px;
+  font-size: 0.875em;
+  line-height: 1;
+  color: #24292f;
+  vertical-align: middle;
+  background-color: #f6f8fa;
+  border: solid 1px #d0d7de;
+  border-bottom-color: #d0d7de;
+  border-radius: 6px;
+  box-shadow: inset 0 -1px 0 #d0d7de;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ───────── 高亮 mark（搜索关键词） ───────── */
+.markdown-content mark {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-weight: 500;
+  transition: background-color 0.15s ease;
+}
+.markdown-content mark.active-highlight {
+  background-color: #ffc107;
+  color: #212529;
+  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
+  font-weight: bold;
+}
+
+/* 多词分别导航色（与 SearchView 导航卡片色相一致） */
+.markdown-content mark.hl-term-0 { background-color: #ffe0b2; color: #e65100; }
+.markdown-content mark.hl-term-1 { background-color: #bbdefb; color: #0d47a1; }
+.markdown-content mark.hl-term-2 { background-color: #c8e6c9; color: #1b5e20; }
+.markdown-content mark.hl-term-3 { background-color: #e1bee7; color: #4a148c; }
+.markdown-content mark.hl-term-4 { background-color: #ffcdd2; color: #b71c1c; }
+.markdown-content mark.hl-term-5 { background-color: #b2dfdb; color: #004d40; }
+.markdown-content mark.hl-term-6 { background-color: #d1c4e9; color: #311b92; }
+.markdown-content mark.hl-term-7 { background-color: #fff9c4; color: #f57f17; }
+
+/* ───────── scrollbar 美化（pre/table 横向滚动条浅灰胶囊） ───────── */
+.markdown-content pre::-webkit-scrollbar,
+.markdown-content table::-webkit-scrollbar {
+  height: 8px;
+}
+.markdown-content pre::-webkit-scrollbar-thumb,
+.markdown-content table::-webkit-scrollbar-thumb {
+  background: rgba(139, 148, 158, 0.5);
+  border-radius: 4px;
+}
+.markdown-content pre::-webkit-scrollbar-thumb:hover,
+.markdown-content table::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 148, 158, 0.8);
+}

@@ -5,6 +5,33 @@
 
 ---
 
+## 当前状态:阶段二十九·29.1 进行中(2026-10-16)
+
+**最后更新**:2026-10-16 15:46
+
+### 2026-10-16 — 阶段二十九·29.1 Markdown 预览观感全面优化(完成,本地未推送)
+- 用户反馈 4 类问题:① 文档内跳转链接失效;② 代码块没 IDE 直观的缩进/特殊字符;③ 字体忽大忽小;④ 整体观感差。
+- 根因(一一对应):① markdown-it 未装 anchor → heading 没 id → 锚链接失效;xss-protection 强制 target=_blank → 内部锚链接也开新窗口;② 无 syntax highlight;pre/code 无 tab-size、无 IDE 友好字体;③ h4=1em=14px 与正文同字号、字体栈英文优先;markdown-it `breaks:false` 让硬回车合并成空格;④ DocumentView/SearchView 两份近似重复 ~150 行 CSS。
+- 一次性修复:
+  - `markdown-it-anchor@^9.2.1` 装上(自动给 heading 加 id,支持中文 slug)
+  - `highlight.js@^11.12.0` 装上(代码块语法高亮,GitHub Dark 精简主题写在 markdown.css)
+  - `markdown-renderer.ts`:`breaks:false→true`;`typographer:true→false`(避免中文破折号自动替换);装 anchor + highlight 插件
+  - `xss-protection.ts`:DOMPurify `addHook('afterSanitizeAttributes')` 对内部锚链接(`href^="#"`)移除 `target=_blank`/`rel`,保留外部链接安全策略;`sanitizeDocumentHtml` ALLOWED_ATTR 加 `id`(anchor 需要);调用完即 `removeHook` 不污染全局
+  - **新建 `frontend/src/assets/markdown.css`(296 行)**:全局样式,标题梯度平滑、字体栈中文优先、`tab-size:4` + JetBrains Mono 等宽字体、GitHub Dark pre/code、表格 block+overflow:auto、自定义 hljs 主题、scrollbar 美化、mark 高亮多色支持
+  - `main.ts` `import './assets/markdown.css'`
+  - `DocumentView.vue`:删 ~150 行重复 markdown-content 块 + 删 `.preview-content-table` 死 CSS(@architecture 27.17 遗留);`.preview-container` 加 `@click="handlePreviewAnchorClick"` 代理 → `scrollIntoView({behavior:'smooth',block:'start'})` + `history.replaceState(null,'',href)`
+  - `SearchView.vue`:同结构,删 ~100 行重复;`.preview-container` 同样加 `@click` 拦截
+- **新增 `handlePreviewAnchorClick(e)`:仅响应主鼠标左键(过滤中键/右键/Ctrl/Meta/Shift/Alt 修饰键),`closest('a')` 找最近链接,仅拦截 `href^="#"`,`preventDefault` 后 `scrollIntoView` + 更新 URL hash 不触发二次滚动
+- **代码量净变化**:DocumentView 2200→2042(-158 行)、SearchView 1374→1274(-100 行)、markdown.css 0→296(+296)、markdown-renderer 119→161(+42)、xss-protection 136→156(+20);**DocumentView/SearchView 共减 258 行重复 CSS,核心收益是后续维护只改一处**
+- **build 验证**:`npm run build` ✓ 4437 modules / 10.11s;SearchView.css 从 ~5kB 缩到 2.19kB(重复 CSS 抽走的直接证据)
+- **type-check**:`vue-tsc` 21 个错误均为历史遗留(SearchView/SettingsView 的 User/UserCreate/UserUpdate 未导入、response:unknown 等),**与本次改动无关**——10-15 28.6 段已确认存量问题
+- **依赖增量**:markdown-it-anchor + highlight.js ~50KB gzip;不属于 `@tech-stack.md` 严禁清单(UI 库/状态管理/HTTP 客户端 才是)
+- **不变边界**:`renderDocumentMarkdown` / `renderMarkdown` / `sanitizeDocumentHtml` 对外签名不变(向后兼容);后端/数据库/鉴权/上传白名单/路由/OnlyOffice 配置 零改动
+- **git 状态**:8 个改动文件 + 1 个新建文件(`markdown.css`),本地未推送——待陈工 review 后 `push.sh`(沙箱外 + credential.interactive=false)
+- **遗留/待办**:① `handlePreviewAnchorClick` 在 DocumentView/SearchView 各注册一份(代码完全相同)→ 后续可抽 `frontend/src/composables/useMarkdownAnchorClick.ts`(本次先不动,等陈工体感测试后再决定是否抽);② `assets/markdown.css` 与 vue-tsc 类型错修复可后续单独任务(不属于本步骤)
+
+---
+
 ## 当前状态:阶段零~二十三全部完成,阶段二十四进行中
 
 **最后更新**:2026-09-15 12:35
