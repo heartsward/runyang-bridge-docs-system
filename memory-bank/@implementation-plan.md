@@ -2651,3 +2651,16 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **通过标准**：陈工的"格式错误"消失
 - **回退方案**：`git checkout HEAD -- backend/app/services/search_service.py`
 - **未来增强**（不阻塞 29.6）：代码块内**也想要高亮**——可走"后端用 sentinel 占位符 + 前端 markdown-it 渲染后替换为 mark 标签"路线
+
+### 步骤 29.8 — 代码块内连续词整体高亮（2026-10-16）
+> 用户反馈：搜 "ufw allow from"，文档 A 评分显示"三词全命中"，但预览时代码块内不显示高亮（29.6 完全跳过代码块），只看到代码块外的首词高亮，**搜索结果与预览不一致**
+- **根因**：29.6 修复"<mark>字面显示"时**走过头**——完全跳过代码块/inline code 段的 mark 插入。代价是代码块内**无法高亮**
+- **修法**：sentinel 占位符路线
+  - **后端** `highlight_terms`：代码块/inline code 段用 sentinel `__HL_<idx>__<term>__<text>__HL_END__` 替代 `<mark>` 插入 markdown 源
+  - markdown-it 渲染时不 escape sentinel（纯 ASCII），原样进 `<pre><code>` 元素
+  - **前端** `sanitizeDocumentHtml`：sanitize 之前做字符串级正则——找到 `<pre><code>` 块，把块内 sentinel 还原为真 `<mark>` 标签
+- **能改什么**：`backend/app/services/search_service.py` + `frontend/src/utils/xss-protection.ts`
+- **怎么验**：
+  - 搜"ufw allow from"预览含代码块的 md → 代码块内 `<mark>ufw allow from</mark>` 整体高亮
+  - 普通段、链接 URL 段、inline code、fenced code 全部正确处理
+  - pytest + build 全过
