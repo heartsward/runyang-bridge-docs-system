@@ -2523,3 +2523,29 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   5. `/search` 智能搜索预览：观感与文档管理一致
 - **通过标准**：4 项反馈全部肉眼可感知改善；build 无新错；无 console error
 - **回退方案**：`git checkout HEAD -- frontend/src/utils/markdown-renderer.ts frontend/src/utils/xss-protection.ts frontend/src/main.ts frontend/src/views/DocumentView.vue frontend/src/views/SearchView.vue frontend/package.json && rm frontend/src/assets/markdown.css`
+
+## 阶段二十九·29.2 — 29.1 体感问题修复（2026-10-16）
+
+> 用户体感反馈 4 个问题：① 跳转还是没用；② 代码块颜色太淡；③ txt 转 md 颜色淡；④ 智能搜索彩色高亮破坏格式；⑤ 返回丢焦点
+
+### 步骤 29.2 — 5 个体感问题一次性修根
+- **能改什么**：
+  - `frontend/src/views/DocumentView.vue`（简化 handlePreviewAnchorClick + 加 sessionStorage 状态保存/恢复）
+  - `frontend/src/views/SearchView.vue`（同上结构 + 关 mark 注入时的 hl-term-* class）
+  - `frontend/src/assets/markdown.css`（代码块改 GitHub Light 主题 + 行内 code 加强 + mark 改克制方案）
+  - `frontend/src/components/OfficeEditor.vue`（返回逻辑）
+  - `frontend/src/router/index.ts`（若返回需要新 query/state）
+- **不能改什么**：
+  - 29.1 抽到全局的 CSS 结构（仍用 .markdown-content）
+  - 后端 / 数据库 / 鉴权
+  - markdown-renderer.ts 插件配置（anchor 留着、highlight 留着）
+- **怎么验**：
+  1. `npm run build` 0 error
+  2. dev server 5173 启起，登录后 `/documents`：
+     - 含 `# 一级` `## 二级` 的 md，点 `[跳到二级](#二级)` → 同窗口 smooth scroll（**不**开新窗口，**不**人工拦截）
+     - 含 ` ```js ` 的代码块 → 白底深字 + 关键色清晰
+     - 行内 `code` → 颜色更深
+  3. 文档列表第 50 行 → 预览 → 关闭 → 列表**不重置滚动**到顶，仍在第 50 行
+  4. `/search` 多词搜索 → 预览 → 所有 mark 同一淡黄 → 点某个词 → 该词高亮（active 状态）
+- **通过标准**：5 个问题肉眼可感知改善；build 无新错
+- **回退方案**：`git checkout HEAD -- frontend/src/views/DocumentView.vue frontend/src/views/SearchView.vue frontend/src/assets/markdown.css`

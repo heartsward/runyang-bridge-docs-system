@@ -107,7 +107,14 @@ const editorInited = ref(false)
 const EDITOR_PLACEHOLDER_ID = 'onlyoffice-editor-container'
 
 function goBack() {
-  router.push('/documents')
+  // 29.2：用 router.back() 而非 router.push('/documents')，回到 history 上一页
+  // （可能是 /documents 也可能是 /search）——保留用户原本的浏览路径
+  // DocumentView / SearchView 通过 sessionStorage 恢复滚动位置 + 分页（29.2 saveDocsState）
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/documents')
+  }
 }
 
 declare global {

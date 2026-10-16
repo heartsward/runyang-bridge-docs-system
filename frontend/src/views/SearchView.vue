@@ -383,7 +383,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NLayout,
@@ -775,7 +775,10 @@ const updatePreviewHighlightCount = () => {
     html = `<pre>${previewContent.value}</pre>`
   }
 
-  // 为 <mark> 添加全局索引 + 词归属标记 + 分词色 class（data-term 由后端注入，缺失时回退整个查询串）
+  // 29.2：为 <mark> 添加全局索引 + 词归属标记（**不再注入 hl-term-* class**——统一淡黄观感）
+  // 29.1 注入 hl-term-0..7 多色 class 致花花绿绿破坏文档观感；
+  // 29.2 全部 mark 用统一淡黄（markdown.css 默认），只通过 data-highlight-term / data-highlight-index 保留
+  // JS 侧"按词导航"所需的元信息（多词导航卡片仍按 term 区分）。
   let highlightIndex = 0
   html = html.replace(/<mark([^>]*)>/g, (_full, attrs: string) => {
     let dataTerm = ''
@@ -789,12 +792,8 @@ const updatePreviewHighlightCount = () => {
     const dataHighlightTerm = dataTerm
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
-    // 多词时按词序着色（单词不加 class，保持默认黄）
-    const colorIdx = termOrder.findIndex(t => t.toLowerCase() === dataTerm)
-    const colorClass = termOrder.length > 1 && colorIdx >= 0
-      ? ` class="hl-term-${colorIdx % 8}"`
-      : ''
-    return `<mark${attrs}${colorClass} data-highlight-term="${dataHighlightTerm}" data-highlight-index="${highlightIndex++}">`
+    // 29.2：不再注入 hl-term-* colorClass——观感克制优先
+    return `<mark${attrs} data-highlight-term="${dataHighlightTerm}" data-highlight-index="${highlightIndex++}">`
   })
 
   // sanitize（mark/data-*/class 已在 xss-protection 白名单放行）
@@ -867,7 +866,47 @@ const hydratePreviewImages = async () => {
 // 组件卸载：释放图片 blob URL
 onBeforeUnmount(() => {
   if (_revokePreviewImages) { _revokePreviewImages(); _revokePreviewImages = null }
+  // 29.2：保存搜索词 + 滚动位置（跳到 OnlyOffice / 切换路由时保留）
+  saveSearchState()
 })
+
+// 29.2：状态保存/恢复——从 /office-edit/:docId 返回时不丢搜索词 + 滚动位置
+const SEARCH_STATE_KEY = 'runyang-search-state'
+
+const saveSearchState = (): void => {
+  try {
+    sessionStorage.setItem(SEARCH_STATE_KEY, JSON.stringify({
+      ts: Date.now(),
+      scrollTop: window.scrollY,
+      searchQuery: searchQuery.value,
+    }))
+  } catch {
+    // 静默
+  }
+}
+
+const restoreSearchState = (): void => {
+  try {
+    const raw = sessionStorage.getItem(SEARCH_STATE_KEY)
+    if (!raw) return
+    const state = JSON.parse(raw)
+    if (Date.now() - (state.ts || 0) > 5 * 60 * 1000) {
+      sessionStorage.removeItem(SEARCH_STATE_KEY)
+      return
+    }
+    if (state.searchQuery) {
+      searchQuery.value = state.searchQuery
+      debouncedSearchQuery.value = state.searchQuery
+    }
+    if (state.scrollTop) {
+      nextTick(() => setTimeout(() => {
+        window.scrollTo({ top: state.scrollTop, behavior: 'auto' as ScrollBehavior })
+      }, 200))
+    }
+  } catch {
+    // 解析失败静默
+  }
+}
 
 // 当前导航目标词（点击词卡片切换）
 const activeNavTerm = ref('')
@@ -1056,6 +1095,8 @@ const clearSearch = () => {
 // 组件挂载：加载当前用户（编辑按钮需超管判断）
 onMounted(() => {
   loadCurrentUser()
+  // 29.2：从 OnlyOffice 返回时恢复搜索词 + 滚动位置
+  restoreSearchState()
 })
 
 // 监听预览模式变化
@@ -1104,8 +1145,10 @@ watch(previewMode, async (newMode) => {
   }
 })
 
-// 29.1：内部锚链接（[text](#anchor)）点击 → 同窗口 smooth scroll 跳转到目标 heading
-// 由 .preview-container 上的 @click 代理触发；xss-protection.ts 已对内部锚链接移除 target=_blank
+// 29.2：内部锚链接（[text](#anchor)）→ 不再拦截，**让浏览器 native 处理**。
+// 29.1 过度工程：preventDefault + scrollIntoView 反倒干扰了浏览器 native 跳转。
+// 现代浏览器原生支持 percent-encoded fragment 匹配中文 id。xss-protection.ts 已对内链
+// 移除 target=_blank → 同窗口 native jump。这里仅做外部链接兜底。
 const handlePreviewAnchorClick = (e: MouseEvent): void => {
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
   const target = e.target as HTMLElement | null
@@ -1113,13 +1156,13 @@ const handlePreviewAnchorClick = (e: MouseEvent): void => {
   const anchor = target.closest('a') as HTMLAnchorElement | null
   if (!anchor) return
   const href = anchor.getAttribute('href') || ''
-  if (!href.startsWith('#') || href === '#') return
-  e.preventDefault()
-  const id = decodeURIComponent(href.slice(1))
-  const el = document.getElementById(id)
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  history.replaceState(null, '', href)
+  // 内部锚链接（#xxx）→ 放行浏览器 native 跳转
+  if (href.startsWith('#')) return
+  // 外部链接兜底
+  if (!anchor.target || anchor.target === '_self') {
+    anchor.target = '_blank'
+    anchor.rel = 'noopener noreferrer'
+  }
 }
 
 </script>

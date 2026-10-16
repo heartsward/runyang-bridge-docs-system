@@ -129,16 +129,19 @@
     'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
     Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 0.875em;
-  background-color: rgba(175, 184, 193, 0.2);
-  padding: 0.2em 0.4em;
+  background-color: rgba(175, 184, 193, 0.25);
+  padding: 0.18em 0.4em;
   border-radius: 6px;
-  color: #1f2328;
+  color: #24292f;
+  border: 1px solid rgba(175, 184, 193, 0.35);
   /* 防连字干扰对齐（IDE 直观的等宽对齐） */
   font-feature-settings: "liga" 0, "calt" 0;
   font-variant-ligatures: none;
 }
 
-/* ───────── 代码块（GitHub Dark 风 + IDE 直观的 tab 对齐） ───────── */
+/* ───────── 代码块（29.2：GitHub Light 主题 + IDE 直观的 tab 对齐） ─────────
+   29.1 用 GitHub Dark 主题（深底浅字），陈工反馈"颜色太淡"——改 Light 主题白底深字，
+   更 IDE 友好（VSCode / IDEA 默认都是白底），跟正文区视觉分层清晰。 */
 .markdown-content pre {
   margin: 14px 0;
   padding: 16px 18px;
@@ -146,11 +149,12 @@
   font-family:
     'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono',
     Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 0.875em;
+  font-size: 0.9em;
   line-height: 1.6;
-  background-color: #24292e;
+  background-color: #f6f8fa;
   border-radius: 6px;
-  color: #e6edf3;
+  border: 1px solid #d0d7de;
+  color: #24292f;
   /* IDE 直观的 4 宽 tab 缩进 */
   tab-size: 4;
   -moz-tab-size: 4;
@@ -166,33 +170,46 @@
   white-space: pre;
   display: block;
   min-width: max-content;
+  border: none;
 }
 
-/* ───────── highlight.js GitHub Dark 精简主题（29.1：随 markdown-renderer.ts 装 hljs 后生效） ───────── */
-.markdown-content .hljs { color: #e6edf3; background: transparent; }
+/* ───────── highlight.js GitHub Light 主题（29.2：随 markdown-renderer.ts 装 hljs 后生效） ─────────
+   调色板对照 https://github.com/light 真实配色：
+   - comment/quote：#6e7781（中性灰，斜体）
+   - keyword/built-in/section：#cf222e（深红，醒目）
+   - string/attr：#0a3069（深蓝，沉稳）
+   - number/symbol/bullet/literal：#0550ae（中蓝）
+   - title/class/function：#8250df（紫）
+   - variable/attribute：#953800（橙棕）
+   - tag/name/selector-id：#116329（深绿）
+   - meta/deletion/addition：克制灰/浅红/浅绿 */
+.markdown-content .hljs { color: #24292f; background: transparent; }
 .markdown-content .hljs-comment,
-.markdown-content .hljs-quote { color: #8b949e; font-style: italic; }
+.markdown-content .hljs-quote { color: #6e7781; font-style: italic; }
 .markdown-content .hljs-keyword,
 .markdown-content .hljs-selector-tag,
 .markdown-content .hljs-literal,
 .markdown-content .hljs-section,
-.markdown-content .hljs-link { color: #ff7b72; }
-.markdown-content .hljs-string,
-.markdown-content .hljs-attr { color: #a5d6ff; }
-.markdown-content .hljs-number,
-.markdown-content .hljs-symbol { color: #79c0ff; }
+.markdown-content .hljs-link,
 .markdown-content .hljs-built_in,
-.markdown-content .hljs-builtin-name { color: #ffa657; }
+.markdown-content .hljs-builtin-name { color: #cf222e; font-weight: 500; }
+.markdown-content .hljs-string,
+.markdown-content .hljs-attr,
+.markdown-content .hljs-symbol { color: #0a3069; }
+.markdown-content .hljs-number { color: #0550ae; }
 .markdown-content .hljs-title,
-.markdown-content .hljs-class .hljs-title { color: #d2a8ff; font-weight: 600; }
+.markdown-content .hljs-class .hljs-title,
+.markdown-content .hljs-type,
+.markdown-content .hljs-function .hljs-title { color: #8250df; font-weight: 600; }
 .markdown-content .hljs-variable,
-.markdown-content .hljs-template-variable { color: #ffa657; }
+.markdown-content .hljs-template-variable,
+.markdown-content .hljs-attribute { color: #953800; }
 .markdown-content .hljs-tag,
-.markdown-content .hljs-name { color: #7ee787; }
-.markdown-content .hljs-attribute { color: #79c0ff; }
-.markdown-content .hljs-meta { color: #8b949e; }
-.markdown-content .hljs-deletion { color: #ffa198; background-color: rgba(255, 129, 130, 0.1); }
-.markdown-content .hljs-addition { color: #7ee787; background-color: rgba(46, 160, 67, 0.1); }
+.markdown-content .hljs-name,
+.markdown-content .hljs-selector-id { color: #116329; }
+.markdown-content .hljs-meta { color: #6e7781; }
+.markdown-content .hljs-deletion { color: #82071e; background-color: #ffebe9; }
+.markdown-content .hljs-addition { color: #116329; background-color: #dafbe1; }
 .markdown-content .hljs-emphasis { font-style: italic; }
 .markdown-content .hljs-strong { font-weight: 700; }
 
@@ -254,31 +271,36 @@
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
-/* ───────── 高亮 mark（搜索关键词） ───────── */
+/* ───────── 高亮 mark（搜索关键词）—— 29.2 克制方案 ─────────
+   29.1 用 8 色 hl-term-* 多色相：多词搜索时整篇文档"花花绿绿"，抢戏文档本身。
+   29.2 改成统一低饱和度淡黄，**所有 mark 一致**——不破坏文档阅读体验。
+   "当前选中的高亮" = active-highlight（更醒目，加边框），是唯一"抢戏"的元素。
+   单词 / 多词 一视同仁：克制观感 > 花哨色相分类。 */
 .markdown-content mark {
-  background-color: #fff3cd;
-  color: #856404;
+  background-color: #fff8c5;  /* 低饱和度淡黄，柔和不抢戏 */
+  color: #4a3c00;  /* 深棕字，对比度足够 */
   padding: 1px 3px;
   border-radius: 2px;
   font-weight: 500;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
 .markdown-content mark.active-highlight {
-  background-color: #ffc107;
-  color: #212529;
-  box-shadow: 0 0 4px rgba(255, 193, 7, 0.6);
-  font-weight: bold;
+  background-color: #ffd33d;  /* 当前选中：更亮的黄 */
+  color: #1f1300;
+  box-shadow: 0 0 0 2px #f59f00;  /* 橙色外环：明确视觉焦点 */
+  font-weight: 700;
 }
 
-/* 多词分别导航色（与 SearchView 导航卡片色相一致） */
-.markdown-content mark.hl-term-0 { background-color: #ffe0b2; color: #e65100; }
-.markdown-content mark.hl-term-1 { background-color: #bbdefb; color: #0d47a1; }
-.markdown-content mark.hl-term-2 { background-color: #c8e6c9; color: #1b5e20; }
-.markdown-content mark.hl-term-3 { background-color: #e1bee7; color: #4a148c; }
-.markdown-content mark.hl-term-4 { background-color: #ffcdd2; color: #b71c1c; }
-.markdown-content mark.hl-term-5 { background-color: #b2dfdb; color: #004d40; }
-.markdown-content mark.hl-term-6 { background-color: #d1c4e9; color: #311b92; }
-.markdown-content mark.hl-term-7 { background-color: #fff9c4; color: #f57f17; }
+/* 29.2：hl-term-* 多色相 class 仍然保留 class 注入（SearchView 不再注入），以防用户手写或旧缓存
+   但**默认观感**回归到统一淡黄，不再花花绿绿。透明度 0.4 让多色变弱化背景。 */
+.markdown-content mark.hl-term-0 { background-color: rgba(255, 224, 178, 0.4); color: inherit; }
+.markdown-content mark.hl-term-1 { background-color: rgba(187, 222, 251, 0.4); color: inherit; }
+.markdown-content mark.hl-term-2 { background-color: rgba(200, 230, 201, 0.4); color: inherit; }
+.markdown-content mark.hl-term-3 { background-color: rgba(225, 190, 231, 0.4); color: inherit; }
+.markdown-content mark.hl-term-4 { background-color: rgba(255, 205, 210, 0.4); color: inherit; }
+.markdown-content mark.hl-term-5 { background-color: rgba(178, 223, 219, 0.4); color: inherit; }
+.markdown-content mark.hl-term-6 { background-color: rgba(209, 196, 233, 0.4); color: inherit; }
+.markdown-content mark.hl-term-7 { background-color: rgba(255, 249, 196, 0.4); color: inherit; }
 
 /* ───────── scrollbar 美化（pre/table 横向滚动条浅灰胶囊） ───────── */
 .markdown-content pre::-webkit-scrollbar,

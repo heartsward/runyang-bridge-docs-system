@@ -509,7 +509,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, reactive, h, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, reactive, h, watch } from 'vue'
 import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NSpace,
@@ -1897,9 +1897,60 @@ onMounted(async () => {
       loadCurrentUser(),
       loadOnlyOfficeConfig()  // 阶段二十七：拉 OnlyOffice 配置（页面级并行加载）
     ])
+    // 29.2：从 OnlyOffice 路由返回时恢复滚动位置 + 分页（解决"返回丢焦点"）
+    restoreDocsState()
   } catch (error) {
     console.error('初始化页面失败:', error)
   }
+})
+
+// 29.2：状态保存/恢复——从 /office-edit/:docId 返回时不丢滚动位置 + 分页
+// PageLayout 是 window 滚动（无独立滚动容器），所以存 window.scrollY
+// sessionStorage 跨路由持久、刷新清除；5 分钟内有效（避免陈工主动刷新后还看到旧位置）
+const DOCS_STATE_KEY = 'runyang-docs-state'
+
+const saveDocsState = (): void => {
+  try {
+    sessionStorage.setItem(DOCS_STATE_KEY, JSON.stringify({
+      ts: Date.now(),
+      scrollTop: window.scrollY,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+    }))
+  } catch {
+    // 静默（无痕模式可能不可用）
+  }
+}
+
+const restoreDocsState = (): void => {
+  try {
+    const raw = sessionStorage.getItem(DOCS_STATE_KEY)
+    if (!raw) return
+    const state = JSON.parse(raw)
+    // 5 分钟过期
+    if (Date.now() - (state.ts || 0) > 5 * 60 * 1000) {
+      sessionStorage.removeItem(DOCS_STATE_KEY)
+      return
+    }
+    // 恢复分页（避免陈工分页跳回 1）
+    if (state.page) pagination.page = state.page
+    if (state.pageSize) pagination.pageSize = state.pageSize
+    // 恢复滚动位置（列表加载完后滚到原位置）
+    nextTick(() => {
+      setTimeout(() => {
+        if (state.scrollTop) {
+          window.scrollTo({ top: state.scrollTop, behavior: 'auto' as ScrollBehavior })
+        }
+      }, 150)
+    })
+  } catch {
+    // 解析失败静默
+  }
+}
+
+onBeforeUnmount(() => {
+  // 离开 /documents（含跳到 /office-edit）时存状态
+  saveDocsState()
 })
 
 
@@ -1938,26 +1989,27 @@ const getFileUrl = (document: Document | null): string => {
   return `${baseUrl}/api/v1/documents/${document.id}/preview`
 }
 
-// 29.1：内部锚链接（[text](#anchor)）点击 → 同窗口 smooth scroll 跳转到目标 heading
-// 由 .preview-container 上的 @click 代理触发；xss-protection.ts 已对内部锚链接移除 target=_blank
+// 29.2：内部锚链接（[text](#anchor)）→ 不再拦截，**让浏览器 native 处理**。
+// 29.1 过度工程：preventDefault + scrollIntoView 反倒干扰了浏览器 native 跳转。
+// 现代浏览器（Chrome 80+ / Firefox 70+ / Safari 13+）原生支持 percent-encoded fragment 匹配中文 id。
+// xss-protection.ts 已对内部锚链接移除 target=_blank → 同窗口 native jump。
+// 这里**只做外部链接兜底**：防止 default 行为对真外部链接意外跳出当前页
+// （理论上 DOMPurify 已加 target=_blank，但为防御性二次保险）。
 const handlePreviewAnchorClick = (e: MouseEvent): void => {
-  // 仅响应主鼠标左键（避免中键打开新标签、右键菜单等被误吞）
   if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
   const target = e.target as HTMLElement | null
   if (!target) return
   const anchor = target.closest('a') as HTMLAnchorElement | null
   if (!anchor) return
   const href = anchor.getAttribute('href') || ''
-  // 只拦截内部锚链接（href 以 # 开头）；外部链接（http://...）正常行为
-  if (!href.startsWith('#') || href === '#') return
-  e.preventDefault()
-  // 解码（兼容 markdown-it-anchor 对中文 heading 生成的 slug）
-  const id = decodeURIComponent(href.slice(1))
-  const el = document.getElementById(id)
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  // 更新 URL hash 但不触发滚动（scrollIntoView 已处理）
-  history.replaceState(null, '', href)
+  // 内部锚链接（#xxx）→ 放行浏览器 native 跳转，不干预
+  if (href.startsWith('#')) return
+  // 外部链接（http/https/mailto/...）→ 让浏览器按 target=_blank 处理（DOMPurify 已设置）
+  // 如果是裸外部链接（target 不是 _blank），兜底加 target=_blank
+  if (!anchor.target || anchor.target === '_self') {
+    anchor.target = '_blank'
+    anchor.rel = 'noopener noreferrer'
+  }
 }
 
 </script>
