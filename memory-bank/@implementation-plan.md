@@ -2712,3 +2712,17 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   - MarkdownPreviewBody：highlightedCount 统一从 renderedHtml 数 mark
 - **能改什么**：`backend/app/api/endpoints/search.py` + `frontend/src/views/SearchView.vue` + `frontend/src/views/DocumentView.vue` + `frontend/src/components/MarkdownPreviewBody.vue`
 - **验证**：py_compile OK + `from app.main import app` 烟测 OK + pytest 41 passed + 功能级验证（search_in_text 整段匹配 1 行、highlight_phrase inline code 内 sentinel=1 mark=0）+ vue-tsc 关键未定义变量错误清零
+
+## 阶段三十：设备资产表格列宽可拖动（2026-10-16）
+
+### 步骤 30.1 — AssetView 列宽拖动 + localStorage 持久化 + 重置按钮
+> 陈工需求：设备名称/类型/IP 等列之间要手动拖动宽度的分隔符，内容看不全时拖宽看全部
+- **方案**：naive-ui 2.42 n-data-table 原生 `resizable: true`（表头边缘出现拖动条，minWidth/maxWidth 钳制）
+  - 全部数据列加 `resizable: true` + `minWidth`；操作列保持固定宽（按钮组不参与拖动）
+  - `@unstable-column-resize`（源码确认：Header.mjs 拖动时调 doUpdateResizableWidth 内部状态 + onUnstableColumnResize prop 回调）→ 把 limitedWidth 存 localStorage（key `runyang-asset-col-widths`）
+  - 列定义改为 `computed`，width = 用户存的 > 默认值（刷新后恢复）
+  - **重置列宽按钮**：naive-ui 内部 resizableWidths 不随 columns 变化清除、无公开重置 API → 清 storage + `:key="assetTableKey"` 自增强制重建表格
+  - 附带增强：`ellipsis: true` → `ellipsis: { tooltip: true }`——列拖窄截断时悬停 tooltip 看全文（IP/部门列也补了 ellipsis）
+  - 筛选区加提示文字"拖动表头边缘可调整列宽（自动保存）"
+- **能改什么**：`frontend/src/views/AssetView.vue`
+- **验证**：vue-tsc 本次改动相关错误 0（其余为提取弹窗历史遗留）+ vite build 通过

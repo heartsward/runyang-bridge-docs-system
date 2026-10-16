@@ -134,7 +134,7 @@
           />
         </n-space>
         
-        <!-- 第二行：排序选项 -->
+        <!-- 第二行：排序选项 + 列宽工具 -->
         <n-space align="center">
           <n-text depth="3" style="white-space: nowrap;">排序方式:</n-text>
           <n-select
@@ -150,6 +150,11 @@
             style="width: 100px"
             @update:value="handleSortChange"
           />
+          <n-divider vertical />
+          <n-text depth="3" style="white-space: nowrap; font-size: 12px;">
+            提示：拖动表头边缘可调整列宽（自动保存）
+          </n-text>
+          <n-button size="small" quaternary @click="resetColumnWidths">重置列宽</n-button>
         </n-space>
       </n-space>
     </n-card>
@@ -185,6 +190,7 @@
 
     <div v-else>
       <n-data-table
+        :key="assetTableKey"
         :columns="columns"
         :data="assets"
         :pagination="pagination"
@@ -194,6 +200,7 @@
         @update:checked-row-keys="handleSelectionChange"
         @update:page="handlePageChange"
         @update:page-size="handlePageSizeChange"
+        @unstable-column-resize="handleColumnResize"
       />
     </div>
   </PageLayout>
@@ -1468,20 +1475,76 @@ const getDiffFields = (newAsset: any, existingAsset: any) => {
 }
 
 // 表格列定义
-const columns: DataTableColumns<Asset> = [
+// ============ 30.1：列宽可拖动 + localStorage 持久化 ============
+// naive-ui n-data-table 原生 resizable：列定义加 resizable:true 后表头边缘出现拖动条。
+// 组件内部宽度状态不随 columns 变化清除、也没有公开重置 API——所以：
+//  - @unstable-column-resize 把最终宽度存 localStorage（key: runyang-asset-col-widths）
+//  - 初始化时把存的宽度写进列 width（未存则用默认值）
+//  - "重置列宽"按钮：清 storage + assetTableKey++ 强制重建表格（重建后内部状态归零）
+const COL_WIDTHS_KEY = 'runyang-asset-col-widths'
+const defaultColWidths: Record<string, number> = {
+  name: 150, asset_type: 100, ip_address: 120, hostname: 150,
+  device_model: 120, system_version: 140, network_location: 100,
+  department: 100, groups: 160, commissioning_date: 110,
+  warranty_expiry: 120, status: 80, actions: 150,
+}
+const loadSavedColWidths = (): Record<string, number> => {
+  try {
+    const raw = localStorage.getItem(COL_WIDTHS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+const savedColWidths = ref<Record<string, number>>(loadSavedColWidths())
+const assetTableKey = ref(0)
+
+const handleColumnResize = (
+  _resizedWidth: number,
+  limitedWidth: number,
+  column: { key?: string | number }
+): void => {
+  const key = String(column.key ?? '')
+  if (!key) return
+  savedColWidths.value = { ...savedColWidths.value, [key]: limitedWidth }
+  try {
+    localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(savedColWidths.value))
+  } catch { /* 存储满等异常忽略，不影响拖动 */ }
+}
+
+const resetColumnWidths = (): void => {
+  savedColWidths.value = {}
+  try {
+    localStorage.removeItem(COL_WIDTHS_KEY)
+  } catch { /* ignore */ }
+  // 强制重建表格：清掉 naive-ui 内部 resizableWidths 状态
+  assetTableKey.value += 1
+  message.success('列宽已重置')
+}
+
+// 列宽 = 用户存的 > 默认值
+const colWidth = (key: string): number => savedColWidths.value[key] ?? defaultColWidths[key]
+
+const columns = computed<DataTableColumns<Asset>>(() => [
   {
     type: 'selection'
   },
   {
     title: '设备名称',
     key: 'name',
-    width: 150,
-    ellipsis: true
+    width: colWidth('name'),
+    minWidth: 80,
+    resizable: true,
+    ellipsis: { tooltip: true }
   },
   {
     title: '类型',
     key: 'asset_type',
-    width: 100,
+    width: colWidth('asset_type'),
+    minWidth: 70,
+    resizable: true,
     render: (row) => h(NTag, { size: 'small' }, {
       default: () => assetService.getAssetTypeName(row.asset_type)
     })
@@ -1489,25 +1552,34 @@ const columns: DataTableColumns<Asset> = [
   {
     title: 'IP地址',
     key: 'ip_address',
-    width: 120
+    width: colWidth('ip_address'),
+    minWidth: 80,
+    resizable: true,
+    ellipsis: { tooltip: true }
   },
   {
     title: '主机名',
     key: 'hostname',
-    width: 150,
-    ellipsis: true
+    width: colWidth('hostname'),
+    minWidth: 80,
+    resizable: true,
+    ellipsis: { tooltip: true }
   },
   {
     title: '设备型号',
     key: 'device_model',
-    width: 120,
-    ellipsis: true
+    width: colWidth('device_model'),
+    minWidth: 80,
+    resizable: true,
+    ellipsis: { tooltip: true }
   },
   {
     title: '系统型号及版本',
     key: 'system_version',
-    width: 140,
-    ellipsis: true,
+    width: colWidth('system_version'),
+    minWidth: 90,
+    resizable: true,
+    ellipsis: { tooltip: true },
     render: (row) => row.system_version
       ? h('span', {}, row.system_version)
       : h('span', { style: { color: '#999' } }, '—')
@@ -1515,7 +1587,9 @@ const columns: DataTableColumns<Asset> = [
   {
     title: '所处网络',
     key: 'network_location',
-    width: 100,
+    width: colWidth('network_location'),
+    minWidth: 70,
+    resizable: true,
     render: (row) => {
       // 检查是否有network_location字段
       if (!row.network_location) {
@@ -1536,12 +1610,17 @@ const columns: DataTableColumns<Asset> = [
   {
     title: '部门',
     key: 'department',
-    width: 100
+    width: colWidth('department'),
+    minWidth: 70,
+    resizable: true,
+    ellipsis: { tooltip: true }
   },
   {
     title: '分组',
     key: 'groups',
-    width: 160,
+    width: colWidth('groups'),
+    minWidth: 90,
+    resizable: true,
     render: (row) => {
       const gs = row.groups || []
       if (!gs.length) return h('span', { style: { color: '#999' } }, '—')
@@ -1553,7 +1632,9 @@ const columns: DataTableColumns<Asset> = [
   {
     title: '启用日期',
     key: 'commissioning_date',
-    width: 110,
+    width: colWidth('commissioning_date'),
+    minWidth: 90,
+    resizable: true,
     render: (row) => row.commissioning_date
       ? h('span', {}, formatDate(row.commissioning_date))
       : h('span', { style: { color: '#999' } }, '未设置')
@@ -1561,7 +1642,9 @@ const columns: DataTableColumns<Asset> = [
   {
     title: '维保到期',
     key: 'warranty_expiry',
-    width: 120,
+    width: colWidth('warranty_expiry'),
+    minWidth: 90,
+    resizable: true,
     render: (row) => {
       if (!row.warranty_expiry) {
         return h('span', { style: { color: '#999' } }, '未设置')
@@ -1577,7 +1660,9 @@ const columns: DataTableColumns<Asset> = [
   {
     title: '状态',
     key: 'status',
-    width: 80,
+    width: colWidth('status'),
+    minWidth: 70,
+    resizable: true,
     render: (row) => h(NTag, { 
       size: 'small',
       type: assetService.getAssetStatusColor(row.status)
@@ -1629,7 +1714,7 @@ const columns: DataTableColumns<Asset> = [
       ]
     })
   }
-]
+])
 
 // 提取结果表格列
 const extractColumns: DataTableColumns<Asset> = [
