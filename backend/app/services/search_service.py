@@ -314,6 +314,63 @@ class SearchService:
                     found.append((m.start(), m.end()))
         found.sort()
         return found
+
+    def highlight_phrase(self, text: str, phrase: str) -> str:
+        """29.9：完整 q 串整体高亮——只在 phrase 连续出现的位置插 mark,不重复按分词插
+
+        与 highlight_terms 的差异:
+        - highlight_terms 接受多个 term(分词),长词优先 + 按位置去重
+        - highlight_phrase **只**接受 1 个 phrase,严格只插 phrase 命中的位置
+        - 用于"完整 q 串在文档里连续出现"的场景——预览里只有 N 个整段 mark
+        - 前端 ↑↓ 在整段之间跳(陈工期望的"整词上下选择"导航)
+
+        复用 29.6/29.8 保护:
+        - 链接 URL 段:原样(避免破坏 markdown 链接语法)
+        - 代码块/inline code 段:用 sentinel 占位符(前端 markdown-it 渲染后还原为真 <mark>)
+        - 普通段:<mark> 标签
+        """
+        if not text or not phrase:
+            return text
+
+        # 收集"不可高亮区":链接 URL 段、fenced code 段、inline code 段
+        link_url_ranges: List[tuple] = []
+        code_ranges: List[tuple] = []
+        md_link_pattern = re.compile(r'(!?)\[([^\]]*)\]\(([^)]*)\)')
+        for m in md_link_pattern.finditer(text):
+            link_url_ranges.append((m.start(3), m.end(3)))
+        fence_re = re.compile(r'(?:```|~~~)[^\n]*\n.*?\n(?:```|~~~)', re.DOTALL)
+        for m in fence_re.finditer(text):
+            code_ranges.append((m.start(), m.end()))
+        inline_code_re = re.compile(r'`[^`\n]+`')
+        for m in inline_code_re.finditer(text):
+            if any(not (m.end() <= s or m.start() >= e) for s, e in code_ranges):
+                continue
+            code_ranges.append((m.start(), m.end()))  # 29.9:inline code 也算 code 段
+
+        pattern = re.compile(re.escape(phrase), re.IGNORECASE)
+        out: List[str] = []
+        pos = 0
+        sentinel_idx = 0
+        for m in pattern.finditer(text):
+            start, end = m.start(), m.end()
+            in_link_url = any(not (end <= s or start >= e) for s, e in link_url_ranges)
+            if in_link_url:
+                # 链接 URL 段:跳过(保护 markdown 链接语法)
+                continue
+            in_code = any(not (end <= s or start >= e) for s, e in code_ranges)
+            out.append(text[pos:start])
+            matched_text = text[start:end]
+            term_attr = html_lib.escape(matched_text.lower(), quote=True)
+            if in_code:
+                # 29.8/29.9:代码块/inline code 段用 sentinel 占位符(避免 markdown-it escape)
+                out.append(f"@@HL@@{sentinel_idx}@@{term_attr}@@{matched_text}@@HLEND@@")
+                sentinel_idx += 1
+            else:
+                # 普通段:用 <mark>
+                out.append(f'<mark data-term="{term_attr}">{matched_text}</mark>')
+            pos = end
+        out.append(text[pos:])
+        return ''.join(out)
     
     def get_file_info(self, file_path: str) -> Dict[str, Any]:
         """获取文件信息"""

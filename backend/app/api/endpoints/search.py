@@ -114,9 +114,25 @@ async def search_documents(
         single_term = len(terms) == 1
         all_terms = [q.strip()] if single_term else terms
 
+        # 29.9 修：多词搜索 — "完整匹配优先"两阶段过滤
+        # - 第一阶段:扫描所有文档,找出"完整 q.strip() 串连续命中"的文档集(phrase_hits)
+        # - 第二阶段:如果 phrase_hits 非空 → 只对这批文档打分(不打散单词搜索,陈工原话"长词优先匹配到结果就不用打散单词搜索")
+        #           如果 phrase_hits 为空 → 走原分词匹配打分逻辑(完整匹配没结果才退到分词)
+        phrase_hits: set = set()
+        if not single_term and len(terms) >= 2:
+            phrase = q.strip()
+            for doc in documents:
+                if (doc.content_extracted and doc.content and phrase.lower() in doc.content.lower()) or \
+                   phrase.lower() in doc.title.lower() or \
+                   (doc.description and phrase.lower() in doc.description.lower()):
+                    phrase_hits.add(doc.id)
+
         search_results = []
 
         for doc in documents:
+            # 29.9:完整匹配有结果时,跳过非完整匹配文档(不打散单词搜索)
+            if not single_term and len(terms) >= 2 and phrase_hits and doc.id not in phrase_hits:
+                continue
             content_terms: List[str] = []
             title_terms: List[str] = []
             desc_terms: List[str] = []
@@ -460,8 +476,12 @@ async def preview_document(
             document_structure = format_result.get('structure', {})
         
         
-        # 如果有高亮关键词，添加高亮标记（阶段二十·20.5：按空格分词后多词高亮，
-        # 每个 <mark> 带 data-term 属性供前端按词分组导航）
+        # 29.9：如果有高亮关键词，添加高亮标记
+        # - 单词：保持原有整体串匹配语义(highlight_text)
+        # - 多词且完整 q 串在文档里连续出现：**只**按整段插 mark(29.9 修)
+        #   → 预览里只有 N 个整段 mark,前端 ↑↓ 在整段之间跳(陈工"整词上下选择")
+        # - 多词但没完整匹配：按分词分别插 mark
+        #   → 预览里每个词的命中都显示,前端按词分别导航
         if highlight:
             search_service = SearchService()
             hl_terms = tokenize_query(highlight)
@@ -469,7 +489,14 @@ async def preview_document(
                 # 单词：保持原有整体串匹配语义
                 content = search_service.highlight_text(content, highlight.strip())
             else:
-                content = search_service.highlight_terms(content, hl_terms)
+                # 多词：先看完整 q 串是否在文档里连续出现
+                phrase = highlight.strip()
+                if doc.content_extracted and doc.content and phrase.lower() in doc.content.lower():
+                    # 完整匹配：只插整段,不重复按分词插(陈工期望"整词上下选择")
+                    content = search_service.highlight_phrase(content, phrase)
+                else:
+                    # 没完整匹配:按分词分别插(每个词独立 ↑↓)
+                    content = search_service.highlight_terms(content, hl_terms)
         
         # 记录文档查看统计（仅限已登录用户）
         if current_user:

@@ -2664,3 +2664,16 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   - 搜"ufw allow from"预览含代码块的 md → 代码块内 `<mark>ufw allow from</mark>` 整体高亮
   - 普通段、链接 URL 段、inline code、fenced code 全部正确处理
   - pytest + build 全过
+
+### 步骤 29.9 — 搜索结果层"长词匹配优先"两阶段过滤（2026-10-16）
+> 用户反馈：搜"ufw allow from"——文档 A 完整匹配三词、文档 B 分散命中两词。29.5 改的 +0.15 弱加分让 A 排第一，但 B **也进入结果列表**。陈工要："长词优先匹配到结果就不用打散单词搜索，直接输出长词匹配到的文档就行"
+- **修法**：`search.py` 端点两阶段过滤
+  - 第一阶段：扫描所有文档，收集"完整 q.strip() 串连续命中"的 phrase_hits 集合
+  - 第二阶段：主循环里如果 phrase_hits 非空 → 跳过不在 phrase_hits 里的文档（不打分、不入选）
+  - 如果 phrase_hits 为空 → 走原分词匹配打分（完整匹配没结果才退到分词）
+- **配套**：`search_service.py` 加 `highlight_phrase(text, phrase)` 函数
+  - 只插 phrase 命中的整段（不重复按分词插）
+  - 链接 URL 段原样保护、fenced code + inline code 段用 sentinel（29.8 占位符路线）
+- **联动**：`search.py` preview_document 端点优先调 highlight_phrase（完整 q 串命中时）→ 预览只有 N 个整段 mark，前端 ↑↓ 在整段之间跳（陈工"整词上下选择"）
+- **能改什么**：`backend/app/api/endpoints/search.py` + `backend/app/services/search_service.py`
+- **验证**：`py_compile` 通过 + `pytest 41 passed` + `from app.main import app` 烟测路由数 17
