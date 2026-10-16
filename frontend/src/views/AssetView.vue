@@ -154,6 +154,33 @@
           <n-text depth="3" style="white-space: nowrap; font-size: 12px;">
             提示：拖动表头边缘可调整列宽（自动保存）
           </n-text>
+          <n-popover trigger="click" placement="bottom" :style="{ width: '320px' }">
+            <template #trigger>
+              <n-button size="small" quaternary>
+                <template #icon>
+                  <n-icon :component="SettingsOutline" />
+                </template>
+                列设置
+              </n-button>
+            </template>
+            <div class="col-settings-panel">
+              <div class="col-settings-title">显示 / 隐藏列，↑↓ 调整顺序</div>
+              <div v-for="(k, i) in colOrder" :key="k" class="col-settings-row">
+                <n-checkbox
+                  :checked="!hiddenCols.includes(k)"
+                  @update:checked="toggleColVisible(k)"
+                >
+                  {{ colTitle(k) }}
+                </n-checkbox>
+                <n-space size="small" :wrap="false">
+                  <n-button size="tiny" quaternary :disabled="i === 0" @click="moveCol(k, -1)">↑</n-button>
+                  <n-button size="tiny" quaternary :disabled="i === colOrder.length - 1" @click="moveCol(k, 1)">↓</n-button>
+                </n-space>
+              </div>
+              <n-divider style="margin: 8px 0;" />
+              <n-button size="small" block @click="resetColLayout">重置列布局</n-button>
+            </div>
+          </n-popover>
           <n-button size="small" quaternary @click="resetColumnWidths">重置列宽</n-button>
         </n-space>
       </n-space>
@@ -591,7 +618,27 @@
         <n-space vertical size="large">
           <div style="text-align: center; margin-bottom: 20px;">
             <n-h3 style="margin: 0;">{{ viewingAsset.name }}</n-h3>
-            <n-text depth="3">{{ viewingAsset.ip_address || '无IP地址' }}</n-text>
+            <n-space justify="center" size="small" style="margin-top: 6px;">
+              <n-tag :type="assetService.getAssetTypeColor(viewingAsset.asset_type)" size="small">
+                {{ getAssetTypeLabel(viewingAsset.asset_type) }}
+              </n-tag>
+              <n-tag v-if="viewingAsset.network_location" :type="assetService.getNetworkLocationColor(viewingAsset.network_location)" size="small">
+                {{ getNetworkLocationLabel(viewingAsset.network_location) }}
+              </n-tag>
+              <n-tag
+                v-if="viewingAsset.department"
+                size="small"
+                :bordered="false"
+                :color="{ color: assetService.getDepartmentColor(viewingAsset.department).color, borderColor: assetService.getDepartmentColor(viewingAsset.department).borderColor, textColor: assetService.getDepartmentColor(viewingAsset.department).textColor }"
+              >
+                {{ viewingAsset.department }}
+              </n-tag>
+              <n-tag :type="getStatusType(viewingAsset.status)" size="small">
+                {{ getAssetStatusLabel(viewingAsset.status) }}
+              </n-tag>
+            </n-space>
+            <n-text v-if="viewingAsset.ip_address" depth="3" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.ip_address }}</n-text>
+            <n-text v-else depth="3">无IP地址</n-text>
           </div>
           
           <n-tabs type="line" animated>
@@ -602,13 +649,17 @@
                   {{ viewingAsset.name }}
                 </n-descriptions-item>
                 <n-descriptions-item label="设备类型">
-                  {{ getAssetTypeLabel(viewingAsset.asset_type) }}
+                  <n-tag :type="assetService.getAssetTypeColor(viewingAsset.asset_type)" size="small">
+                    {{ getAssetTypeLabel(viewingAsset.asset_type) }}
+                  </n-tag>
                 </n-descriptions-item>
                 <n-descriptions-item label="IP地址">
-                  {{ viewingAsset.ip_address || '未设置' }}
+                  <n-text v-if="viewingAsset.ip_address" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.ip_address }}</n-text>
+                  <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
                 <n-descriptions-item label="主机名">
-                  {{ viewingAsset.hostname || '未设置' }}
+                  <n-text v-if="viewingAsset.hostname" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.hostname }}</n-text>
+                  <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
                 <n-descriptions-item label="设备型号">
                   {{ viewingAsset.device_model || '未设置' }}
@@ -617,10 +668,21 @@
                   {{ viewingAsset.system_version || '未设置' }}
                 </n-descriptions-item>
                 <n-descriptions-item label="所处网络">
-                  {{ getNetworkLocationLabel(viewingAsset.network_location) }}
+                  <n-tag v-if="viewingAsset.network_location" :type="assetService.getNetworkLocationColor(viewingAsset.network_location)" size="small">
+                    {{ getNetworkLocationLabel(viewingAsset.network_location) }}
+                  </n-tag>
+                  <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
                 <n-descriptions-item label="所属部门">
-                  {{ viewingAsset.department || '未设置' }}
+                  <n-tag
+                    v-if="viewingAsset.department"
+                    size="small"
+                    :bordered="false"
+                    :color="{ color: assetService.getDepartmentColor(viewingAsset.department).color, borderColor: assetService.getDepartmentColor(viewingAsset.department).borderColor, textColor: assetService.getDepartmentColor(viewingAsset.department).textColor }"
+                  >
+                    {{ viewingAsset.department }}
+                  </n-tag>
+                  <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
                 <n-descriptions-item label="状态">
                   <n-tag :type="getStatusType(viewingAsset.status)">
@@ -903,6 +965,7 @@ import {
   NDivider,
   NScrollbar,
   NDatePicker,
+  NPopover,
   useMessage,
   useDialog,
   type DataTableColumns,
@@ -1527,11 +1590,87 @@ const resetColumnWidths = (): void => {
 // 列宽 = 用户存的 > 默认值
 const colWidth = (key: string): number => savedColWidths.value[key] ?? defaultColWidths[key]
 
-const columns = computed<DataTableColumns<Asset>>(() => [
-  {
-    type: 'selection'
-  },
-  {
+// ============ 30.2：列显隐 + 排序配置（localStorage 持久化） ============
+// 可配置列（selection/actions 固定不参与）
+const CONFIGURABLE_COL_KEYS = [
+  'name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'system_version',
+  'network_location', 'department', 'groups', 'commissioning_date', 'warranty_expiry', 'status',
+] as const
+const COL_ORDER_KEY = 'runyang-asset-col-order'
+const COL_HIDDEN_KEY = 'runyang-asset-col-hidden'
+
+const loadColOrder = (): string[] => {
+  let saved: string[] = []
+  try {
+    const raw = localStorage.getItem(COL_ORDER_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) saved = parsed.map(String)
+    }
+  } catch { /* ignore */ }
+  // 容错合并：保留已存顺序，新增列追加末尾，已删列丢弃
+  const result = saved.filter(k => (CONFIGURABLE_COL_KEYS as readonly string[]).includes(k))
+  for (const k of CONFIGURABLE_COL_KEYS) {
+    if (!result.includes(k)) result.push(k)
+  }
+  return result
+}
+const loadHiddenCols = (): string[] => {
+  try {
+    const raw = localStorage.getItem(COL_HIDDEN_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.map(String) : []
+  } catch {
+    return []
+  }
+}
+const colOrder = ref<string[]>(loadColOrder())
+const hiddenCols = ref<string[]>(loadHiddenCols())
+
+const persistColLayout = (): void => {
+  try {
+    localStorage.setItem(COL_ORDER_KEY, JSON.stringify(colOrder.value))
+    localStorage.setItem(COL_HIDDEN_KEY, JSON.stringify(hiddenCols.value))
+  } catch { /* ignore */ }
+}
+const toggleColVisible = (key: string): void => {
+  hiddenCols.value = hiddenCols.value.includes(key)
+    ? hiddenCols.value.filter(k => k !== key)
+    : [...hiddenCols.value, key]
+  persistColLayout()
+}
+const moveCol = (key: string, dir: -1 | 1): void => {
+  const i = colOrder.value.indexOf(key)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= colOrder.value.length) return
+  const next = [...colOrder.value]
+  ;[next[i], next[j]] = [next[j], next[i]]
+  colOrder.value = next
+  persistColLayout()
+}
+const resetColLayout = (): void => {
+  colOrder.value = [...CONFIGURABLE_COL_KEYS]
+  hiddenCols.value = []
+  persistColLayout()
+  message.success('列布局已重置')
+}
+
+// 30.2：部门彩色标签渲染（hash 稳定配色，同部门跨行颜色一致）
+const renderDeptTag = (dept?: string | null) => {
+  if (!dept) return h('span', { style: { color: '#999' } }, '未设置')
+  const c = assetService.getDepartmentColor(dept)
+  return h(NTag, {
+    size: 'small',
+    bordered: false,
+    color: { color: c.color, borderColor: c.borderColor, textColor: c.textColor },
+  }, { default: () => dept })
+}
+
+// 列定义 map：key → 列配置（组装时按 colOrder 排序、hiddenCols 过滤）
+// 必须是 computed：width 依赖 savedColWidths，"重置列宽"后要能回到默认值
+const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[number]>>>(() => ({
+  name: {
     title: '设备名称',
     key: 'name',
     width: colWidth('name'),
@@ -1539,33 +1678,42 @@ const columns = computed<DataTableColumns<Asset>>(() => [
     resizable: true,
     ellipsis: { tooltip: true }
   },
-  {
+  asset_type: {
     title: '类型',
     key: 'asset_type',
     width: colWidth('asset_type'),
     minWidth: 70,
     resizable: true,
-    render: (row) => h(NTag, { size: 'small' }, {
+    render: (row) => h(NTag, {
+      size: 'small',
+      type: assetService.getAssetTypeColor(row.asset_type),
+    }, {
       default: () => assetService.getAssetTypeName(row.asset_type)
     })
   },
-  {
+  ip_address: {
     title: 'IP地址',
     key: 'ip_address',
     width: colWidth('ip_address'),
     minWidth: 80,
     resizable: true,
-    ellipsis: { tooltip: true }
+    ellipsis: { tooltip: true },
+    render: (row) => row.ip_address
+      ? h('span', { style: { fontFamily: 'Consolas, Menlo, monospace', fontSize: '13px' } }, row.ip_address)
+      : h('span', { style: { color: '#999' } }, '—')
   },
-  {
+  hostname: {
     title: '主机名',
     key: 'hostname',
     width: colWidth('hostname'),
     minWidth: 80,
     resizable: true,
-    ellipsis: { tooltip: true }
+    ellipsis: { tooltip: true },
+    render: (row) => row.hostname
+      ? h('span', { style: { fontFamily: 'Consolas, Menlo, monospace', fontSize: '13px' } }, row.hostname)
+      : h('span', { style: { color: '#999' } }, '—')
   },
-  {
+  device_model: {
     title: '设备型号',
     key: 'device_model',
     width: colWidth('device_model'),
@@ -1573,7 +1721,7 @@ const columns = computed<DataTableColumns<Asset>>(() => [
     resizable: true,
     ellipsis: { tooltip: true }
   },
-  {
+  system_version: {
     title: '系统型号及版本',
     key: 'system_version',
     width: colWidth('system_version'),
@@ -1584,22 +1732,19 @@ const columns = computed<DataTableColumns<Asset>>(() => [
       ? h('span', {}, row.system_version)
       : h('span', { style: { color: '#999' } }, '—')
   },
-  {
+  network_location: {
     title: '所处网络',
     key: 'network_location',
     width: colWidth('network_location'),
     minWidth: 70,
     resizable: true,
     render: (row) => {
-      // 检查是否有network_location字段
       if (!row.network_location) {
         return h('span', { style: { color: '#999' } }, '未设置')
       }
-      
       const locationName = assetService.getNetworkLocationName(row.network_location)
       const locationColor = assetService.getNetworkLocationColor(row.network_location)
-      
-      return h(NTag, { 
+      return h(NTag, {
         size: 'small',
         type: locationColor
       }, {
@@ -1607,15 +1752,15 @@ const columns = computed<DataTableColumns<Asset>>(() => [
       })
     }
   },
-  {
+  department: {
     title: '部门',
     key: 'department',
     width: colWidth('department'),
     minWidth: 70,
     resizable: true,
-    ellipsis: { tooltip: true }
+    render: (row) => renderDeptTag(row.department)
   },
-  {
+  groups: {
     title: '分组',
     key: 'groups',
     width: colWidth('groups'),
@@ -1629,7 +1774,7 @@ const columns = computed<DataTableColumns<Asset>>(() => [
       })
     }
   },
-  {
+  commissioning_date: {
     title: '启用日期',
     key: 'commissioning_date',
     width: colWidth('commissioning_date'),
@@ -1639,7 +1784,7 @@ const columns = computed<DataTableColumns<Asset>>(() => [
       ? h('span', {}, formatDate(row.commissioning_date))
       : h('span', { style: { color: '#999' } }, '未设置')
   },
-  {
+  warranty_expiry: {
     title: '维保到期',
     key: 'warranty_expiry',
     width: colWidth('warranty_expiry'),
@@ -1657,7 +1802,7 @@ const columns = computed<DataTableColumns<Asset>>(() => [
       }, formatDate(row.warranty_expiry))
     }
   },
-  {
+  status: {
     title: '状态',
     key: 'status',
     width: colWidth('status'),
@@ -1670,6 +1815,20 @@ const columns = computed<DataTableColumns<Asset>>(() => [
       default: () => assetService.getAssetStatusName(row.status)
     })
   },
+}))
+
+const colTitle = (key: string): string => {
+  const def = colDefsMap.value[key] as { title?: string } | undefined
+  return def?.title ?? key
+}
+
+const columns = computed<DataTableColumns<Asset>>(() => [
+  {
+    type: 'selection'
+  },
+  ...colOrder.value
+    .filter(k => !hiddenCols.value.includes(k) && colDefsMap.value[k])
+    .map(k => colDefsMap.value[k]),
   {
     title: '操作',
     key: 'actions',
@@ -2975,5 +3134,20 @@ onMounted(async () => {
 /* AssetView specific styles can be added here if needed */
 .extract-asset-card {
   margin-bottom: 12px;
+}
+</style>
+
+<style>
+/* 30.2：列设置面板——NPopover 内容 teleport 到 body，scoped 样式不生效，用全局块 */
+.col-settings-title {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 8px;
+}
+.col-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
 }
 </style>

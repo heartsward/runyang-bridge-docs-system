@@ -2726,3 +2726,16 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   - 筛选区加提示文字"拖动表头边缘可调整列宽（自动保存）"
 - **能改什么**：`frontend/src/views/AssetView.vue`
 - **验证**：vue-tsc 本次改动相关错误 0（其余为提取弹窗历史遗留）+ vite build 通过
+
+### 步骤 30.2 — 列显隐/排序配置 + 类型/部门彩色标签 + 详情弹窗美化（2026-10-16）
+> 陈工需求：①列显隐+排序配置；②设备类型/部门像"所处网络"那样做彩色标签；③查看详情的渲染逻辑与列表一致，美化文字提升易读性
+- **列设置面板**：筛选区"列设置"按钮（NPopover）——checkbox 显隐 + ↑↓ 调序；持久化 localStorage（runyang-asset-col-order / runyang-asset-col-hidden）；loadColOrder 容错合并（新增列追加末尾/已删列丢弃）；"重置列布局"恢复默认
+- **列定义重构**：12 个数据列收进 `colDefsMap`（**computed**——width 依赖 savedColWidths，重置列宽后才能回默认值），columns computed 按 colOrder 过滤 hiddenCols 组装；selection/actions 固定不参与
+- **彩色标签**：
+  - assetService 新增 `getAssetTypeColor`（server=蓝/network=浅蓝/storage=橙/security=红/database=绿）
+  - assetService 新增 `getDepartmentColor`（部门是自由文本→hash 稳定映射 10 色调色板，同部门跨行颜色一致；浅底+同色文字自定义 tag color）
+  - 表格：类型列加 type 色、部门列改彩色 tag
+- **文字美化**：IP/主机名列 + 详情弹窗改等宽字体（Consolas/Menlo）；空值统一灰色 "—"
+- **详情弹窗**：头部名称下加 类型/网络/部门/状态 彩色 tag 行；基本信息 tab 里类型/网络/部门同样渲染彩色 tag（与列表一致）
+- **能改什么**：`frontend/src/views/AssetView.vue` + `frontend/src/services/asset.ts`
+- **验证**：vue-tsc 改动相关 0 错误 + vite build 通过

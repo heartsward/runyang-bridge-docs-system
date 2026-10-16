@@ -118,6 +118,36 @@ export class AssetService {
     return typeIcons[type] || '📦'
   }
 
+  // 获取资产类型颜色（30.2：与"所处网络"一致的彩色标签）
+  getAssetTypeColor(type: string): 'success' | 'warning' | 'error' | 'info' | 'primary' | 'default' {
+    const typeColors: Record<string, 'success' | 'warning' | 'error' | 'info' | 'primary' | 'default'> = {
+      server: 'primary',      // 服务器 - 蓝
+      network: 'info',        // 网络设备 - 浅蓝
+      storage: 'warning',     // 存储设备 - 橙
+      security: 'error',      // 安全设备 - 红
+      database: 'success',    // 数据库 - 绿
+      application: 'default', // 应用程序
+      other: 'default'        // 其他
+    }
+    return typeColors[type] || 'default'
+  }
+
+  // 获取部门配色（30.2：部门是自由文本，用 hash 稳定映射到调色板——
+  // 同一部门在任何设备行/详情里颜色一致，不同部门颜色区分）
+  getDepartmentColor(dept: string): { color: string; borderColor: string; textColor: string } {
+    const palette = [
+      '#2080f0', '#18a058', '#f0a020', '#d03050', '#7c3aed',
+      '#0891b2', '#c2410c', '#4f46e5', '#059669', '#be185d',
+    ]
+    let hash = 0
+    for (let i = 0; i < dept.length; i++) {
+      hash = (hash * 31 + dept.charCodeAt(i)) >>> 0
+    }
+    const fg = palette[hash % palette.length]
+    // 浅底（hex+透明度后缀）+ 同色系文字，观感与 naive-ui tag 一致
+    return { color: fg + '1f', borderColor: fg + '55', textColor: fg }
+  }
+
   // 获取网络位置显示名称
   getNetworkLocationName(location: string): string {
     const locationNames: Record<string, string> = {
