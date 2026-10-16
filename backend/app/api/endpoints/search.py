@@ -165,11 +165,15 @@ async def search_documents(
                         # 整段匹配行（用 search_in_text 找含 phrase 的行）
                         matches = search_service.search_in_text(doc.content, phrase)
                         if matches:
-                            content_terms = [phrase]
+                            # 29.11 修：完整匹配 = 全部词命中（陈工"应该是3/3全命中"）
+                            # content_terms 用分词列表，前端"命中 X/Y 词"显示全命中；
+                            # highlights 仍只按整段 phrase 生成（不打散单词）
+                            content_terms = list(terms)
                             match_count = len(matches)
                             for m in matches[:3]:
-                                # highlight 段内整段(不分词插入 mark)
-                                highlighted_line = _highlight_text(m["content"], phrase)
+                                # 29.11 修：_highlight_text 不存在（NameError 被 except 吞掉
+                                # → highlights 空 → "第XX行提示消失、空文档框"）；用本地 _highlight_terms
+                                highlighted_line = _highlight_terms(m["content"], [phrase])
                                 highlights.append({
                                     "text": highlighted_line,
                                     "line_number": m["line_number"]
@@ -187,7 +191,8 @@ async def search_documents(
                         if ms:
                             content_terms.append(t)
                             match_count += len(ms)
-                        if len(highlights) < 3:
+                        # 29.11 修：ms 为空时 ms[0] 会 IndexError → 整个搜索 500
+                        if ms and len(highlights) < 3:
                             highlights.append({
                                 "text": _highlight_terms(ms[0]["content"], terms),
                                 "line_number": ms[0]["line_number"]
@@ -513,9 +518,11 @@ async def preview_document(
                     # 单词：保持原有整体串匹配语义
                     content = search_service.highlight_text(content, highlight.strip())
                 else:
-                    # 多词：先看完整 q 串是否在原 doc.content 里有连续命中
+                    # 多词：先看完整 q 串是否在原文档 content 里有连续命中
+                    # 29.11 修：这里误写 `doc`（本函数变量名是 `document`），NameError 被
+                    # 兜底 try/except 吞掉 → 多词预览完全无高亮（陈工"上下选择的词没出现"）
                     phrase = highlight.strip()
-                    if doc.content_extracted and doc.content and phrase.lower() in doc.content.lower():
+                    if document.content_extracted and document.content and phrase.lower() in document.content.lower():
                         # 完整匹配：只插整段,不重复按分词插(陈工"整词上下选择")
                         content = search_service.highlight_phrase(content, phrase)
                     else:

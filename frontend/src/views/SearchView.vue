@@ -496,6 +496,10 @@ const currentHighlightIndex = ref(0)
 // 每个词当前导航到的位置（term → 该词 indexes 中的下标）
 const termCursor = ref<Record<string, number>>({})
 
+// 29.11 修：MarkdownPreviewBody 的模板 ref 必须声明同名变量才能绑定
+// （29.5 漏声明 → watch 里 markdownBodyRef.value 抛 ReferenceError → Ctrl+F 焦点迁移失效）
+const markdownBodyRef = ref<{ focusForFind?: () => void } | null>(null)
+
 // 编辑模式相关（与文档管理 W4 一致：仅超管可编辑 MD 副本）
 const currentUser = ref<User | null>(null)
 const previewEditMode = ref(false)
@@ -760,6 +764,7 @@ const updatePreviewHighlightCount = () => {
   }
 
   const termOrder = splitQueryTerms(searchQuery.value)
+  const phrase = (searchQuery.value || '').trim()
 
   // 20.6：markdown-it 渲染为语义 HTML（与文档管理一致；后端注入的 <mark data-term> 经 html:true 原样透传）
   let html: string
@@ -770,10 +775,12 @@ const updatePreviewHighlightCount = () => {
     html = `<pre>${previewContent.value}</pre>`
   }
 
+  // 29.11 修：先 sanitize（内部把代码块/inline code 里的 sentinel 还原为真 <mark data-term>），
+  // 再统一 reindex——之前先 reindex 导致 sentinel 还原出的 mark 没有 data-highlight-index，
+  // 代码块内的高亮无法被 ↑↓ 导航定位（陈工"上下选择的词没出现"）
+  html = sanitizeDocumentHtml(html)
+
   // 29.2：为 <mark> 添加全局索引 + 词归属标记（**不再注入 hl-term-* class**——统一淡黄观感）
-  // 29.1 注入 hl-term-0..7 多色 class 致花花绿绿破坏文档观感；
-  // 29.2 全部 mark 用统一淡黄（markdown.css 默认），只通过 data-highlight-term / data-highlight-index 保留
-  // JS 侧"按词导航"所需的元信息（多词导航卡片仍按 term 区分）。
   let highlightIndex = 0
   html = html.replace(/<mark([^>]*)>/g, (_full, attrs: string) => {
     let dataTerm = ''
@@ -791,8 +798,6 @@ const updatePreviewHighlightCount = () => {
     return `<mark${attrs} data-highlight-term="${dataHighlightTerm}" data-highlight-index="${highlightIndex++}">`
   })
 
-  // sanitize（mark/data-*/class 已在 xss-protection 白名单放行）
-  html = sanitizeDocumentHtml(html)
   previewHtml.value = html
 
   // 按查询词顺序分组（命中的词才有组；顺序与用户输入一致）
@@ -810,12 +815,24 @@ const updatePreviewHighlightCount = () => {
   }
 
   const groups: Array<{ term: string; count: number; indexes: number[] }> = []
-  for (const t of termOrder) {
-    const key = t.toLowerCase()
-    const indexes = indexByTerm[key]
-    if (indexes && indexes.length > 0) {
-      indexes.sort((a, b) => a - b)
-      groups.push({ term: t, count: indexes.length, indexes })
+  // 29.11 修：多词查询且后端按整段 phrase 高亮时（data-term="ufw allow from"），
+  // 拆词 termOrder 对不上整段 mark → termGroups 为空 → 词卡片/↑↓ 不出现。
+  // 优先识别"整段组"：完整 q 串命中时只出一个整段卡片（陈工"整词上下选择"）
+  if (termOrder.length >= 2 && phrase) {
+    const phraseIndexes = indexByTerm[phrase.toLowerCase()]
+    if (phraseIndexes && phraseIndexes.length > 0) {
+      phraseIndexes.sort((a, b) => a - b)
+      groups.push({ term: phrase, count: phraseIndexes.length, indexes: phraseIndexes })
+    }
+  }
+  if (groups.length === 0) {
+    for (const t of termOrder) {
+      const key = t.toLowerCase()
+      const indexes = indexByTerm[key]
+      if (indexes && indexes.length > 0) {
+        indexes.sort((a, b) => a - b)
+        groups.push({ term: t, count: indexes.length, indexes })
+      }
     }
   }
   // 兜底：后端未带 data-term 且多词时（不应发生），把全部 mark 归第一词
@@ -898,7 +915,7 @@ const restoreSearchState = (): void => {
     }
     if (state.searchQuery) {
       searchQuery.value = state.searchQuery
-      debouncedSearchQuery.value = state.searchQuery
+      // 29.11 修：debouncedSearchQuery 不存在（29.2 遗留死代码，恢复状态时抛 ReferenceError）
     }
     if (state.scrollTop) {
       nextTick(() => setTimeout(() => {

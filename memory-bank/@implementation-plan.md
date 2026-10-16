@@ -2692,3 +2692,23 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   - 搜"ufw allow from"分词匹配文档 → highlights 数组含分词行(原逻辑)
   - 单词搜索走原逻辑
   - py_compile 通过 + pytest 41 passed + from app.main import app 烟测 17 路由
+
+### 步骤 29.11 — 修复 29.10 回归：4 个未定义变量 bug（2026-10-16）
+> 陈工反馈：搜索后"第XX行"命中提示直接消失、只返回空文档框、右侧显示"命中1/3词"（应 3/3 全命中）、预览时高亮上下选择的词没出现
+- **根因（4 处，全是 29.9/29.10 引入的未定义变量，被 try/except 吞掉）**：
+  1. `search.py` 完整匹配分支调 `_highlight_text`（不存在，应为 `_highlight_terms`）→ NameError → highlights 空数组 → "第XX行消失、空文档框"
+  2. `search.py` 完整匹配分支 `content_terms=[phrase]` 只算 1 词 → 前端"命中 1/3 词"
+  3. `search.py` preview_document 里写 `doc.content_extracted`（本函数变量名是 `document`）→ NameError 被兜底吞 → 多词预览完全无高亮
+  4. `SearchView.vue` termGroups 按拆词找组，整段 mark data-term="ufw allow from" 对不上 → 词卡片空；`MarkdownPreviewBody` highlightedCount 在 mode='html' 时 `!props.content` 直接 return 0 → 全局 ↑↓ 条永不显示
+- **附带修**：
+  - `search.py` 分词分支 `ms[0]` 在 ms 空时 IndexError → 搜索 500（加 `if ms` 守卫）
+  - `SearchView.vue` 先 sanitize（sentinel→mark 还原）再 reindex——之前顺序反了，代码块内还原的 mark 没有 data-highlight-index，↑↓ 定位不到
+  - `SearchView.vue`/`DocumentView.vue` 补声明 `markdownBodyRef`（29.5 漏声明 → watch 里 ReferenceError → **Ctrl+F 焦点迁移从未生效**，即陈工反复反馈"Ctrl+F 不行"的真正根因）
+  - `SearchView.vue` 删死代码 `debouncedSearchQuery.value`（不存在，恢复状态时抛 ReferenceError）
+- **修法**：
+  - 完整匹配分支：`content_terms = list(terms)`（全词计入）+ `_highlight_terms(m["content"], [phrase])`（整段 mark）
+  - preview_document：`doc.` → `document.`
+  - SearchView：先 `sanitizeDocumentHtml` 再 reindex；termGroups 优先识别"整段组"（完整 q 串命中时只出一个整段卡片）
+  - MarkdownPreviewBody：highlightedCount 统一从 renderedHtml 数 mark
+- **能改什么**：`backend/app/api/endpoints/search.py` + `frontend/src/views/SearchView.vue` + `frontend/src/views/DocumentView.vue` + `frontend/src/components/MarkdownPreviewBody.vue`
+- **验证**：py_compile OK + `from app.main import app` 烟测 OK + pytest 41 passed + 功能级验证（search_in_text 整段匹配 1 行、highlight_phrase inline code 内 sentinel=1 mark=0）+ vue-tsc 关键未定义变量错误清零

@@ -573,6 +573,11 @@ const previewLoading = ref(false)
 const previewMode = ref<'extracted' | 'original'>('extracted')
 const currentDocument = ref<Document | null>(null)
 
+// 29.11 修：MarkdownPreviewBody 的模板 ref 必须声明同名变量才能绑定。
+// 29.5 漏声明 → 下方 watch 里 markdownBodyRef.value 抛 ReferenceError →
+// focusForFind 从未被调用 → 陈工反复反馈的"预览里 Ctrl+F 搜索不行"真正根因。
+const markdownBodyRef = ref<{ focusForFind?: () => void } | null>(null)
+
 const editLoading = ref(false)
 
 // 阶段十八·18.8：图片水合（带 token 拉 wiki 图片 → blob URL）

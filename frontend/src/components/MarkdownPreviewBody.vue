@@ -207,7 +207,8 @@ function escapeAttr(s: string): string {
 const currentHighlightIndex = ref(0)
 
 const highlightedCount = computed(() => {
-  if (!props.content) return 0
+  // 29.11 修：mode='html'（SearchView）时 props.content 为空，之前直接 return 0
+  // → 全局 ↑↓ 导航条永远不显示。改为统一从渲染后 HTML 数 <mark>
   // 从渲染后 HTML 里数 <mark> 数量
   const matches = renderedHtml.value.match(/<mark[^>]*>/g)
   return matches ? matches.length : 0
