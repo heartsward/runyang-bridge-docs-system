@@ -2677,3 +2677,18 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **联动**：`search.py` preview_document 端点优先调 highlight_phrase（完整 q 串命中时）→ 预览只有 N 个整段 mark，前端 ↑↓ 在整段之间跳（陈工"整词上下选择"）
 - **能改什么**：`backend/app/api/endpoints/search.py` + `backend/app/services/search_service.py`
 - **验证**：`py_compile` 通过 + `pytest 41 passed` + `from app.main import app` 烟测路由数 17
+
+### 步骤 29.10 — 完整匹配文档的 highlights 只按整段生成（2026-10-16）
+> 陈工反馈：搜"ufw allow from"完整段命中后,搜索结果的"第xx行"高亮列表里还有单词命中的高亮行数(单独 ufw / allow / from 行)
+- **根因**：29.9 改的 phrase_hits 过滤**只**控制文档入选,主循环里的 highlights 数组生成**仍跑分词匹配**——完整匹配文档的 highlights 数组里混着整段行 + 单独分词行
+- **修法**：`search.py` 端点主循环增加分支
+  - `single_term` → 单词原逻辑
+  - 多词 + 完整匹配 + 本 doc 在 phrase_hits → **只按整段 q 串生成 highlights**(`search_in_text(content, phrase)` 整段搜 + `_highlight_text` 整段插 mark)
+  - 多词 + 完整匹配无结果 → 走原分词匹配
+- **配套**：前端 `MarkdownPreviewBody.vue` 把 `content: string` 改为 `content?: string`——mode='html' 时不必传 content,消除 `Missing required prop` 警告
+- **能改什么**：`backend/app/api/endpoints/search.py` + `frontend/src/components/MarkdownPreviewBody.vue`
+- **验证**：
+  - 搜"ufw allow from"完整匹配文档 → highlights 数组**只有**整段行(无单词行)
+  - 搜"ufw allow from"分词匹配文档 → highlights 数组含分词行(原逻辑)
+  - 单词搜索走原逻辑
+  - py_compile 通过 + pytest 41 passed + from app.main import app 烟测 17 路由

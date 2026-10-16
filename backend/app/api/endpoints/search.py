@@ -142,19 +142,42 @@ async def search_documents(
             # --- 1) 内容匹配（最高优先级） ---
             if doc.content_extracted and doc.content:
                 if single_term:
+                    # 单词:原逻辑
                     try:
                         matches = search_service.search_in_text(doc.content, q)
                         if matches:
                             content_terms = [q.strip()]
                             match_count = len(matches)
-                            for match in matches[:3]:  # 显示前3个匹配片段
+                            for match in matches[:3]:
                                 highlights.append({
                                     "text": match["content"],
                                     "line_number": match["line_number"]
                                 })
                     except Exception:
                         pass
+                elif not single_term and len(terms) >= 2 and phrase_hits and doc.id in phrase_hits:
+                    # 29.9 修:完整匹配文档 — highlights 只按整段 q 串生成,不打散单词
+                    # 之前的 bug:虽然 phrase_hits 过滤了文档入选,但已入选文档**仍跑**分词匹配
+                    # → highlights 数组里混着"整段行" + "单独 ufw 行" + "单独 allow 行" + "单独 from 行"
+                    # → 搜索结果里"第xx行还有单词命中的高亮行数"
+                    phrase = q.strip()
+                    try:
+                        # 整段匹配行（用 search_in_text 找含 phrase 的行）
+                        matches = search_service.search_in_text(doc.content, phrase)
+                        if matches:
+                            content_terms = [phrase]
+                            match_count = len(matches)
+                            for m in matches[:3]:
+                                # highlight 段内整段(不分词插入 mark)
+                                highlighted_line = _highlight_text(m["content"], phrase)
+                                highlights.append({
+                                    "text": highlighted_line,
+                                    "line_number": m["line_number"]
+                                })
+                    except Exception:
+                        pass
                 else:
+                    # 多词但没完整匹配(phrase_hits 为空时):走原分词匹配
                     try:
                         term_matches = search_service.search_terms_in_text(doc.content, terms)
                     except Exception:
@@ -164,11 +187,11 @@ async def search_documents(
                         if ms:
                             content_terms.append(t)
                             match_count += len(ms)
-                            if len(highlights) < 3:
-                                highlights.append({
-                                    "text": _highlight_terms(ms[0]["content"], terms),
-                                    "line_number": ms[0]["line_number"]
-                                })
+                        if len(highlights) < 3:
+                            highlights.append({
+                                "text": _highlight_terms(ms[0]["content"], terms),
+                                "line_number": ms[0]["line_number"]
+                            })
 
             # --- 2) 标题匹配（对内容未命中的词） ---
             remaining = [t for t in all_terms if t not in content_terms]
@@ -476,27 +499,32 @@ async def preview_document(
             document_structure = format_result.get('structure', {})
         
         
-        # 29.9：如果有高亮关键词，添加高亮标记
+        # 29.9 + 29.10 兜底：如果有高亮关键词，添加高亮标记
         # - 单词：保持原有整体串匹配语义(highlight_text)
         # - 多词且完整 q 串在文档里连续出现：**只**按整段插 mark(29.9 修)
-        #   → 预览里只有 N 个整段 mark,前端 ↑↓ 在整段之间跳(陈工"整词上下选择")
         # - 多词但没完整匹配：按分词分别插 mark
-        #   → 预览里每个词的命中都显示,前端按词分别导航
-        if highlight:
-            search_service = SearchService()
-            hl_terms = tokenize_query(highlight)
-            if len(hl_terms) == 1:
-                # 单词：保持原有整体串匹配语义
-                content = search_service.highlight_text(content, highlight.strip())
-            else:
-                # 多词：先看完整 q 串是否在文档里连续出现
-                phrase = highlight.strip()
-                if doc.content_extracted and doc.content and phrase.lower() in doc.content.lower():
-                    # 完整匹配：只插整段,不重复按分词插(陈工期望"整词上下选择")
-                    content = search_service.highlight_phrase(content, phrase)
+        # 29.10 兜底：整个段包 try/except——失败时降级到原 content(500 → 200 无 mark)
+        # + content 兜底(防止 format_result 异常导致 content=None)
+        if highlight and content:
+            try:
+                search_service = SearchService()
+                hl_terms = tokenize_query(highlight)
+                if len(hl_terms) == 1:
+                    # 单词：保持原有整体串匹配语义
+                    content = search_service.highlight_text(content, highlight.strip())
                 else:
-                    # 没完整匹配:按分词分别插(每个词独立 ↑↓)
-                    content = search_service.highlight_terms(content, hl_terms)
+                    # 多词：先看完整 q 串是否在原 doc.content 里有连续命中
+                    phrase = highlight.strip()
+                    if doc.content_extracted and doc.content and phrase.lower() in doc.content.lower():
+                        # 完整匹配：只插整段,不重复按分词插(陈工"整词上下选择")
+                        content = search_service.highlight_phrase(content, phrase)
+                    else:
+                        # 没完整匹配:按分词分别插(每个词独立 ↑↓)
+                        content = search_service.highlight_terms(content, hl_terms)
+            except Exception as hl_err:
+                # 29.10 兜底:高亮失败不影响预览——降级到原 content(可能无 mark 但不 500)
+                import logging
+                logging.warning(f"[preview_document] 高亮失败(降级到原 content): {type(hl_err).__name__}: {hl_err}")
         
         # 记录文档查看统计（仅限已登录用户）
         if current_user:

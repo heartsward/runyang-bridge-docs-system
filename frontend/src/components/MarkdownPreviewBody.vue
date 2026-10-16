@@ -85,7 +85,7 @@ import { renderDocumentMarkdownHtml, renderMarkdown } from '@/utils/markdown-ren
 import { sanitizeDocumentHtml } from '@/utils/xss-protection'
 
 interface Props {
-  content: string                          // 原始 markdown（mode='markdown' 时使用）
+  content?: string                         // 原始 markdown（mode='markdown' 时使用）——可选
   html?: string                            // 已渲染 HTML（mode='html' 时使用，跳过组件内部 markdown 渲染）
   mode?: 'markdown' | 'html'              // 内容模式,默认 markdown
   keyword?: string                        // 搜索关键词（触发高亮 + 全局 ↑↓）
