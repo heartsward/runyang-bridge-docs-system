@@ -2575,3 +2575,22 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
      - 文档列表第 50 行 → 点导航菜单"文档管理" → **滚动到顶**（不恢复）
 - **通过标准**：4 个问题肉眼可感知改善；build + pytest 0 错
 - **回退方案**：`git checkout HEAD -- backend/app/services/search_service.py backend/app/api/endpoints/search.py frontend/src/views/SearchView.vue frontend/src/views/DocumentView.vue`
+
+### 步骤 29.4 — 智能搜索与状态保存再优化（2026-10-16）
+
+> 用户反馈 3 个新问题：① 多词搜索预览后 ↑↓ 只对第一个词；② SearchView 预览不能用 Ctrl+F；③ 状态保存丢失标签筛选
+
+- **能改什么**：
+  - `frontend/src/views/SearchView.vue`（加全局 ↑↓ 按钮 + Ctrl+F 焦点修复）
+  - `frontend/src/views/DocumentView.vue`（saveDocsState 加 selectedTags）
+- **不能改什么**：
+  - 后端
+  - 鉴权 / 路由
+- **怎么验**：
+  1. `npm run build` 0 error
+  2. dev server 5173：
+     - 搜 "防火墙 代码" 进入预览 → **顶部 ↑↓ 按钮按位置整体跳**（不是按词分组）
+     - 搜 "防火墙" 进入预览 → 按 Ctrl+F → 能搜（焦点迁到 .preview-container）
+     - 文档管理勾选标签 → OnlyOffice → 返回 → **标签 + 滚动位置都恢复**
+- **通过标准**：3 个问题肉眼可感知
+- **回退方案**：`git checkout HEAD -- frontend/src/views/SearchView.vue frontend/src/views/DocumentView.vue`

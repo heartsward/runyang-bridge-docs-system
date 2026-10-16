@@ -1916,6 +1916,8 @@ const saveDocsState = (): void => {
       scrollTop: window.scrollY,
       page: pagination.page,
       pageSize: pagination.pageSize,
+      // 29.4：陈工反馈"勾选标签筛选后返回丢失标签选择"——加 selectedTags
+      selectedTags: [...selectedTags.value],
     }))
   } catch {
     // 静默（无痕模式可能不可用）
@@ -1935,6 +1937,11 @@ const restoreDocsState = (): void => {
     // 恢复分页（避免陈工分页跳回 1）
     if (state.page) pagination.page = state.page
     if (state.pageSize) pagination.pageSize = state.pageSize
+    // 29.4：恢复标签筛选——watch searchQuery 不会重新拉数据，selectedTags 改变只触发
+    // computed filteredDocuments 重算，列表立即按标签筛选
+    if (Array.isArray(state.selectedTags) && state.selectedTags.length > 0) {
+      selectedTags.value = [...state.selectedTags]
+    }
     // 恢复滚动位置（列表加载完后滚到原位置）
     nextTick(() => {
       setTimeout(() => {

@@ -272,7 +272,21 @@
               <n-tag type="warning" size="small">
                 🔍 共 {{ highlightedCount }} 处
               </n-tag>
-              <n-text depth="3" style="font-size: 11px;">点击词切换导航目标</n-text>
+              <!-- 29.4：全局"上一处 / 下一处"——按所有 mark 出现位置整体跳转(不按词分组) -->
+              <n-button-group size="tiny">
+                <n-button
+                  @click="scrollToGlobalHighlight(-1)"
+                  :disabled="currentHighlightIndex <= 0"
+                >↑</n-button>
+                <n-button
+                  @click="scrollToGlobalHighlight(1)"
+                  :disabled="currentHighlightIndex >= highlightedCount - 1"
+                >↓</n-button>
+              </n-button-group>
+              <n-text depth="3" style="font-size: 11px;">
+                {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
+              </n-text>
+              <n-text depth="3" style="font-size: 11px; margin-left: 8px;">点击词切换导航目标</n-text>
             </n-space>
             <!-- 每个词独立导航（多词用空格分隔） -->
             <n-space align="center" size="small" wrap>
@@ -972,6 +986,29 @@ const scrollToHighlightInPreview = (term: string, direction: number) => {
   }, 100)
 }
 
+// 29.4：全局"上一处 / 下一处"——按所有 mark 出现位置整体跳转(不按词分组)
+// 陈工原话"进入预览后没有按照多词作为一个整体命中进行上下选择,只有第一个词进行上下选择"
+// → 顶部加一组全局 ↑↓ 与 DocumentView line 235-242 一致;下方 term-nav-item 卡片保留作为按词跳转二级入口
+const scrollToGlobalHighlight = (direction: number) => {
+  const total = highlightedCount.value
+  if (total === 0) return
+  let newIdx = currentHighlightIndex.value + direction
+  if (newIdx < 0) newIdx = 0
+  if (newIdx >= total) newIdx = total - 1
+  currentHighlightIndex.value = newIdx
+
+  setTimeout(() => {
+    const targetMark = document.querySelector(`.markdown-content mark[data-highlight-index="${newIdx}"]`)
+    if (targetMark) {
+      document.querySelectorAll('.markdown-content mark.active-highlight').forEach(el => {
+        el.classList.remove('active-highlight')
+      })
+      targetMark.classList.add('active-highlight')
+      targetMark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, 100)
+}
+
 // ===== 编辑模式（与文档管理 W4 一致：MD 副本编辑，保存自动重建索引） =====
 
 // 加载当前用户（判断是否超管）
@@ -1105,6 +1142,27 @@ onMounted(() => {
   loadCurrentUser()
   // 29.2：从 OnlyOffice 返回时恢复搜索词 + 滚动位置
   restoreSearchState()
+})
+
+// 29.4：预览弹窗打开时，blur 顶部搜索 input + focus 到 .preview-container
+// 根因：陈工从顶部 n-input 输入搜索词按回车后，input 仍持有焦点 → Ctrl+F 行为被 input 抢
+// 修法：弹窗打开时强制 blur activeElement（如果是 input/textarea），让 Ctrl+F 搜整个文档
+watch(showPreviewModal, async (show) => {
+  if (!show) return
+  await nextTick()
+  // 等待 modal 内部 v-html 内容渲染完成
+  setTimeout(() => {
+    const active = document.activeElement as HTMLElement | null
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+      active.blur()
+    }
+    // 把 .preview-container 设为可 focus（Ctrl+F 时浏览器把 focus 元素当主搜索区）
+    const previewContainer = document.querySelector('.preview-container') as HTMLElement | null
+    if (previewContainer) {
+      previewContainer.setAttribute('tabindex', '-1')
+      previewContainer.focus({ preventScroll: true })
+    }
+  }, 200)
 })
 
 // 监听预览模式变化
