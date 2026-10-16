@@ -288,14 +288,14 @@ class SearchService:
             out.append(text[pos:start])
             matched_text = text[start:end]
             in_code = any(not (end <= s or start >= e) for s, e in code_ranges)
-                if in_code:
-                    # 29.8 修:代码块/inline code 段用 @@ 分隔的 sentinel(避开 markdown 的 __** delimiter)
-                    # 前端 markdown-it 渲染后,字符串里是 <pre><code>@@HL@@<idx>@@<term>@@<text>@@HLEND@@</code></pre>
-                    # 还原在 sanitizeDocumentHtml 内部统一处理
-                    # 属性值做 HTML 转义(虽然 sentinel 不含特殊字符,但保险起见)
-                    term_attr = html_lib.escape(matched_text.lower(), quote=True)
-                    out.append(f"@@HL@@{sentinel_idx}@@{term_attr}@@{matched_text}@@HLEND@@")
-                    sentinel_idx += 1
+            if in_code:
+                # 29.8 修:代码块/inline code 段用 @@ 分隔的 sentinel(避开 markdown 的 __** delimiter)
+                # 前端 markdown-it 渲染后,字符串里是 <pre><code>@@HL@@<idx>@@<term>@@<text>@@HLEND@@</code></pre>
+                # 还原在 sanitizeDocumentHtml 内部统一处理
+                # 属性值做 HTML 转义(虽然 sentinel 不含特殊字符,但保险起见)
+                term_attr = html_lib.escape(matched_text.lower(), quote=True)
+                out.append(f"@@HL@@{sentinel_idx}@@{term_attr}@@{matched_text}@@HLEND@@")
+                sentinel_idx += 1
             else:
                 # 普通段:用 <mark>
                 term_attr = html_lib.escape(matched_text.lower(), quote=True)
