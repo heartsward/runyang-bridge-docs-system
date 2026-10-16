@@ -2594,3 +2594,45 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
      - 文档管理勾选标签 → OnlyOffice → 返回 → **标签 + 滚动位置都恢复**
 - **通过标准**：3 个问题肉眼可感知
 - **回退方案**：`git checkout HEAD -- frontend/src/views/SearchView.vue frontend/src/views/DocumentView.vue`
+
+### 步骤 29.5 — 智能搜索 + 预览框架统一（2026-10-16）
+
+> 用户反馈 3 个根问题：① 搜索逻辑应"完整匹配优先"（ufw allow from 完整匹配置顶,不分词搜索）；② 全局 ↑↓ 没生效(进入预览只有首词上下选择,两词/一词匹配也没按钮)；③ Ctrl+F 依然不行 + 搜索预览和文档预览应统一框架
+
+#### 29.5.1 — 后端:完整匹配优先(单一返回)
+- **能改什么**：`backend/app/api/endpoints/search.py`
+- **做什么**：改打分逻辑为"完整 q 串在文档里"置顶
+  - 优先级 1:文档内容包含完整 q.strip()(不拆词,连续) → 排前,按出现位置早的优先
+  - 优先级 2:分词全部命中(允许间隔) → 次之
+  - 优先级 3:分词部分命中 → 最后
+  - 不再用"phrase bonus +0.15"弱加分——直接用 phrase_match 布尔字段强制置顶
+- **怎么验**：
+  - pytest tests/ 仍 41 passed
+  - 搜"ufw allow from" → 包含完整串的文档排前(连续"ufw allow from"三词连续)
+  - 搜"ufw 配置" → 没完整匹配的才用分词匹配
+
+#### 29.5.2 — 前端:抽 DocumentPreviewModal 共享组件
+- **新建**: `frontend/src/components/DocumentPreviewModal.vue`(~250 行)
+  - 包含:n-modal 容器 + 文档信息行 + 视图切换(提取内容/原文件) + markdown 渲染 + mark 注入(完整匹配支持) + 全局 ↑↓ 导航 + Ctrl+F 焦点迁移
+  - 接受 props:show/document/content/loading/mode/searchKeyword/showModeToggle
+  - 内部统一处理:
+    - 焦点迁移(modal 打开时 blur input + focus .preview-container)
+    - 链接跳转 native(29.2 修法)
+    - mark 注入(29.3 修法,markdown 链接保护)
+    - 全局 ↑↓ 导航(29.4 修法)
+- **替换**:
+  - `DocumentView.vue` 删 ~150 行预览代码,用 `<DocumentPreviewModal>` 替换
+  - `SearchView.vue` 删 ~200 行预览代码,用 `<DocumentPreviewModal>` 替换
+  - DocumentView 独有的 previewEditMode / 预览编辑:作为 slot 传入或保留在 view 层
+- **怎么验**:
+  - `npm run build` 0 error
+  - dev server:文档管理 / 智能搜索 / OnlyOffice 入口的预览都走同一组件
+  - 搜"ufw allow from"三词全匹配进入预览 → **顶部全局 ↑↓** 真正生效
+  - 搜单匹配 / 两词 / 一词匹配 → 全局 ↑↓ 仍可见
+  - 任意预览按 Ctrl+F → 浏览器原生查找栏弹出
+- **通过标准**:3 个根问题肉眼可感知 + 两个 view 行为一致
+
+#### 29.5.3 — 验证 + 记忆
+- 后端 pytest 41 passed
+- 前端 build 0 error
+- 改 commit + push(陈工手动)

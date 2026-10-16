@@ -265,61 +265,40 @@
           </n-space>
         </n-space>
 
-        <!-- 搜索高亮导航（多词分别导航，仅在提取内容模式下显示） -->
-        <div style="margin-bottom: 16px;" v-if="!previewEditMode && previewMode === 'extracted' && searchQuery && highlightedCount > 0">
-          <n-space vertical size="small" style="width: 100%;">
-            <n-space align="center">
-              <n-tag type="warning" size="small">
-                🔍 共 {{ highlightedCount }} 处
-              </n-tag>
-              <!-- 29.4：全局"上一处 / 下一处"——按所有 mark 出现位置整体跳转(不按词分组) -->
+        <!-- 29.5：搜索高亮导航——拆成两部分：
+             1) 顶部全局"共 N 处 / ↑↓ / 当前位置"由 MarkdownPreviewBody 组件内部渲染
+             2) 多词分组卡片（按词跳转二级入口）保留在 SearchView 自己,用 slot 注入组件 -->
+        <div v-if="!previewEditMode && previewMode === 'extracted' && searchQuery && termGroups.length > 0" style="margin-bottom: 16px;">
+          <n-space align="center" size="small" wrap>
+            <div
+              v-for="group in termGroups"
+              :key="group.term"
+              class="term-nav-item"
+              :class="{ 'term-nav-active': activeNavTerm === group.term }"
+              :style="{ borderColor: getTermColor(group.term) }"
+              @click="selectNavTerm(group.term)"
+            >
+              <span class="term-nav-label" :style="{ color: getTermColor(group.term) }">
+                {{ group.term }}
+              </span>
+              <span class="term-nav-count">{{ group.count }}处</span>
               <n-button-group size="tiny">
                 <n-button
-                  @click="scrollToGlobalHighlight(-1)"
-                  :disabled="currentHighlightIndex <= 0"
+                  @click.stop="scrollToHighlightInPreview(group.term, -1)"
+                  :disabled="group.count > 1 && getTermCursor(group.term) <= 0"
                 >↑</n-button>
                 <n-button
-                  @click="scrollToGlobalHighlight(1)"
-                  :disabled="currentHighlightIndex >= highlightedCount - 1"
+                  @click.stop="scrollToHighlightInPreview(group.term, 1)"
+                  :disabled="group.count > 1 && getTermCursor(group.term) >= group.count - 1"
                 >↓</n-button>
               </n-button-group>
-              <n-text depth="3" style="font-size: 11px;">
-                {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
-              </n-text>
-              <n-text depth="3" style="font-size: 11px; margin-left: 8px;">点击词切换导航目标</n-text>
-            </n-space>
-            <!-- 每个词独立导航（多词用空格分隔） -->
-            <n-space align="center" size="small" wrap>
-              <div
-                v-for="group in termGroups"
-                :key="group.term"
-                class="term-nav-item"
-                :class="{ 'term-nav-active': activeNavTerm === group.term }"
-                :style="{ borderColor: getTermColor(group.term) }"
-                @click="selectNavTerm(group.term)"
-              >
-                <span class="term-nav-label" :style="{ color: getTermColor(group.term) }">
-                  {{ group.term }}
-                </span>
-                <span class="term-nav-count">{{ group.count }}处</span>
-                <n-button-group size="tiny">
-                  <n-button
-                    @click.stop="scrollToHighlightInPreview(group.term, -1)"
-                    :disabled="group.count > 1 && getTermCursor(group.term) <= 0"
-                  >↑</n-button>
-                  <n-button
-                    @click.stop="scrollToHighlightInPreview(group.term, 1)"
-                    :disabled="group.count > 1 && getTermCursor(group.term) >= group.count - 1"
-                  >↓</n-button>
-                </n-button-group>
-                <span class="term-nav-pos">
-                  {{ getTermCursor(group.term) + 1 }} / {{ group.count }}
-                </span>
-              </div>
-            </n-space>
+              <span class="term-nav-pos">
+                {{ getTermCursor(group.term) + 1 }} / {{ group.count }}
+              </span>
+            </div>
           </n-space>
         </div>
-        
+
         <!-- 编辑模式：textarea 直接编辑 Markdown 副本 -->
         <n-input
           v-if="previewEditMode"
@@ -329,18 +308,18 @@
           placeholder="编辑 Markdown 内容..."
           style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
         />
-        <!-- 提取内容模式（20.6：markdown-it 渲染，观感对齐文档管理预览；previewHtml 已含高亮注入+sanitize）
-             27.17：n-scrollbar → 原生 overflow:auto 容器（与文档管理 .preview-container 一致）。
-             根因：NScrollbar 按内容盒宽度测量溢出，宽表格溢出块级 .markdown-content 时盒宽不变
-             → 横向 rail 永不出现，只能上下滚。原生 overflow:auto 的 scrollWidth 含溢出后代，横向可拖。 -->
-        <div
+        <!-- 29.5：提取内容模式——使用共享 MarkdownPreviewBody 组件
+             SearchView 走 mode='html' 模式:displayPreviewHtml 已包含渲染+mark 注入+图片水合
+             组件职责:补 data-highlight-index + 全局 ↑↓ + Ctrl+F 焦点 + 链接 native 跳转 -->
+        <MarkdownPreviewBody
           v-else-if="previewMode === 'extracted' || !shouldShowViewToggle(previewDocumentData)"
-          class="preview-container"
-          @click="handlePreviewAnchorClick"
-        >
-          <!-- 29.1：@click 容器代理拦截 [text](#anchor) → smooth scroll 到 heading（不开新窗口） -->
-          <div v-html="displayPreviewHtml" class="markdown-content"></div>
-        </div>
+          ref="markdownBodyRef"
+          mode="html"
+          :html="displayPreviewHtml"
+          :keyword="searchQuery"
+          :max-height="'60vh'"
+          :show-highlight-nav="true"
+        />
         
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
         <div v-else-if="shouldShowViewToggle(previewDocumentData) && previewMode === 'original'" class="original-file-preview" style="height: 60vh;">
@@ -441,6 +420,7 @@ import {
   PencilOutline
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
+import MarkdownPreviewBody from '../components/MarkdownPreviewBody.vue'  // 29.5:共享预览核心
 import { apiService } from '@/services/api'
 import { authService } from '@/services'
 import { wikiService } from '@/services/wiki'
@@ -1144,25 +1124,17 @@ onMounted(() => {
   restoreSearchState()
 })
 
-// 29.4：预览弹窗打开时，blur 顶部搜索 input + focus 到 .preview-container
-// 根因：陈工从顶部 n-input 输入搜索词按回车后，input 仍持有焦点 → Ctrl+F 行为被 input 抢
-// 修法：弹窗打开时强制 blur activeElement（如果是 input/textarea），让 Ctrl+F 搜整个文档
+// 29.5：预览弹窗打开时,通知 MarkdownPreviewBody 组件做 Ctrl+F 焦点迁移
+// (DocumentView 同样加这个 watch——两边统一,行为一致)
 watch(showPreviewModal, async (show) => {
   if (!show) return
   await nextTick()
-  // 等待 modal 内部 v-html 内容渲染完成
   setTimeout(() => {
-    const active = document.activeElement as HTMLElement | null
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-      active.blur()
+    const body = markdownBodyRef.value as { focusForFind?: () => void } | null
+    if (body && typeof body.focusForFind === 'function') {
+      body.focusForFind()
     }
-    // 把 .preview-container 设为可 focus（Ctrl+F 时浏览器把 focus 元素当主搜索区）
-    const previewContainer = document.querySelector('.preview-container') as HTMLElement | null
-    if (previewContainer) {
-      previewContainer.setAttribute('tabindex', '-1')
-      previewContainer.focus({ preventScroll: true })
-    }
-  }, 200)
+  }, 250)
 })
 
 // 监听预览模式变化

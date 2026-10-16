@@ -203,13 +203,12 @@ async def search_documents(
                     else:
                         score = 0.4
             else:
-                # 多词：命中词覆盖率为主（全词命中 > 部分命中），命中桶质量为辅
-                coverage = len(matched_terms) / len(terms)
+                # 29.5：多词搜索 — "完整匹配优先"语义
+                # - 优先级 1:文档内容/标题/描述 包含完整 q.strip() 串(连续) → score = 1.0 强制置顶
+                # - 优先级 2:分词全部命中(允许间隔,不一定连续) → score = 0.5 + 0.5 * bucket
+                # - 优先级 3:分词部分命中 → score < 0.5 + 0.5 * bucket
+                # 29.3 的 +0.15 phrase bonus 改为强制置顶,避免"完整匹配跟部分匹配分数太接近"
                 bucket_score = {"content": 0.8, "title": 0.6, "description": 0.4}[match_type]
-                score = min(0.5 * coverage + 0.5 * bucket_score, 1.0)
-                # 29.3：完整 phrase bonus——多词查询时,如果文档内容包含完整 q 串(带空格)，
-                # 视为更精确匹配,排序靠前。phrase 是"按空格拼回原查询"——只在 terms 数 >= 2 时启用。
-                # 命中条件:phrase 出现在 content / title / description 任一位置
                 if len(terms) >= 2:
                     phrase = q.strip()
                     phrase_hit = (
@@ -218,8 +217,18 @@ async def search_documents(
                         or (doc.description and phrase.lower() in doc.description.lower())
                     )
                     if phrase_hit:
-                        # +0.15 让完整匹配的文档自然排到部分匹配之上
-                        score = min(score + 0.15, 1.0)
+                        # 完整匹配:score 强制 1.0(永远排第一),不受 bucket 影响
+                        # 例:内容桶 0.8 + 完整匹配 → 1.0(置顶);标题桶 0.6 + 完整匹配 → 1.0
+                        # 完整匹配之间按 match_count 多少再排(出现早/多的更靠前)
+                        content_bonus = min(match_count / 20.0, 0.1) if match_type == 'content' else 0
+                        score = min(1.0 + content_bonus, 1.0)  # 用 [1.0, 1.1] 范围保留排序
+                    else:
+                        # 非完整匹配:按命中词覆盖率 + 桶质量
+                        coverage = len(matched_terms) / len(terms)
+                        score = min(0.5 * coverage + 0.5 * bucket_score, 0.99)  # 上限 0.99,保证完整匹配永远 > 任何分词匹配
+                else:
+                    # 单个 term(虽然 single_term=False 但防御性)
+                    score = bucket_score
 
             # 标题/描述命中的高亮文本（内容命中时 highlights 已由片段填充）
             if match_type == "title":

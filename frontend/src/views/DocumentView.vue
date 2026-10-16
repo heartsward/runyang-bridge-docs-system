@@ -227,23 +227,7 @@
             在线预览
           </n-button>
 
-          <!-- 搜索高亮信息（仅在提取内容模式下显示） -->
-          <n-space v-if="previewMode === 'extracted' && searchKeyword && highlightedCount > 0" size="small">
-            <n-tag type="warning" size="small">
-              🔍 "{{ searchKeyword }}" 共 {{ highlightedCount }} 处
-            </n-tag>
-            <n-button-group size="tiny">
-              <n-button @click="scrollToHighlight(-1)" :disabled="currentHighlightIndex <= 0">
-                ↑
-              </n-button>
-              <n-button @click="scrollToHighlight(1)" :disabled="currentHighlightIndex >= highlightedCount - 1">
-                ↓
-              </n-button>
-            </n-button-group>
-            <n-text depth="3" style="font-size: 11px;">
-              {{ currentHighlightIndex + 1 }} / {{ highlightedCount }}
-            </n-text>
-          </n-space>
+          <!-- 29.5：全局搜索高亮 ↑↓ 已抽到 MarkdownPreviewBody 组件,这里只保留"当前 N/总 M"展示(由组件顶部显示) -->
         </n-space>
 
         <!-- 23.2：切换按钮固定到工具栏右侧，所有格式都显示；非 PDF/图片降级为下载卡 -->
@@ -258,33 +242,34 @@
         </n-radio-group>
       </div>
 
-      <div class="preview-container" @click="handlePreviewAnchorClick">
-        <!-- 提取内容模式（阶段 3E：后端发 Markdown → 前端 markdown-it 渲染为 HTML → DOMPurify sanitize）
-             29.1：@click 容器代理拦截内部锚链接 [text](#anchor)，平滑滚动到 heading（不开新窗口） -->
-        <div
-          v-if="(previewMode === 'extracted' || !shouldShowViewToggle(currentDocument)) && !previewEditMode"
-          v-html="displayPreviewHtml"
-          class="markdown-content"
-        ></div>
-
-        <!-- W4：编辑模式 textarea -->
-        <div v-if="previewEditMode">
-          <!-- 27.16：元信息段已从编辑器剥离，这里明确告知，避免用户以为"保存后标题丢了" -->
-          <div class="edit-meta-tip">
-            只编辑正文。标题 / 来源文件 / 文档类型 / 标签等元信息由系统维护，
-            不在此处显示，保存时也不会被改动。
-          </div>
-          <n-input
-            v-model:value="previewEditContent"
-            type="textarea"
-            :autosize="{ minRows: 15, maxRows: 30 }"
-            placeholder="编辑 Markdown 正文..."
-            style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
-          />
+      <!-- 29.5：共享预览核心组件(渲染+高亮+全局↑↓+Ctrl+F 焦点+链接跳转)
+           DocumentView 保留 modal/工具栏/视图切换,只换内容区 -->
+      <div v-if="!previewEditMode && (previewMode === 'extracted' || !shouldShowViewToggle(currentDocument))">
+        <MarkdownPreviewBody
+          ref="markdownBodyRef"
+          :content="previewContent"
+          :keyword="searchKeyword"
+          :max-height="'80vh'"
+          :show-highlight-nav="true"
+        />
+      </div>
+      <div v-else-if="previewEditMode">
+        <!-- 27.16：元信息段已从编辑器剥离，这里明确告知，避免用户以为"保存后标题丢了" -->
+        <div class="edit-meta-tip">
+          只编辑正文。标题 / 来源文件 / 文档类型 / 标签等元信息由系统维护，
+          不在此处显示，保存时也不会被改动。
         </div>
-        
-        <!-- 原文件模式 (仅对支持的文件类型显示) -->
-        <div v-else-if="shouldShowViewToggle(currentDocument) && previewMode === 'original'" class="original-file-preview">
+        <n-input
+          v-model:value="previewEditContent"
+          type="textarea"
+          :autosize="{ minRows: 15, maxRows: 30 }"
+          placeholder="编辑 Markdown 正文..."
+          style="font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"
+        />
+      </div>
+
+      <!-- 原文件模式 (仅对支持的文件类型显示) -->
+      <div v-else-if="shouldShowViewToggle(currentDocument) && previewMode === 'original'" class="original-file-preview">
           <!-- PDF 文件使用 iframe 预览 -->
           <iframe
             v-if="isPDFFile(currentDocument)"
@@ -326,7 +311,6 @@
           </div>
         </div>
       </div>
-    </div>
     <template #footer>
       <n-space justify="end">
         <!-- W4：编辑模式时显示保存/取消 -->
@@ -544,6 +528,7 @@ import {
 } from 'naive-ui'
 import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline, PencilOutline, EyeOutline, RefreshOutline } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
+import MarkdownPreviewBody from '../components/MarkdownPreviewBody.vue'  // 29.5:共享预览核心(渲染+高亮+焦点)
 import { documentService, uploadService, authService, taskService } from '@/services'
 import { wikiService } from '@/services/wiki'
 import type { Document, Category, User } from '@/types/api'
@@ -1360,35 +1345,10 @@ const addHighlightIndexes = () => {
 }
 
 // 滚动到指定高亮位置
-const scrollToHighlight = (direction: number) => {
-  if (highlightedCount.value === 0) return
-  
-  // 计算新的索引
-  let newIndex = currentHighlightIndex.value + direction
-  if (newIndex < 0) newIndex = 0
-  if (newIndex >= highlightedCount.value) newIndex = highlightedCount.value - 1
-  
-  currentHighlightIndex.value = newIndex
-  
-  // 查找对应的高亮元素并滚动到视图
-  setTimeout(() => {
-    const targetMark = document.querySelector(`[data-highlight-index="${newIndex}"]`)
-    if (targetMark) {
-      // 移除之前的活跃高亮样式
-      document.querySelectorAll('mark.active-highlight').forEach(el => {
-        el.classList.remove('active-highlight')
-      })
-      
-      // 添加当前高亮样式
-      targetMark.classList.add('active-highlight')
-      
-      // 滚动到视图
-      targetMark.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      })
-    }
-  }, 100)
+// 29.5：scrollToHighlight 已抽到 MarkdownPreviewBody 组件,这里保留兼容旧调用——通过 ref 转发
+// (实际上 line 230 工具栏的全局 ↑↓ 已删除,这里只保留函数签名防止 type 错)
+const scrollToHighlight = (_direction: number) => {
+  // no-op: 由组件内部处理
 }
 
 // 下载文档（阶段十·W5：支持选择 原文件 / MD）
@@ -1904,6 +1864,18 @@ onMounted(async () => {
   }
 })
 
+// 29.5：预览弹窗打开时,通知 MarkdownPreviewBody 组件做 Ctrl+F 焦点迁移
+watch(showPreviewModal, async (show) => {
+  if (!show) return
+  await nextTick()
+  setTimeout(() => {
+    const body = markdownBodyRef.value as { focusForFind?: () => void } | null
+    if (body && typeof body.focusForFind === 'function') {
+      body.focusForFind()
+    }
+  }, 250)
+})
+
 // 29.2：状态保存/恢复——从 /office-edit/:docId 返回时不丢滚动位置 + 分页
 // PageLayout 是 window 滚动（无独立滚动容器），所以存 window.scrollY
 // sessionStorage 跨路由持久、刷新清除；5 分钟内有效（避免陈工主动刷新后还看到旧位置）
@@ -2010,21 +1982,9 @@ const getFileUrl = (document: Document | null): string => {
 // xss-protection.ts 已对内部锚链接移除 target=_blank → 同窗口 native jump。
 // 这里**只做外部链接兜底**：防止 default 行为对真外部链接意外跳出当前页
 // （理论上 DOMPurify 已加 target=_blank，但为防御性二次保险）。
-const handlePreviewAnchorClick = (e: MouseEvent): void => {
-  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-  const target = e.target as HTMLElement | null
-  if (!target) return
-  const anchor = target.closest('a') as HTMLAnchorElement | null
-  if (!anchor) return
-  const href = anchor.getAttribute('href') || ''
-  // 内部锚链接（#xxx）→ 放行浏览器 native 跳转，不干预
-  if (href.startsWith('#')) return
-  // 外部链接（http/https/mailto/...）→ 让浏览器按 target=_blank 处理（DOMPurify 已设置）
-  // 如果是裸外部链接（target 不是 _blank），兜底加 target=_blank
-  if (!anchor.target || anchor.target === '_self') {
-    anchor.target = '_blank'
-    anchor.rel = 'noopener noreferrer'
-  }
+// 29.5：handlePreviewAnchorClick 已抽到 MarkdownPreviewBody 组件,这里保留 no-op 占位
+const handlePreviewAnchorClick = (_e: MouseEvent): void => {
+  // no-op: 链接跳转由组件内部处理
 }
 
 </script>
