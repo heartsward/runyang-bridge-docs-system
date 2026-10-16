@@ -219,6 +219,11 @@ class SearchService:
         - mark 带 data-term 属性，供前端按词分组做分别导航
         - 29.3：**markdown 链接保护**——`[text](url)` 的 text 段正常高亮，URL 段完全跳过
           （避免 `href="#xxx<mark>...</mark>"` 破坏 markdown 链接语法，导致浏览器 native 跳转失效）
+        - 29.6：**代码块 / 行内代码 保护**——fenced code block 和 inline code 段完全不插入 mark
+          （markdown-it 渲染 fenced code 时会 HTML escape `<` `>` 为 `&lt;` `&gt;` 字面字符，
+          插入 mark 会被 escape 成 `&lt;mark&gt;` 显示成字面文本，破坏代码块观感）
+        - 29.7：**完整 q 串整体高亮**——若多词查询的完整 `q.strip()` 串在原文中连续出现，
+          把整段作为**单一** mark 插入（不按分词拆开），实现陈工期望的"ufw allow from" 3 词一个高亮块
         """
         if not text or not terms:
             return text
@@ -226,27 +231,57 @@ class SearchService:
         if not unique_terms:
             return text
 
-        # 29.3：先识别所有 markdown 链接 `[text](url)`，收集 URL 段位置作为"不可高亮区"
-        # text 段可以高亮（语义上属于正文），URL 段必须保持原样（否则破坏链接语法）
-        # 注意：内联图片 `![alt](url)` 也用同款语法，一并保护
+        # 29.3 + 29.6：先识别所有"不可高亮区"——markdown 链接 URL 段 + fenced code block + inline code
+        no_highlight_ranges: List[tuple] = []
+
+        # 29.3：markdown 链接 `[text](url)` 的 URL 段
+        # 内联图片 `![alt](url)` 也用同款语法,一并保护
         md_link_pattern = re.compile(r'(!?)\[([^\]]*)\]\(([^)]*)\)')
-        url_ranges: List[tuple] = []  # (start, end) of (url) 内不可高亮区
         for m in md_link_pattern.finditer(text):
-            # m.group(3) 是 url 部分；它在 text 中的位置 = m.start(3) .. m.end(3)
-            url_ranges.append((m.start(3), m.end(3)))
+            no_highlight_ranges.append((m.start(3), m.end(3)))
+
+        # 29.6：fenced code block (``` 或 ~~~ 包裹的整段)
+        # 用非贪婪 + DOTALL 匹配最小代码块;支持 ```lang / ~~~lang 开头
+        fence_re = re.compile(r'(?:```|~~~)[^\n]*\n.*?\n(?:```|~~~)', re.DOTALL)
+        for m in fence_re.finditer(text):
+            no_highlight_ranges.append((m.start(), m.end()))
+
+        # 29.6：inline code (`xxx` 单行内代码)——不跨行
+        # 排除已经被 fenced code block 覆盖的范围
+        inline_code_re = re.compile(r'`[^`\n]+`')
+        for m in inline_code_re.finditer(text):
+            if any(not (m.end() <= s or m.start() >= e) for s, e in no_highlight_ranges):
+                continue
+            no_highlight_ranges.append((m.start(), m.end()))
+
+        # 29.7：完整 q 串作为"长 term"加入，长词优先命中
+        # 例:terms=['ufw','allow','from'],完整 q="ufw allow from"——把 "ufw allow from" 也作为 term
+        # 长词优先匹配会先匹配整段,跳过已占区间,实现"整体高亮"
+        all_terms = list(unique_terms)
+        if len(unique_terms) >= 2:
+            phrase = ' '.join(unique_terms)  # 注意:这里不用 q.strip()——避免依赖外部入参
+            if phrase not in all_terms and phrase.strip():
+                all_terms.append(phrase)
 
         # 长词优先 + 按位置去重，避免重叠高亮
-        ordered = sorted(unique_terms, key=len, reverse=True)
+        # 29.7：必须按"长词优先遍历 taken"——否则短词先入 taken 后,长词命中因重叠被跳过
+        # 例: 'ufw' [3:6] 和 'ufw allow from' [3:17] 重叠;短词先入 taken 时,长词命中被跳过
+        #      长词先入 taken 时,短词命中被跳过(长词命中已占区间)
+        ordered = sorted(all_terms, key=len, reverse=True)
         patterns = [(t, re.compile(re.escape(t), re.IGNORECASE)) for t in ordered]
         taken: List[tuple] = []
-        for start, end in self._find_all_occurrences(text, patterns):
-            # 29.3：跳过 markdown 链接 URL 段内的命中
-            if any(not (end <= s or start >= e) for s, e in url_ranges):
-                continue
-            # 已占用的区间去重
-            if any(not (end <= s or start >= e) for s, e in taken):
-                continue
-            taken.append((start, end))
+        for term, pattern in patterns:
+            for m in pattern.finditer(text):
+                start, end = m.start(), m.end()
+                if not m.group():
+                    continue
+                # 29.3 + 29.6：跳过所有"不可高亮区"（链接 URL 段、fenced code、inline code）
+                if any(not (end <= s or start >= e) for s, e in no_highlight_ranges):
+                    continue
+                # 已占用的区间去重
+                if any(not (end <= s or start >= e) for s, e in taken):
+                    continue
+                taken.append((start, end))
         # 重新按位置输出：一次性替换
         taken.sort()
         out: List[str] = []

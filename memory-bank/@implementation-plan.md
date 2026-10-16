@@ -2636,3 +2636,18 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 后端 pytest 41 passed
 - 前端 build 0 error
 - 改 commit + push(陈工手动)
+
+### 步骤 29.6 — 代码块 mark 字面显示修复（2026-10-16）
+
+> 用户反馈：搜 "ufw" 在代码块里的内容渲染出 `sudo apt install <mark data-term="ufw">ufw</mark>` 字面文本——陈工叫"格式错误"。29.3 修了 markdown 链接保护，29.6 补代码块保护
+
+- **根因**：markdown-it 渲染 fenced code block 时会 HTML escape **所有内容**（包括 `<mark>` → `&lt;mark&gt;`）。后端在 markdown 源里全文插入 mark 标签，代码块内的 mark 标签被 escape → v-html 显示字面文本
+- **修法**：`search_service.highlight_terms` 加 fenced code block + inline code 保护——同 29.3 链接保护思路（识别不可高亮区，跳过插入）
+- **能改什么**：`backend/app/services/search_service.py`
+- **怎么验**：
+  - 搜 "ufw" 预览含代码块的 md → 代码块内 `sudo apt install ufw` 原样显示，**无 `<mark>` 字面**
+  - 搜 "firewall" 预览普通段落 → mark 注入生效
+  - pytest 41 passed
+- **通过标准**：陈工的"格式错误"消失
+- **回退方案**：`git checkout HEAD -- backend/app/services/search_service.py`
+- **未来增强**（不阻塞 29.6）：代码块内**也想要高亮**——可走"后端用 sentinel 占位符 + 前端 markdown-it 渲染后替换为 mark 标签"路线
