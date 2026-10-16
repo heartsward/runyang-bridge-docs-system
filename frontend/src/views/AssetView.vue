@@ -1769,7 +1769,7 @@ const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[n
     render: (row) => {
       const gs = row.groups || []
       if (!gs.length) return h('span', { style: { color: '#999' } }, '—')
-      return h(NSpace, { size: 4 }, {
+      return h(NSpace, { size: 4, justify: 'center', style: 'width: 100%' }, {
         default: () => gs.map(g => h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => g }))
       })
     }
@@ -1824,16 +1824,19 @@ const colTitle = (key: string): string => {
 
 const columns = computed<DataTableColumns<Asset>>(() => [
   {
-    type: 'selection'
+    type: 'selection',
+    align: 'center'
   },
+  // 30.3：全部列统一居中（表头 + 单元格内容）——陈工反馈左对齐观感不齐
   ...colOrder.value
     .filter(k => !hiddenCols.value.includes(k) && colDefsMap.value[k])
-    .map(k => colDefsMap.value[k]),
+    .map(k => ({ ...colDefsMap.value[k], align: 'center' } as NonNullable<DataTableColumns<Asset>[number]>)),
   {
     title: '操作',
     key: 'actions',
     width: 150,
-    render: (row) => h(NSpace, { size: 'small' }, {
+    align: 'center',
+    render: (row) => h(NSpace, { size: 'small', justify: 'center' }, {
       default: () => [
         h(NButton, {
           size: 'small',

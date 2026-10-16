@@ -2739,3 +2739,9 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **详情弹窗**：头部名称下加 类型/网络/部门/状态 彩色 tag 行；基本信息 tab 里类型/网络/部门同样渲染彩色 tag（与列表一致）
 - **能改什么**：`frontend/src/views/AssetView.vue` + `frontend/src/services/asset.ts`
 - **验证**：vue-tsc 改动相关 0 错误 + vite build 通过
+
+### 步骤 30.3 — 资产表格全列居中（2026-10-16）
+> 陈工反馈：设备名称/类型/IP/主机名等内容全部左对齐，观感不齐，希望每列内容居中
+- **修法**：columns 组装时统一注入 `align: 'center'`（naive-ui 列属性，表头 th + 单元格 td 一起居中）；selection 列、actions 列也居中；分组列 NSpace 是 flex 布局 text-align 无效 → 加 `justify:'center'` + `width:100%`
+- **能改什么**：`frontend/src/views/AssetView.vue`
+- **验证**：vue-tsc 改动相关 0 错误 + vite build 通过
