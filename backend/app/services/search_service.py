@@ -217,24 +217,40 @@ class SearchService:
         - 长词优先，避免短词先吞掉长词（"交换机" 不会拆掉 "核心交换机"）
         - 大小写不敏感；重叠区间去重
         - mark 带 data-term 属性，供前端按词分组做分别导航
+        - 29.3：**markdown 链接保护**——`[text](url)` 的 text 段正常高亮，URL 段完全跳过
+          （避免 `href="#xxx<mark>...</mark>"` 破坏 markdown 链接语法，导致浏览器 native 跳转失效）
         """
         if not text or not terms:
             return text
         unique_terms = list(dict.fromkeys(t for t in terms if t))
         if not unique_terms:
             return text
+
+        # 29.3：先识别所有 markdown 链接 `[text](url)`，收集 URL 段位置作为"不可高亮区"
+        # text 段可以高亮（语义上属于正文），URL 段必须保持原样（否则破坏链接语法）
+        # 注意：内联图片 `![alt](url)` 也用同款语法，一并保护
+        md_link_pattern = re.compile(r'(!?)\[([^\]]*)\]\(([^)]*)\)')
+        url_ranges: List[tuple] = []  # (start, end) of (url) 内不可高亮区
+        for m in md_link_pattern.finditer(text):
+            # m.group(3) 是 url 部分；它在 text 中的位置 = m.start(3) .. m.end(3)
+            url_ranges.append((m.start(3), m.end(3)))
+
         # 长词优先 + 按位置去重，避免重叠高亮
         ordered = sorted(unique_terms, key=len, reverse=True)
         patterns = [(t, re.compile(re.escape(t), re.IGNORECASE)) for t in ordered]
         taken: List[tuple] = []
-        out: List[str] = []
-        pos = 0
         for start, end in self._find_all_occurrences(text, patterns):
+            # 29.3：跳过 markdown 链接 URL 段内的命中
+            if any(not (end <= s or start >= e) for s, e in url_ranges):
+                continue
+            # 已占用的区间去重
             if any(not (end <= s or start >= e) for s, e in taken):
                 continue
             taken.append((start, end))
         # 重新按位置输出：一次性替换
         taken.sort()
+        out: List[str] = []
+        pos = 0
         for start, end in taken:
             out.append(text[pos:start])
             matched_text = text[start:end]

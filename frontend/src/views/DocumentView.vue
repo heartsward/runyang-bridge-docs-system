@@ -550,7 +550,7 @@ import type { Document, Category, User } from '@/types/api'
 import apiService from '@/services/api'
 import { debounce } from '@/utils'
 import { downloadWikiDocument, hydrateWikiImages } from '@/utils/file-download'
-import { useRouter } from 'vue-router'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -1949,8 +1949,16 @@ const restoreDocsState = (): void => {
 }
 
 onBeforeUnmount(() => {
-  // 离开 /documents（含跳到 /office-edit）时存状态
-  saveDocsState()
+  // 29.3：移除全局 saveDocsState——只在线预览路由返回时存（见下方 onBeforeRouteLeave）
+  // 之前 onBeforeUnmount 触发范围过广,陈工点导航菜单"文档管理"也会触发,导致状态被错误恢复
+})
+
+// 29.3：只在跳到 /office-edit（OnlyOffice 在线预览）时存状态——其他路由切换不存
+// 这样从 OnlyOffice 返回时仍能恢复滚动位置,但点导航菜单切到 /assets 等不会触发
+onBeforeRouteLeave((to, from) => {
+  if (to.name === 'office-edit') {
+    saveDocsState()
+  }
 })
 
 

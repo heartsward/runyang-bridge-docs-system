@@ -291,11 +291,11 @@
                 <n-button-group size="tiny">
                   <n-button
                     @click.stop="scrollToHighlightInPreview(group.term, -1)"
-                    :disabled="getTermCursor(group.term) <= 0"
+                    :disabled="group.count > 1 && getTermCursor(group.term) <= 0"
                   >↑</n-button>
                   <n-button
                     @click.stop="scrollToHighlightInPreview(group.term, 1)"
-                    :disabled="getTermCursor(group.term) >= group.count - 1"
+                    :disabled="group.count > 1 && getTermCursor(group.term) >= group.count - 1"
                   >↓</n-button>
                 </n-button-group>
                 <span class="term-nav-pos">
@@ -384,6 +384,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { useSafeHtml } from '@/utils/xss-protection'
 import {
   NLayout,
@@ -866,8 +867,15 @@ const hydratePreviewImages = async () => {
 // 组件卸载：释放图片 blob URL
 onBeforeUnmount(() => {
   if (_revokePreviewImages) { _revokePreviewImages(); _revokePreviewImages = null }
-  // 29.2：保存搜索词 + 滚动位置（跳到 OnlyOffice / 切换路由时保留）
-  saveSearchState()
+  // 29.3：移除全局 saveSearchState——只在跳到 /office-edit 时存（见下方 onBeforeRouteLeave）
+  // 之前 onBeforeUnmount 触发范围过广
+})
+
+// 29.3：只在跳到 /office-edit（OnlyOffice 在线预览）时保存搜索状态
+onBeforeRouteLeave((to, from) => {
+  if (to.name === 'office-edit') {
+    saveSearchState()
+  }
 })
 
 // 29.2：状态保存/恢复——从 /office-edit/:docId 返回时不丢搜索词 + 滚动位置

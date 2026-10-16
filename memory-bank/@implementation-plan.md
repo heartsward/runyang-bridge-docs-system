@@ -2549,3 +2549,29 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   4. `/search` 多词搜索 → 预览 → 所有 mark 同一淡黄 → 点某个词 → 该词高亮（active 状态）
 - **通过标准**：5 个问题肉眼可感知改善；build 无新错
 - **回退方案**：`git checkout HEAD -- frontend/src/views/DocumentView.vue frontend/src/views/SearchView.vue frontend/src/assets/markdown.css`
+
+### 步骤 29.3 — 智能搜索体验根上修（2026-10-16）
+
+> 用户反馈 4 个新问题：① 多词搜索不优先完整短语；② 单匹配时上下按钮全禁用；③ mark 注入破坏 markdown 链接；④ 跳转还是不可用（与 ③ 关联）；⑤ 状态保存太激进（陈工点导航菜单也触发）
+> 根因（实测验证）：后端 highlight_terms 全文插入 mark 包括 markdown 链接 URL 段；后端搜索打分无 phrase bonus；前端单匹配按钮 disabled 逻辑 bug；onBeforeUnmount 触发范围过广
+
+- **能改什么**：
+  - `backend/app/services/search_service.py`（highlight_terms 跳过 markdown 链接 URL 段）
+  - `backend/app/api/endpoints/search.py`（多词打分加 phrase bonus）
+  - `frontend/src/views/SearchView.vue`（单匹配按钮 enabled + 状态保存改 onBeforeRouteLeave）
+  - `frontend/src/views/DocumentView.vue`（同上 onBeforeRouteLeave）
+- **不能改什么**：
+  - 鉴权 / 路由 / 上传白名单
+  - 前端 highlight 占位符机制（`H_0_` 等）——保留向后兼容
+  - 29.1/29.2 已改的 markdown 渲染器、xss 钩子、全局 markdown.css
+- **怎么验**：
+  1. 后端：本地 `pytest backend/tests/` 全绿
+  2. 前端：`npm run build` 0 error
+  3. dev server 上手测：
+     - 搜索 "防火墙 代码" → 完整 phrase 命中的文档排前
+     - 搜 "防火墙" 预览含 `[一、UFW 防火墙](#一ufw-防火墙)` 的 md → 链接不被破坏，**点链接能跳**
+     - 搜只有 1 匹配的词 → 高亮卡片 ↑↓ 按钮可点
+     - 文档列表第 50 行 → OnlyOffice → 返回 → 滚动位置恢复
+     - 文档列表第 50 行 → 点导航菜单"文档管理" → **滚动到顶**（不恢复）
+- **通过标准**：4 个问题肉眼可感知改善；build + pytest 0 错
+- **回退方案**：`git checkout HEAD -- backend/app/services/search_service.py backend/app/api/endpoints/search.py frontend/src/views/SearchView.vue frontend/src/views/DocumentView.vue`

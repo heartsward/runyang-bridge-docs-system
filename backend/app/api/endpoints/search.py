@@ -207,6 +207,19 @@ async def search_documents(
                 coverage = len(matched_terms) / len(terms)
                 bucket_score = {"content": 0.8, "title": 0.6, "description": 0.4}[match_type]
                 score = min(0.5 * coverage + 0.5 * bucket_score, 1.0)
+                # 29.3：完整 phrase bonus——多词查询时,如果文档内容包含完整 q 串(带空格)，
+                # 视为更精确匹配,排序靠前。phrase 是"按空格拼回原查询"——只在 terms 数 >= 2 时启用。
+                # 命中条件:phrase 出现在 content / title / description 任一位置
+                if len(terms) >= 2:
+                    phrase = q.strip()
+                    phrase_hit = (
+                        (doc.content_extracted and doc.content and phrase.lower() in doc.content.lower())
+                        or phrase.lower() in doc.title.lower()
+                        or (doc.description and phrase.lower() in doc.description.lower())
+                    )
+                    if phrase_hit:
+                        # +0.15 让完整匹配的文档自然排到部分匹配之上
+                        score = min(score + 0.15, 1.0)
 
             # 标题/描述命中的高亮文本（内容命中时 highlights 已由片段填充）
             if match_type == "title":
