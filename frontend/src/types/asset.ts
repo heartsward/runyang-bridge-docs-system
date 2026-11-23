@@ -145,7 +145,7 @@ export interface AssetUpdate {
   ip_address?: string
   mac_address?: string
   hostname?: string
-  port?: number
+  port?: number | null   // 32.5：null=显式清空
   network_location?: string
   username?: string
   password?: string
@@ -163,11 +163,11 @@ export interface AssetUpdate {
   service_name?: string
   application?: string
   purpose?: string
-  purchase_date?: string
+  purchase_date?: string | null   // 32.5：null=显式清空该日期
   commissioning_date?: string | null
   warranty_expiry?: string | null
-  last_maintenance?: string
-  next_maintenance?: string
+  last_maintenance?: string | null
+  next_maintenance?: string | null
   notes?: string
   tags?: string[]
   groups?: string[]

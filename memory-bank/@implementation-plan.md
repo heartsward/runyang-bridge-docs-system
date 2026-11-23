@@ -2852,3 +2852,15 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   - AssetView：分享按钮同款变色；筛选行加「分享状态」下拉（已分享/未分享，走 share_filter 服务端筛选）
   - ShareModal：已有分享时顶部加「一键取消所有分享」（Popconfirm 确认，调 revokeAll）；services/shares.ts + revokeAll
 - **验证**：pytest 58 passed（新增 test_share_status.py 5 例：资产/文档注入、share_filter 正反选、一键撤销+计数归零、普通用户 403）；vue-tsc 无新增错误（基线 25 条提取区历史类型错与本改动无关，stash 对账）；vite build OK
+
+### 步骤 32.5 — 资产模型字段补全到界面（2026-11-23）
+> 陈工问"导出字段比实际资产数据字段多"——根因：DB 43 列宽表设计，界面只暴露 ~14 个，导出清单 27 个，三处脱节；真实数据里 19 个字段 100% 为空。陈工选"补全界面"（让宽表用起来），并提醒列设置/排序也要覆盖。
+- **添加/编辑表单**：维保后新增「更多信息（选填）」折叠区（NCollapse）：制造商/序列号/MAC/端口(NInputNumber)/物理位置/机柜位置/数据中心/操作系统/CPU/内存/存储/服务名称/应用程序/用途说明/采购日期/上次维护/下次维护(NDatePicker×3)/SSH密钥。
+  - editAsset 全字段回填；任一扩展字段有值→折叠区自动展开（防"数据存在但看不见"）；copyAsset 全字段复制；resetForm 全清
+  - 提交：文本空串=''（后端清空该列）；日期 null=清空；AssetUpdate 类型放宽（date?: string|null，port?: number|null）
+- **列设置（30.2 机制扩展）**：17 个扩展列进 CONFIGURABLE_COL_KEYS；**默认隐藏**（DEFAULT_HIDDEN_COLS，loadHiddenCols/resetColLayout 兜底）——已有用户 localStorage 存档不受影响，新用户默认只见核心列；列设置面板可勾选打开；defaultColWidths 补齐
+- **排序方式**：+采购日期/上次维护/下次维护（后端 list_assets 日期空值排最后逻辑本来就含这5个日期列）+ 制造商/序列号（字符串排序）
+- **详情弹窗**：新增「扩展信息」tab 完整展示全部补全字段 + 数据来源（source_file/source_document_id）
+- **导出清单不变**（27 字段现在全部界面可维护，脱节消除）
+- 顺手修基线：详情 4 处 `span="2"` 字符串写法（NDescriptionsItem span 是 number prop → TS2322 ×3）改 `:span="2"`——vue-tsc 归一化对账净 -3 零新增
+- **验证**：vue-tsc 错误数 215→212（修3基线，新增0）；vite build OK；后端无改动（AssetUpdate 原生接受全字段，PUT 走 exclude_unset）

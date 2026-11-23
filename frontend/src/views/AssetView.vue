@@ -344,6 +344,105 @@
             </n-form-item>
           </n-grid-item>
         </n-grid>
+
+        <!-- 32.5：模型全字段补全——平时收起不影响主流程，展开可补齐台账细项 -->
+        <n-collapse :default-expanded-names="assetFormExpanded" style="margin: 4px 0 12px;">
+          <n-collapse-item title="更多信息（选填：位置 / 硬件 / 业务 / 维护 / 凭据）" name="ext">
+            <n-grid cols="1 s:2" responsive="screen" :x-gap="16">
+              <n-grid-item>
+                <n-form-item label="制造商" path="manufacturer">
+                  <n-input v-model:value="assetForm.manufacturer" placeholder="如 华为 / 华三 / 思科" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="序列号" path="serial_number">
+                  <n-input v-model:value="assetForm.serial_number" placeholder="设备序列号" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="MAC地址" path="mac_address">
+                  <n-input v-model:value="assetForm.mac_address" placeholder="如 00:1A:2B:3C:4D:5E" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="端口" path="port">
+                  <n-input-number v-model:value="assetForm.port" placeholder="管理端口" :min="1" :max="65535" style="width: 100%" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="物理位置" path="location">
+                  <n-input v-model:value="assetForm.location" placeholder="如 机电房一楼机柜区" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="机柜位置" path="rack_position">
+                  <n-input v-model:value="assetForm.rack_position" placeholder="如 A02柜-U12" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="数据中心" path="datacenter">
+                  <n-input v-model:value="assetForm.datacenter" placeholder="所在机房/数据中心" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="操作系统" path="os_version">
+                  <n-input v-model:value="assetForm.os_version" placeholder="如 VRP V200R010 / CentOS 7.9" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="CPU" path="cpu">
+                  <n-input v-model:value="assetForm.cpu" placeholder="如 8核 x86" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="内存" path="memory">
+                  <n-input v-model:value="assetForm.memory" placeholder="如 16GB" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="存储" path="storage">
+                  <n-input v-model:value="assetForm.storage" placeholder="如 2×1TB RAID1" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="服务名称" path="service_name">
+                  <n-input v-model:value="assetForm.service_name" placeholder="承载的服务" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="应用程序" path="application">
+                  <n-input v-model:value="assetForm.application" placeholder="运行的应用" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="用途说明" path="purpose">
+                  <n-input v-model:value="assetForm.purpose" placeholder="设备用途" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="采购日期" path="purchase_date">
+                  <n-date-picker v-model:value="assetForm.purchase_date" type="date" clearable style="width: 100%" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="上次维护" path="last_maintenance">
+                  <n-date-picker v-model:value="assetForm.last_maintenance" type="date" clearable style="width: 100%" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="下次维护" path="next_maintenance">
+                  <n-date-picker v-model:value="assetForm.next_maintenance" type="date" clearable style="width: 100%" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="SSH密钥" path="ssh_key">
+                  <n-input v-model:value="assetForm.ssh_key" type="textarea" :rows="2" placeholder="私钥指纹或备注（勿存私钥原文）" />
+                </n-form-item>
+              </n-grid-item>
+            </n-grid>
+          </n-collapse-item>
+        </n-collapse>
+
         <n-form-item label="备注" path="notes">
           <n-input v-model:value="assetForm.notes" type="textarea" placeholder="请输入备注" :rows="3" />
         </n-form-item>
@@ -715,16 +814,16 @@
                   </span>
                   <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
-                <n-descriptions-item label="备注信息" span="2">
+                <n-descriptions-item label="备注信息" :span="2">
                   <div v-if="viewingAsset.notes && viewingAsset.notes.trim()" style="white-space: pre-wrap; word-break: break-word; max-width: 100%;">
                     {{ viewingAsset.notes }}
                   </div>
                   <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
-                <n-descriptions-item label="创建时间" span="2">
+                <n-descriptions-item label="创建时间" :span="2">
                   {{ formatDateTime(viewingAsset.created_at) }}
                 </n-descriptions-item>
-                <n-descriptions-item label="更新时间" span="2" v-if="viewingAsset.updated_at">
+                <n-descriptions-item label="更新时间" :span="2" v-if="viewingAsset.updated_at">
                   {{ formatDateTime(viewingAsset.updated_at) }}
                 </n-descriptions-item>
               </n-descriptions>
@@ -759,6 +858,47 @@
                   />
                 </n-form-item>
               </n-form>
+            </n-tab-pane>
+
+            <!-- 32.5：扩展信息标签页（模型补全字段完整展示） -->
+            <n-tab-pane name="extended" tab="扩展信息">
+              <n-descriptions bordered :column="2">
+                <n-descriptions-item label="制造商">{{ viewingAsset.manufacturer || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="序列号">{{ viewingAsset.serial_number || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="MAC地址">
+                  <n-text v-if="viewingAsset.mac_address" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.mac_address }}</n-text>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
+                <n-descriptions-item label="管理端口">
+                  <n-text v-if="viewingAsset.port" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.port }}</n-text>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
+                <n-descriptions-item label="物理位置">{{ viewingAsset.location || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="机柜位置">{{ viewingAsset.rack_position || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="数据中心">{{ viewingAsset.datacenter || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="操作系统">{{ viewingAsset.os_version || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="CPU">{{ viewingAsset.cpu || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="内存">{{ viewingAsset.memory || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="存储">{{ viewingAsset.storage || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="服务名称">{{ viewingAsset.service_name || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="应用程序">{{ viewingAsset.application || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="用途说明" :span="2">{{ viewingAsset.purpose || '未设置' }}</n-descriptions-item>
+                <n-descriptions-item label="采购日期">
+                  <span v-if="viewingAsset.purchase_date">{{ formatDate(viewingAsset.purchase_date) }}</span>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
+                <n-descriptions-item label="上次维护">
+                  <span v-if="viewingAsset.last_maintenance">{{ formatDate(viewingAsset.last_maintenance) }}</span>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
+                <n-descriptions-item label="下次维护">
+                  <span v-if="viewingAsset.next_maintenance">{{ formatDate(viewingAsset.next_maintenance) }}</span>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-descriptions-item>
+                <n-descriptions-item label="数据来源">
+                  {{ viewingAsset.source_file || (viewingAsset.source_document_id ? `文档#${viewingAsset.source_document_id}` : '手工录入') }}
+                </n-descriptions-item>
+              </n-descriptions>
             </n-tab-pane>
 
           </n-tabs>
@@ -985,6 +1125,9 @@ import {
   NScrollbar,
   NDatePicker,
   NPopover,
+  NCollapse,
+  NCollapseItem,
+  NInputNumber,
   useMessage,
   useDialog,
   type DataTableColumns,
@@ -1080,6 +1223,8 @@ const realTimeStatistics = computed(() => {
 })
 const searchQuery = ref('')
 const showCreateModal = ref(false)
+// 32.5：扩展字段折叠区——编辑时任一扩展字段有值则自动展开
+const assetFormExpanded = ref<string[]>([])
 const showExtractModal = ref(false)
 const showExtractResult = ref(false)
 const showViewModal = ref(false)
@@ -1155,9 +1300,14 @@ const sortConfig = reactive({
 })
 
 // 表单数据（日期字段用 NDatePicker 的时间戳，提交时转 ISO 字符串）
-type AssetFormModel = Omit<AssetCreate, 'commissioning_date' | 'warranty_expiry'> & {
+// 32.5：补全模型全部可编辑字段（制造商/序列号/MAC/端口/SSH密钥/位置/机柜/数据中心/
+// OS/CPU/内存/存储/服务/应用/用途/采购/上次维护/下次维护），与导出、列设置、排序对齐
+type AssetFormModel = Omit<AssetCreate, 'commissioning_date' | 'warranty_expiry' | 'purchase_date' | 'last_maintenance' | 'next_maintenance'> & {
   commissioning_date?: number | null
   warranty_expiry?: number | null
+  purchase_date?: number | null
+  last_maintenance?: number | null
+  next_maintenance?: number | null
 }
 const assetForm = reactive<AssetFormModel>({
   name: '',
@@ -1174,7 +1324,26 @@ const assetForm = reactive<AssetFormModel>({
   commissioning_date: null,
   warranty_expiry: null,
   groups: [] as string[],
-  notes: ''
+  notes: '',
+  // 32.5 扩展字段
+  manufacturer: '',
+  serial_number: '',
+  mac_address: '',
+  port: undefined as number | undefined,  // AssetCreate.port 类型是 number|undefined
+  ssh_key: '',
+  location: '',
+  rack_position: '',
+  datacenter: '',
+  os_version: '',
+  cpu: '',
+  memory: '',
+  storage: '',
+  service_name: '',
+  application: '',
+  purpose: '',
+  purchase_date: null as number | null,
+  last_maintenance: null as number | null,
+  next_maintenance: null as number | null
 })
 
 const extractForm = reactive({
@@ -1521,7 +1690,13 @@ const sortByOptions = computed(() => [
   { label: 'IP地址', value: 'ip_address' },
   { label: '状态', value: 'status' },
   { label: '启用日期', value: 'commissioning_date' },
-  { label: '维保到期', value: 'warranty_expiry' }
+  { label: '维保到期', value: 'warranty_expiry' },
+  // 32.5：补全字段里的可排序项（日期类后端已支持空值排最后）
+  { label: '采购日期', value: 'purchase_date' },
+  { label: '上次维护', value: 'last_maintenance' },
+  { label: '下次维护', value: 'next_maintenance' },
+  { label: '制造商', value: 'manufacturer' },
+  { label: '序列号', value: 'serial_number' }
 ])
 
 // 排序顺序选项
@@ -1592,6 +1767,11 @@ const defaultColWidths: Record<string, number> = {
   device_model: 120, system_version: 140, network_location: 100,
   department: 100, groups: 160, commissioning_date: 110,
   warranty_expiry: 120, status: 80, actions: 150,
+  // 32.5：扩展列默认宽度（默认隐藏，用户在列设置里打开后生效）
+  manufacturer: 110, serial_number: 140, mac_address: 140, port: 80,
+  location: 140, rack_position: 110, datacenter: 110, os_version: 140,
+  cpu: 100, memory: 90, storage: 120, service_name: 120, application: 120,
+  purpose: 150, purchase_date: 110, last_maintenance: 110, next_maintenance: 110,
 }
 const loadSavedColWidths = (): Record<string, number> => {
   try {
@@ -1637,7 +1817,17 @@ const colWidth = (key: string): number => savedColWidths.value[key] ?? defaultCo
 const CONFIGURABLE_COL_KEYS = [
   'name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'system_version',
   'network_location', 'department', 'groups', 'commissioning_date', 'warranty_expiry', 'status',
+  // 32.5：模型补全字段进列设置（默认隐藏，用时在"列设置"里打开）
+  'manufacturer', 'serial_number', 'mac_address', 'port', 'location', 'rack_position',
+  'datacenter', 'os_version', 'cpu', 'memory', 'storage', 'service_name', 'application',
+  'purpose', 'purchase_date', 'last_maintenance', 'next_maintenance',
 ] as const
+// 32.5：扩展列首次无存档时默认隐藏（保持表格原有紧凑观感）
+const DEFAULT_HIDDEN_COLS = [
+  'manufacturer', 'serial_number', 'mac_address', 'port', 'location', 'rack_position',
+  'datacenter', 'os_version', 'cpu', 'memory', 'storage', 'service_name', 'application',
+  'purpose', 'purchase_date', 'last_maintenance', 'next_maintenance',
+]
 const COL_ORDER_KEY = 'runyang-asset-col-order'
 const COL_HIDDEN_KEY = 'runyang-asset-col-hidden'
 
@@ -1660,11 +1850,11 @@ const loadColOrder = (): string[] => {
 const loadHiddenCols = (): string[] => {
   try {
     const raw = localStorage.getItem(COL_HIDDEN_KEY)
-    if (!raw) return []
+    if (!raw) return [...DEFAULT_HIDDEN_COLS]  // 32.5：扩展列默认隐藏
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed.map(String) : []
   } catch {
-    return []
+    return [...DEFAULT_HIDDEN_COLS]
   }
 }
 const colOrder = ref<string[]>(loadColOrder())
@@ -1693,7 +1883,7 @@ const moveCol = (key: string, dir: -1 | 1): void => {
 }
 const resetColLayout = (): void => {
   colOrder.value = [...CONFIGURABLE_COL_KEYS]
-  hiddenCols.value = []
+  hiddenCols.value = [...DEFAULT_HIDDEN_COLS]  // 32.5：重置后扩展列仍默认隐藏
   persistColLayout()
   message.success('列布局已重置')
 }
@@ -1857,6 +2047,64 @@ const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[n
       default: () => assetService.getAssetStatusName(row.status)
     })
   },
+  // ===== 32.5：模型补全字段列（列设置里默认隐藏，按需打开） =====
+  ...Object.fromEntries(
+    ([
+      ['manufacturer', '制造商'],
+      ['serial_number', '序列号'],
+      ['mac_address', 'MAC地址'],
+      ['location', '物理位置'],
+      ['rack_position', '机柜位置'],
+      ['datacenter', '数据中心'],
+      ['os_version', '操作系统'],
+      ['cpu', 'CPU'],
+      ['memory', '内存'],
+      ['storage', '存储'],
+      ['service_name', '服务名称'],
+      ['application', '应用程序'],
+      ['purpose', '用途说明'],
+    ] as const).map(([k, t]) => [k, {
+      title: t,
+      key: k,
+      width: colWidth(k),
+      minWidth: 70,
+      resizable: true,
+      ellipsis: { tooltip: true },
+      render: (row: Asset) => {
+        const v = (row as any)[k]
+        return v ? h('span', {}, String(v)) : h('span', { style: { color: '#999' } }, '—')
+      }
+    }])
+  ),
+  port: {
+    title: '端口',
+    key: 'port',
+    width: colWidth('port'),
+    minWidth: 60,
+    resizable: true,
+    render: (row) => row.port
+      ? h('span', { style: { fontFamily: 'Consolas, Menlo, monospace' } }, String(row.port))
+      : h('span', { style: { color: '#999' } }, '—')
+  },
+  ...Object.fromEntries(
+    ([
+      ['purchase_date', '采购日期'],
+      ['last_maintenance', '上次维护'],
+      ['next_maintenance', '下次维护'],
+    ] as const).map(([k, t]) => [k, {
+      title: t,
+      key: k,
+      width: colWidth(k),
+      minWidth: 90,
+      resizable: true,
+      render: (row: Asset) => {
+        const v = (row as any)[k]
+        return v
+          ? h('span', {}, formatDate(v))
+          : h('span', { style: { color: '#999' } }, '未设置')
+      }
+    }])
+  ),
 }))
 
 const colTitle = (key: string): string => {
@@ -2204,8 +2452,28 @@ const resetForm = () => {
     commissioning_date: null,
     warranty_expiry: null,
     groups: [],
-    notes: ''
+    notes: '',
+    // 32.5：扩展字段复位
+    manufacturer: '',
+    serial_number: '',
+    mac_address: '',
+    port: undefined,
+    ssh_key: '',
+    location: '',
+    rack_position: '',
+    datacenter: '',
+    os_version: '',
+    cpu: '',
+    memory: '',
+    storage: '',
+    service_name: '',
+    application: '',
+    purpose: '',
+    purchase_date: null,
+    last_maintenance: null,
+    next_maintenance: null
   })
+  assetFormExpanded.value = []
   editingAsset.value = null
 }
 
@@ -2249,7 +2517,26 @@ const handleSubmit = async () => {
         commissioning_date: timestampToISO(assetForm.commissioning_date) ?? null,
         warranty_expiry: timestampToISO(assetForm.warranty_expiry) ?? null,
         groups: assetForm.groups || [],
-        notes: assetForm.notes
+        notes: assetForm.notes,
+        // 32.5：扩展字段（文本空串=清空；日期 null=清空，见 AssetUpdate 类型）
+        manufacturer: assetForm.manufacturer || '',
+        serial_number: assetForm.serial_number || '',
+        mac_address: assetForm.mac_address || '',
+        port: assetForm.port ?? null,
+        ssh_key: assetForm.ssh_key || '',
+        location: assetForm.location || '',
+        rack_position: assetForm.rack_position || '',
+        datacenter: assetForm.datacenter || '',
+        os_version: assetForm.os_version || '',
+        cpu: assetForm.cpu || '',
+        memory: assetForm.memory || '',
+        storage: assetForm.storage || '',
+        service_name: assetForm.service_name || '',
+        application: assetForm.application || '',
+        purpose: assetForm.purpose || '',
+        purchase_date: timestampToISO(assetForm.purchase_date) ?? null,
+        last_maintenance: timestampToISO(assetForm.last_maintenance) ?? null,
+        next_maintenance: timestampToISO(assetForm.next_maintenance) ?? null
       }
       await assetService.updateAsset(editingAsset.value.id, updateData)
       message.success('设备更新成功')
@@ -2258,7 +2545,11 @@ const handleSubmit = async () => {
       const createData: AssetCreate = {
         ...assetForm,
         commissioning_date: timestampToISO(assetForm.commissioning_date),
-        warranty_expiry: timestampToISO(assetForm.warranty_expiry)
+        warranty_expiry: timestampToISO(assetForm.warranty_expiry),
+        // 32.5：新增的日期字段同样转换
+        purchase_date: timestampToISO(assetForm.purchase_date),
+        last_maintenance: timestampToISO(assetForm.last_maintenance),
+        next_maintenance: timestampToISO(assetForm.next_maintenance)
       }
       await assetService.createAsset(createData)
       message.success('设备创建成功')
@@ -2300,8 +2591,35 @@ const editAsset = async (asset: Asset) => {
       warranty_expiry: dateToTimestamp(fullAsset.warranty_expiry),
       groups: fullAsset.groups || [],
       notes: fullAsset.notes,
-      tags: fullAsset.tags || []
+      tags: fullAsset.tags || [],
+      // 32.5：扩展字段回填（null→空串，NDatePicker 用时间戳）
+      manufacturer: fullAsset.manufacturer || '',
+      serial_number: fullAsset.serial_number || '',
+      mac_address: fullAsset.mac_address || '',
+      port: fullAsset.port ?? undefined,
+      ssh_key: fullAsset.ssh_key || '',
+      location: fullAsset.location || '',
+      rack_position: fullAsset.rack_position || '',
+      datacenter: fullAsset.datacenter || '',
+      os_version: fullAsset.os_version || '',
+      cpu: fullAsset.cpu || '',
+      memory: fullAsset.memory || '',
+      storage: fullAsset.storage || '',
+      service_name: fullAsset.service_name || '',
+      application: fullAsset.application || '',
+      purpose: fullAsset.purpose || '',
+      purchase_date: dateToTimestamp(fullAsset.purchase_date),
+      last_maintenance: dateToTimestamp(fullAsset.last_maintenance),
+      next_maintenance: dateToTimestamp(fullAsset.next_maintenance)
     })
+    // 任一扩展字段有值 → 折叠区自动展开，避免"数据存在但看不见"
+    const extHasValue = !!(fullAsset.manufacturer || fullAsset.serial_number || fullAsset.mac_address
+      || fullAsset.port || fullAsset.ssh_key || fullAsset.location || fullAsset.rack_position
+      || fullAsset.datacenter || fullAsset.os_version || fullAsset.cpu || fullAsset.memory
+      || fullAsset.storage || fullAsset.service_name || fullAsset.application
+      || fullAsset.purpose || fullAsset.purchase_date || fullAsset.last_maintenance
+      || fullAsset.next_maintenance)
+    assetFormExpanded.value = extHasValue ? ['ext'] : []
     showCreateModal.value = true
   } catch (error: any) {
     message.error('获取资产详情失败')
@@ -2833,8 +3151,33 @@ const copyAsset = async (assetId: number) => {
       network_location: originalAsset.network_location,
       department: originalAsset.department,
       status: 'inactive', // 设置为非活跃状态
-      notes: `复制自资产: ${originalAsset.name}`
+      notes: `复制自资产: ${originalAsset.name}`,
+      // 32.5：扩展字段一并复制（先重置再覆盖，避免脏值）
+      system_version: originalAsset.system_version || '',
+      groups: originalAsset.groups || [],
+      commissioning_date: dateToTimestamp(originalAsset.commissioning_date),
+      warranty_expiry: dateToTimestamp(originalAsset.warranty_expiry),
+      manufacturer: originalAsset.manufacturer || '',
+      serial_number: originalAsset.serial_number || '',
+      mac_address: originalAsset.mac_address || '',
+      port: originalAsset.port ?? undefined,
+      ssh_key: originalAsset.ssh_key || '',
+      location: originalAsset.location || '',
+      rack_position: originalAsset.rack_position || '',
+      datacenter: originalAsset.datacenter || '',
+      os_version: originalAsset.os_version || '',
+      cpu: originalAsset.cpu || '',
+      memory: originalAsset.memory || '',
+      storage: originalAsset.storage || '',
+      service_name: originalAsset.service_name || '',
+      application: originalAsset.application || '',
+      purpose: originalAsset.purpose || '',
+      purchase_date: dateToTimestamp(originalAsset.purchase_date),
+      last_maintenance: dateToTimestamp(originalAsset.last_maintenance),
+      next_maintenance: dateToTimestamp(originalAsset.next_maintenance)
     })
+    // 复制场景扩展字段多半有值 → 展开可见
+    assetFormExpanded.value = ['ext']
     
     // 打开创建模态框
     showCreateModal.value = true
