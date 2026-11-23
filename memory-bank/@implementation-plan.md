@@ -2834,3 +2834,6 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **安全语义变化**（已在代码注释+SKILL.md 标注）：验证码从"只调 MCP"升级为"等价该身份完整 REST 权限"；优点=UI 一键重置即撤销（旧 API_TOKEN 要改 .env+重启），管理员统一码要妥善保管
 - 若生产库曾有 api_client 账号：代码移除后它退化为普通账号（随机密码登不了，无害）；可在 UI 删除
 - **验证**：pytest 53 passed（新增 test_mcp_token_rest_auth.py 9 例：resolve 三口径/REST 统一码全见/个人码隔离+写403/JWT回落/无认证401/旧配置字段移除确认/保留名限制解除）；65-15-6+9=53 对账一致 + 100 路由烟测 + skill py_compile + vite build
+- **32.3 补充（126 实测）**：126 生产库存在历史 api_client 行（阶段二十八建、超管标志）。代码移除后它**不会被 UI 删除**（delete_user 保护超管不可删+前端按钮隐藏），需手动 SQL：
+  `venv\Scripts\python.exe -c "from app.db.database import SessionLocal; from app.models.user import User; db=SessionLocal(); n=db.query(User).filter(User.username=='api_client').delete(); db.commit(); print(n); db.close()"`
+  删后其历史创建条目的 owner/creator_id 成悬空 ID（内容不丢、显示为空、管理员仍可管）。
