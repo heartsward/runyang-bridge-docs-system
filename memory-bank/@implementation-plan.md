@@ -2865,3 +2865,13 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 顺手修基线：详情 4 处 `span="2"` 字符串写法（NDescriptionsItem span 是 number prop → TS2322 ×3）改 `:span="2"`——vue-tsc 归一化对账净 -3 零新增
 - **验证**：vue-tsc 错误数 215→212（修3基线，新增0）；vite build OK；后端无改动（AssetUpdate 原生接受全字段，PUT 走 exclude_unset）
 - **32.5 修正（陈工反馈）**：扩展字段不进列设置/排序（表格横向超宽）——撤回 CONFIGURABLE_COL_KEYS/排序项/colDefsMap 扩展列与 DEFAULT_HIDDEN_COLS，扩展字段只活在表单折叠区+详情扩展tab。旧 localStorage 存档里的扩展列 key 由 columns 组装的存在性过滤自动丢弃，无需迁移。
+- **32.5c**：详情弹窗 tab 顺序按陈工指定调整为 基本信息 → 扩展信息 → 登录凭据。
+
+### 步骤 33 — 每日备份脚本（2026-11-23）
+> 陈工问备份范围后要求落地每日备份。数据四件套互相咬合：yunwei_docs.db（台账/用户/分享/验证码）+ backend/uploads（原件+json边车）+ backend/wiki（md+images+index.db）+ backend/.env（SECRET_KEY，敏感）。
+- scripts/backup_db.py：sqlite3 官方 backup API 热备（无需停后端）+ integrity_check；失败则整轮中止
+- scripts/prune_backups.py：保留策略（14天窗口且保底最近7份）；只认 YYYYMMDD_HHMMSS 快照目录；护栏=根路径不含 backup/备份 关键字直接拒绝
+- scripts/backup_daily.bat：主流程（DB->uploads->wiki->.env->task_status->清理），默认根 D:\rywd-backup（无D盘用C:\），日志自重重定向到 backup.log；robocopy rc>=8 判失败
+- 🔴 坑：bat 内中文注释会被 cmd 按 OEM 码页拆碎（实测报"不是内部或外部命令"）——bat 保持纯 ASCII，中文放 py 文件
+- 定时任务（管理员运行一次）：schtasks /Create /TN "rywd-daily-backup" /TR "...scripts\backup_daily.bat" /SC DAILY /ST 03:10 /RU SYSTEM /RL HIGHEST /F（完整命令见 bat 头注释）
+- 验证：本机端到端跑通（隔离测试根），快照含 db(2.6MB校验ok)+uploads(73M)+wiki(39M)+task_status；本机无 .env 正确 WARN；测试目录已清理
