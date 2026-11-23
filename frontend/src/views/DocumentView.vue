@@ -48,15 +48,8 @@
                   v-for="tag in allTags"
                   :key="tag"
                   size="small"
-                  type="default"
-                  :style="{
-                    cursor: 'pointer',
-                    backgroundColor: selectedTags.includes(tag) ? '#e8f4fd' : '',
-                    borderColor: selectedTags.includes(tag) ? '#409eff' : '',
-                    color: selectedTags.includes(tag) ? '#409eff' : '',
-                    fontWeight: selectedTags.includes(tag) ? 'bold' : 'normal',
-                    transition: 'all 0.3s ease'
-                  }"
+                  :type="tag === '分享' ? 'success' : 'default'"
+                  :style="tagChipStyle(tag)"
                   @click="toggleTagFilter(tag)"
                 >
                   {{ tag }} ({{ getTagCount(tag) }})
@@ -695,6 +688,10 @@ interface PdfConvertItem {
   error_msg?: string | null
 }
 
+// 32.4：虚拟"分享"标签——不入库，由列表注入的 doc.shared 驱动；
+// 固定排在"按标签筛选"最前，点击筛选已分享的文档。
+const SHARE_TAG = '分享'
+
 const allTags = computed(() => {
   const tagCount = new Map<string, number>()
   documents.value.forEach(doc => {
@@ -703,16 +700,23 @@ const allTags = computed(() => {
     }
   })
   // 27.14：按命中数量从多到少排列（并列时按标签名中文序）
-  return Array.from(tagCount.entries())
+  const sorted = Array.from(tagCount.entries())
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'))
     .map(([tag]) => tag)
+    .filter(tag => tag !== SHARE_TAG)  // 用户自建同名标签让位于虚拟分享标签
+  // 有已分享文档时才出现，且固定在最前
+  if (documents.value.some(d => d.shared)) sorted.unshift(SHARE_TAG)
+  return sorted
 })
 
 const tagOptions = computed(() => {
-  return allTags.value.map(tag => ({
-    label: tag,
-    value: tag
-  }))
+  // 32.4：上传/编辑表单可选的真实标签——排除虚拟"分享"标签（它由分享状态驱动，不可手工写入）
+  return allTags.value
+    .filter(tag => tag !== SHARE_TAG)
+    .map(tag => ({
+      label: tag,
+      value: tag
+    }))
 })
 
 // 使用防抖搜索优化性能
@@ -738,11 +742,13 @@ const filteredDocuments = computed(() => {
     )
   }
   
-  // 按标签过滤
+  // 按标签过滤（32.4：虚拟"分享"标签按 doc.shared 匹配，其余按 tags 数组）
   if (selectedTags.value.length > 0) {
     filtered = filtered.filter(doc => {
-      if (!doc.tags || !Array.isArray(doc.tags)) return false
-      return selectedTags.value.every(selectedTag => doc.tags.includes(selectedTag))
+      return selectedTags.value.every(selectedTag => {
+        if (selectedTag === SHARE_TAG) return !!doc.shared
+        return doc.tags && Array.isArray(doc.tags) && doc.tags.includes(selectedTag)
+      })
     })
   }
   
@@ -750,9 +756,34 @@ const filteredDocuments = computed(() => {
 })
 
 const getTagCount = (tag: string) => {
+  if (tag === SHARE_TAG) return documents.value.filter(doc => doc.shared).length  // 32.4
   return documents.value.filter(doc => 
     doc.tags && Array.isArray(doc.tags) && doc.tags.includes(tag)
   ).length
+}
+
+// 32.4：标签筛选 chip 样式——虚拟"分享"标签固定绿色框体（选中时深绿实心反白），
+// 普通标签维持原蓝色选中样式。
+const tagChipStyle = (tag: string) => {
+  const active = selectedTags.value.includes(tag)
+  if (tag === SHARE_TAG) {
+    return {
+      cursor: 'pointer',
+      backgroundColor: active ? '#18a058' : '#e8f7ef',
+      borderColor: '#18a058',
+      color: active ? '#ffffff' : '#18a058',
+      fontWeight: 'bold',
+      transition: 'all 0.3s ease'
+    }
+  }
+  return {
+    cursor: 'pointer',
+    backgroundColor: active ? '#e8f4fd' : '',
+    borderColor: active ? '#409eff' : '',
+    color: active ? '#409eff' : '',
+    fontWeight: active ? 'bold' : 'normal',
+    transition: 'all 0.3s ease'
+  }
 }
 
 const toggleTagFilter = (tag: string) => {
