@@ -32,7 +32,8 @@ class AssetBase(BaseModel):
     
     # 配置信息
     os_version: Optional[str] = Field(None, description="操作系统版本")
-    system_version: Optional[str] = Field(None, description="系统型号及版本")
+    system_version: Optional[str] = Field(None, description="应用版本（原系统型号及版本）")
+    middleware_version: Optional[str] = Field(None, description="中间件版本（32.7新增）")
     cpu: Optional[str] = Field(None, description="CPU信息")
     memory: Optional[str] = Field(None, description="内存信息")
     storage: Optional[str] = Field(None, description="存储信息")
@@ -42,9 +43,15 @@ class AssetBase(BaseModel):
     department: Optional[str] = Field(None, description="所属部门")
     
     # 业务信息
-    service_name: Optional[str] = Field(None, description="服务名称")
-    application: Optional[str] = Field(None, description="应用程序")
+    service_name: Optional[str] = Field(None, description="信息系统名称（原服务名称）")
+    application: Optional[str] = Field(None, description="应用程序（32.7界面移除，列保留）")
     purpose: Optional[str] = Field(None, description="用途说明")
+    
+    # 运维责任（32.7新增）
+    dev_company: Optional[str] = Field(None, description="开发单位")
+    ops_company: Optional[str] = Field(None, description="运维单位")
+    contact_person: Optional[str] = Field(None, description="联系人")
+    contact_phone: Optional[str] = Field(None, description="联系电话")
     
     # 维护信息
     purchase_date: Optional[datetime] = Field(None, description="采购日期")
@@ -121,6 +128,7 @@ class AssetUpdate(BaseModel):
     datacenter: Optional[str] = None
     os_version: Optional[str] = None
     system_version: Optional[str] = None
+    middleware_version: Optional[str] = None  # 32.7
     cpu: Optional[str] = None
     memory: Optional[str] = None
     storage: Optional[str] = None
@@ -129,6 +137,11 @@ class AssetUpdate(BaseModel):
     service_name: Optional[str] = None
     application: Optional[str] = None
     purpose: Optional[str] = None
+    # 32.7 运维责任
+    dev_company: Optional[str] = None
+    ops_company: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_phone: Optional[str] = None
     purchase_date: Optional[datetime] = None
     commissioning_date: Optional[datetime] = None
     warranty_expiry: Optional[datetime] = None

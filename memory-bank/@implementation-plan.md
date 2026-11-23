@@ -2867,6 +2867,17 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **32.5 修正（陈工反馈）**：扩展字段不进列设置/排序（表格横向超宽）——撤回 CONFIGURABLE_COL_KEYS/排序项/colDefsMap 扩展列与 DEFAULT_HIDDEN_COLS，扩展字段只活在表单折叠区+详情扩展tab。旧 localStorage 存档里的扩展列 key 由 columns 组装的存在性过滤自动丢弃，无需迁移。
 - **32.5c**：详情弹窗 tab 顺序按陈工指定调整为 基本信息 → 扩展信息 → 登录凭据。
 
+### 步骤 32.7 — 资产表单三段重排 + 运维责任字段 + 搜索全覆盖（2026-11-24）
+> 陈工两轮样式确认（mockup 小样）后的定稿。
+- **数据库**：assets 新增 5 列（migration `add_asset_ops_fields.py`，幂等）：middleware_version / dev_company / ops_company / contact_person / contact_phone。改名仅换标签不换列：service_name→信息系统名称、system_version→应用版本；application 界面移除、列保留（数据不删）。
+- **表单**：主表单去掉设备型号、系统型号及版本；"更多信息"折叠区重排三段——硬件信息(蓝)：设备型号/制造商/序列号/MAC/管理端口/CPU/内存/存储/物理位置/机柜位置/数据中心/采购日期；软件信息(绿)：操作系统/信息系统名称/应用版本/中间件版本/用途说明/SSH密钥；运维责任(橙)：开发单位/运维单位/联系人/联系电话/上次维护/下次维护。extHasValue 判断补新列+型号+应用版本。
+- **列设置**：去掉 device_model/system_version 两列（loadColOrder 合并逻辑自动丢弃旧存档失效 key）。
+- **详情弹窗**：基本信息去掉型号/版本两行；扩展信息 tab 按同样三段重排。
+- **导出**：前端 exportFieldDefs 补 port/数据中心/中间件版本/运维4列并改标签；后端 field_mapping 同步（系统型号及版本→应用版本、服务名称→信息系统名称、+5新列）。
+- **搜索**：_build_asset_search_filter 从 6 列扩到 22 列（标识凭据/位置/软件/运维责任全覆盖）；词间 AND、字段间 OR 语义不变。
+- **样式**：.ext-section-title（全局 style 块，弹窗 teleport body；左色条+分组色 hw蓝/sw绿/ops橙）。
+- **验证**：pytest 72 passed（新增 test_asset_fields_327.py 11 例：新列PUT回读、9关键词搜索命中、多词AND语义正反例）；vue-tsc 归一化 215→212 零新增（旧错签名"37 more"→"42 more"属文本漂移）；vite build OK。126 部署：git pull → 跑 add_asset_ops_fields.py → 重启后端 → npm run build。
+
 ### 步骤 33 — 每日备份脚本（2026-11-23）
 > 陈工问备份范围后要求落地每日备份。数据四件套互相咬合：yunwei_docs.db（台账/用户/分享/验证码）+ backend/uploads（原件+json边车）+ backend/wiki（md+images+index.db）+ backend/.env（SECRET_KEY，敏感）。
 - scripts/backup_db.py：sqlite3 官方 backup API 热备（无需停后端）+ integrity_check；失败则整轮中止

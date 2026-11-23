@@ -67,7 +67,8 @@ class Asset(Base):
     
     # 配置信息
     os_version = Column(String(255), comment="操作系统版本")
-    system_version = Column(String(255), comment="系统型号及版本")
+    system_version = Column(String(255), comment="应用版本(原系统型号及版本,32.7改名)")
+    middleware_version = Column(String(255), comment="中间件版本(32.7新增)")
     cpu = Column(String(255), comment="CPU信息")
     memory = Column(String(255), comment="内存信息")
     storage = Column(String(255), comment="存储信息")
@@ -77,9 +78,15 @@ class Asset(Base):
     department = Column(String(255), comment="所属部门")
     
     # 业务信息
-    service_name = Column(String(255), comment="服务名称")
-    application = Column(String(255), comment="应用程序")
+    service_name = Column(String(255), comment="信息系统名称(原服务名称,32.7改名)")
+    application = Column(String(255), comment="应用程序(32.7界面移除,列保留)")
     purpose = Column(Text, comment="用途说明")
+    
+    # 运维责任(32.7新增)
+    dev_company = Column(String(255), comment="开发单位")
+    ops_company = Column(String(255), comment="运维单位")
+    contact_person = Column(String(255), comment="联系人")
+    contact_phone = Column(String(100), comment="联系电话")
     
     # 维护信息
     purchase_date = Column(DateTime, comment="采购日期")

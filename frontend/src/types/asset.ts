@@ -51,7 +51,8 @@ export interface Asset {
   
   // 配置信息
   os_version?: string
-  system_version?: string
+  system_version?: string  // 32.7：界面显示为「应用版本」（原系统型号及版本）
+  middleware_version?: string  // 32.7 新增：中间件版本
   cpu?: string
   memory?: string
   storage?: string
@@ -61,9 +62,15 @@ export interface Asset {
   department?: string
   
   // 业务信息
-  service_name?: string
-  application?: string
+  service_name?: string  // 32.7：界面显示为「信息系统名称」（原服务名称）
+  application?: string   // 32.7：界面移除，数据列保留
   purpose?: string
+  
+  // 运维责任（32.7 新增）
+  dev_company?: string
+  ops_company?: string
+  contact_person?: string
+  contact_phone?: string
   
   // 维护信息
   purchase_date?: string
@@ -115,6 +122,7 @@ export interface AssetCreate {
   datacenter?: string
   os_version?: string
   system_version?: string
+  middleware_version?: string  // 32.7
   cpu?: string
   memory?: string
   storage?: string
@@ -123,6 +131,11 @@ export interface AssetCreate {
   service_name?: string
   application?: string
   purpose?: string
+  // 32.7 运维责任
+  dev_company?: string
+  ops_company?: string
+  contact_person?: string
+  contact_phone?: string
   purchase_date?: string
   commissioning_date?: string
   warranty_expiry?: string
@@ -155,6 +168,7 @@ export interface AssetUpdate {
   datacenter?: string
   os_version?: string
   system_version?: string
+  middleware_version?: string  // 32.7
   cpu?: string
   memory?: string
   storage?: string
@@ -163,6 +177,11 @@ export interface AssetUpdate {
   service_name?: string
   application?: string
   purpose?: string
+  // 32.7 运维责任
+  dev_company?: string
+  ops_company?: string
+  contact_person?: string
+  contact_phone?: string
   purchase_date?: string | null   // 32.5：null=显式清空该日期
   commissioning_date?: string | null
   warranty_expiry?: string | null

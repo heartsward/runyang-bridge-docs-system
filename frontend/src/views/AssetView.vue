@@ -281,16 +281,6 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="设备型号" path="device_model">
-              <n-input v-model:value="assetForm.device_model" placeholder="请输入设备型号" />
-            </n-form-item>
-          </n-grid-item>
-          <n-grid-item>
-            <n-form-item label="系统型号及版本" path="system_version">
-              <n-input v-model:value="assetForm.system_version" placeholder="如 V6.0.0.1.2.B090" />
-            </n-form-item>
-          </n-grid-item>
-          <n-grid-item>
             <n-form-item label="所处网络" path="network_location">
               <n-select v-model:value="assetForm.network_location" :options="networkLocationOptions" placeholder="请选择所处网络" />
             </n-form-item>
@@ -345,10 +335,17 @@
           </n-grid-item>
         </n-grid>
 
-        <!-- 32.5：模型全字段补全——平时收起不影响主流程，展开可补齐台账细项 -->
+        <!-- 32.7：更多信息分三段（硬件 / 软件 / 运维责任）；设备型号、应用版本从主表单移入 -->
         <n-collapse :default-expanded-names="assetFormExpanded" style="margin: 4px 0 12px;">
-          <n-collapse-item title="更多信息（选填：位置 / 硬件 / 业务 / 维护 / 凭据）" name="ext">
+          <n-collapse-item title="更多信息（选填）" name="ext">
+            <!-- ① 硬件信息 -->
+            <div class="ext-section-title ext-hw">硬件信息</div>
             <n-grid cols="1 s:2" responsive="screen" :x-gap="16">
+              <n-grid-item>
+                <n-form-item label="设备型号" path="device_model">
+                  <n-input v-model:value="assetForm.device_model" placeholder="请输入设备型号" />
+                </n-form-item>
+              </n-grid-item>
               <n-grid-item>
                 <n-form-item label="制造商" path="manufacturer">
                   <n-input v-model:value="assetForm.manufacturer" placeholder="如 华为 / 华三 / 思科" />
@@ -365,28 +362,8 @@
                 </n-form-item>
               </n-grid-item>
               <n-grid-item>
-                <n-form-item label="端口" path="port">
+                <n-form-item label="管理端口" path="port">
                   <n-input-number v-model:value="assetForm.port" placeholder="管理端口" :min="1" :max="65535" style="width: 100%" />
-                </n-form-item>
-              </n-grid-item>
-              <n-grid-item>
-                <n-form-item label="物理位置" path="location">
-                  <n-input v-model:value="assetForm.location" placeholder="如 机电房一楼机柜区" />
-                </n-form-item>
-              </n-grid-item>
-              <n-grid-item>
-                <n-form-item label="机柜位置" path="rack_position">
-                  <n-input v-model:value="assetForm.rack_position" placeholder="如 A02柜-U12" />
-                </n-form-item>
-              </n-grid-item>
-              <n-grid-item>
-                <n-form-item label="数据中心" path="datacenter">
-                  <n-input v-model:value="assetForm.datacenter" placeholder="所在机房/数据中心" />
-                </n-form-item>
-              </n-grid-item>
-              <n-grid-item>
-                <n-form-item label="操作系统" path="os_version">
-                  <n-input v-model:value="assetForm.os_version" placeholder="如 VRP V200R010 / CentOS 7.9" />
                 </n-form-item>
               </n-grid-item>
               <n-grid-item>
@@ -405,13 +382,48 @@
                 </n-form-item>
               </n-grid-item>
               <n-grid-item>
-                <n-form-item label="服务名称" path="service_name">
-                  <n-input v-model:value="assetForm.service_name" placeholder="承载的服务" />
+                <n-form-item label="物理位置" path="location">
+                  <n-input v-model:value="assetForm.location" placeholder="如 机电房一楼机柜区" />
                 </n-form-item>
               </n-grid-item>
               <n-grid-item>
-                <n-form-item label="应用程序" path="application">
-                  <n-input v-model:value="assetForm.application" placeholder="运行的应用" />
+                <n-form-item label="机柜位置" path="rack_position">
+                  <n-input v-model:value="assetForm.rack_position" placeholder="如 A02柜-U12" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="数据中心" path="datacenter">
+                  <n-input v-model:value="assetForm.datacenter" placeholder="所在机房/数据中心" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="采购日期" path="purchase_date">
+                  <n-date-picker v-model:value="assetForm.purchase_date" type="date" clearable style="width: 100%" />
+                </n-form-item>
+              </n-grid-item>
+            </n-grid>
+
+            <!-- ② 软件信息 -->
+            <div class="ext-section-title ext-sw">软件信息</div>
+            <n-grid cols="1 s:2" responsive="screen" :x-gap="16">
+              <n-grid-item>
+                <n-form-item label="操作系统" path="os_version">
+                  <n-input v-model:value="assetForm.os_version" placeholder="如 VRP V200R010 / CentOS 7.9" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="信息系统名称" path="service_name">
+                  <n-input v-model:value="assetForm.service_name" placeholder="该设备承载的信息系统名称" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="应用版本" path="system_version">
+                  <n-input v-model:value="assetForm.system_version" placeholder="如 V6.0.0.1.2.B090" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="中间件版本" path="middleware_version">
+                  <n-input v-model:value="assetForm.middleware_version" placeholder="如 Tomcat 9.0.85 / Nginx 1.24" />
                 </n-form-item>
               </n-grid-item>
               <n-grid-item>
@@ -420,8 +432,33 @@
                 </n-form-item>
               </n-grid-item>
               <n-grid-item>
-                <n-form-item label="采购日期" path="purchase_date">
-                  <n-date-picker v-model:value="assetForm.purchase_date" type="date" clearable style="width: 100%" />
+                <n-form-item label="SSH密钥" path="ssh_key">
+                  <n-input v-model:value="assetForm.ssh_key" type="textarea" :rows="2" placeholder="私钥指纹或备注（勿存私钥原文）" />
+                </n-form-item>
+              </n-grid-item>
+            </n-grid>
+
+            <!-- ③ 运维责任 -->
+            <div class="ext-section-title ext-ops">运维责任</div>
+            <n-grid cols="1 s:2" responsive="screen" :x-gap="16">
+              <n-grid-item>
+                <n-form-item label="开发单位" path="dev_company">
+                  <n-input v-model:value="assetForm.dev_company" placeholder="系统开发厂商" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="运维单位" path="ops_company">
+                  <n-input v-model:value="assetForm.ops_company" placeholder="运维责任单位" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="联系人" path="contact_person">
+                  <n-input v-model:value="assetForm.contact_person" placeholder="对接联系人" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item label="联系电话" path="contact_phone">
+                  <n-input v-model:value="assetForm.contact_phone" placeholder="座机 / 手机" />
                 </n-form-item>
               </n-grid-item>
               <n-grid-item>
@@ -432,11 +469,6 @@
               <n-grid-item>
                 <n-form-item label="下次维护" path="next_maintenance">
                   <n-date-picker v-model:value="assetForm.next_maintenance" type="date" clearable style="width: 100%" />
-                </n-form-item>
-              </n-grid-item>
-              <n-grid-item>
-                <n-form-item label="SSH密钥" path="ssh_key">
-                  <n-input v-model:value="assetForm.ssh_key" type="textarea" :rows="2" placeholder="私钥指纹或备注（勿存私钥原文）" />
                 </n-form-item>
               </n-grid-item>
             </n-grid>
@@ -770,12 +802,7 @@
                   <n-text v-if="viewingAsset.hostname" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.hostname }}</n-text>
                   <n-text depth="3" v-else>未设置</n-text>
                 </n-descriptions-item>
-                <n-descriptions-item label="设备型号">
-                  {{ viewingAsset.device_model || '未设置' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="系统型号及版本">
-                  {{ viewingAsset.system_version || '未设置' }}
-                </n-descriptions-item>
+                <!-- 32.7：设备型号 / 系统型号及版本(应用版本) 移至「扩展信息」tab -->
                 <n-descriptions-item label="所处网络">
                   <n-tag v-if="viewingAsset.network_location" :type="assetService.getNetworkLocationColor(viewingAsset.network_location)" size="small">
                     {{ getNetworkLocationLabel(viewingAsset.network_location) }}
@@ -831,43 +858,67 @@
 
             <!-- 32.5：扩展信息标签页（模型补全字段完整展示）——第二列（陈工指定顺序） -->
             <n-tab-pane name="extended" tab="扩展信息">
-              <n-descriptions bordered :column="2">
-                <n-descriptions-item label="制造商">{{ viewingAsset.manufacturer || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="序列号">{{ viewingAsset.serial_number || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="MAC地址">
-                  <n-text v-if="viewingAsset.mac_address" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.mac_address }}</n-text>
-                  <n-text depth="3" v-else>未设置</n-text>
-                </n-descriptions-item>
-                <n-descriptions-item label="管理端口">
-                  <n-text v-if="viewingAsset.port" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.port }}</n-text>
-                  <n-text depth="3" v-else>未设置</n-text>
-                </n-descriptions-item>
-                <n-descriptions-item label="物理位置">{{ viewingAsset.location || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="机柜位置">{{ viewingAsset.rack_position || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="数据中心">{{ viewingAsset.datacenter || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="操作系统">{{ viewingAsset.os_version || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="CPU">{{ viewingAsset.cpu || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="内存">{{ viewingAsset.memory || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="存储">{{ viewingAsset.storage || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="服务名称">{{ viewingAsset.service_name || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="应用程序">{{ viewingAsset.application || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="用途说明" :span="2">{{ viewingAsset.purpose || '未设置' }}</n-descriptions-item>
-                <n-descriptions-item label="采购日期">
-                  <span v-if="viewingAsset.purchase_date">{{ formatDate(viewingAsset.purchase_date) }}</span>
-                  <n-text depth="3" v-else>未设置</n-text>
-                </n-descriptions-item>
-                <n-descriptions-item label="上次维护">
-                  <span v-if="viewingAsset.last_maintenance">{{ formatDate(viewingAsset.last_maintenance) }}</span>
-                  <n-text depth="3" v-else>未设置</n-text>
-                </n-descriptions-item>
-                <n-descriptions-item label="下次维护">
-                  <span v-if="viewingAsset.next_maintenance">{{ formatDate(viewingAsset.next_maintenance) }}</span>
-                  <n-text depth="3" v-else>未设置</n-text>
-                </n-descriptions-item>
-                <n-descriptions-item label="数据来源">
-                  {{ viewingAsset.source_file || (viewingAsset.source_document_id ? `文档#${viewingAsset.source_document_id}` : '手工录入') }}
-                </n-descriptions-item>
-              </n-descriptions>
+              <!-- 32.7：按 硬件信息 / 软件信息 / 运维责任 三段重排 -->
+              <n-space vertical size="medium">
+                <div>
+                  <div class="ext-section-title ext-hw">硬件信息</div>
+                  <n-descriptions bordered :column="2">
+                    <n-descriptions-item label="设备型号">{{ viewingAsset.device_model || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="制造商">{{ viewingAsset.manufacturer || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="序列号">{{ viewingAsset.serial_number || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="MAC地址">
+                      <n-text v-if="viewingAsset.mac_address" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.mac_address }}</n-text>
+                      <n-text depth="3" v-else>未设置</n-text>
+                    </n-descriptions-item>
+                    <n-descriptions-item label="管理端口">
+                      <n-text v-if="viewingAsset.port" style="font-family: Consolas, Menlo, monospace;">{{ viewingAsset.port }}</n-text>
+                      <n-text depth="3" v-else>未设置</n-text>
+                    </n-descriptions-item>
+                    <n-descriptions-item label="CPU">{{ viewingAsset.cpu || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="内存">{{ viewingAsset.memory || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="存储">{{ viewingAsset.storage || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="物理位置">{{ viewingAsset.location || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="机柜位置">{{ viewingAsset.rack_position || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="数据中心">{{ viewingAsset.datacenter || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="采购日期">
+                      <span v-if="viewingAsset.purchase_date">{{ formatDate(viewingAsset.purchase_date) }}</span>
+                      <n-text depth="3" v-else>未设置</n-text>
+                    </n-descriptions-item>
+                  </n-descriptions>
+                </div>
+
+                <div>
+                  <div class="ext-section-title ext-sw">软件信息</div>
+                  <n-descriptions bordered :column="2">
+                    <n-descriptions-item label="操作系统">{{ viewingAsset.os_version || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="信息系统名称">{{ viewingAsset.service_name || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="应用版本">{{ viewingAsset.system_version || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="中间件版本">{{ viewingAsset.middleware_version || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="用途说明" :span="2">{{ viewingAsset.purpose || '未设置' }}</n-descriptions-item>
+                  </n-descriptions>
+                </div>
+
+                <div>
+                  <div class="ext-section-title ext-ops">运维责任</div>
+                  <n-descriptions bordered :column="2">
+                    <n-descriptions-item label="开发单位">{{ viewingAsset.dev_company || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="运维单位">{{ viewingAsset.ops_company || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="联系人">{{ viewingAsset.contact_person || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="联系电话">{{ viewingAsset.contact_phone || '未设置' }}</n-descriptions-item>
+                    <n-descriptions-item label="上次维护">
+                      <span v-if="viewingAsset.last_maintenance">{{ formatDate(viewingAsset.last_maintenance) }}</span>
+                      <n-text depth="3" v-else>未设置</n-text>
+                    </n-descriptions-item>
+                    <n-descriptions-item label="下次维护">
+                      <span v-if="viewingAsset.next_maintenance">{{ formatDate(viewingAsset.next_maintenance) }}</span>
+                      <n-text depth="3" v-else>未设置</n-text>
+                    </n-descriptions-item>
+                    <n-descriptions-item label="数据来源" :span="2">
+                      {{ viewingAsset.source_file || (viewingAsset.source_document_id ? `文档#${viewingAsset.source_document_id}` : '手工录入') }}
+                    </n-descriptions-item>
+                  </n-descriptions>
+                </div>
+              </n-space>
             </n-tab-pane>
 
             <!-- 登录凭据标签页——第三列（陈工指定顺序） -->
@@ -1339,11 +1390,17 @@ const assetForm = reactive<AssetFormModel>({
   memory: '',
   storage: '',
   service_name: '',
-  application: '',
+  application: '',  // 32.7：界面不再渲染输入项，保留字段往返旧数据（列不删）
   purpose: '',
   purchase_date: null as number | null,
   last_maintenance: null as number | null,
-  next_maintenance: null as number | null
+  next_maintenance: null as number | null,
+  // 32.7 新增：中间件版本 + 运维责任四件套
+  middleware_version: '',
+  dev_company: '',
+  ops_company: '',
+  contact_person: '',
+  contact_phone: ''
 })
 
 const extractForm = reactive({
@@ -1803,10 +1860,9 @@ const colWidth = (key: string): number => savedColWidths.value[key] ?? defaultCo
 
 // ============ 30.2：列显隐 + 排序配置（localStorage 持久化） ============
 // 可配置列（selection/actions 固定不参与）
-// 32.5：「更多信息」扩展字段不进列设置/排序（陈工：表格会横向超宽）——
-// 它们只在添加/编辑表单和详情「扩展信息」tab 里维护/查看
+// 32.7：设备型号、系统型号及版本(应用版本)移出表格（陈工：收进"更多信息"，列设置去掉）
 const CONFIGURABLE_COL_KEYS = [
-  'name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'system_version',
+  'name', 'asset_type', 'ip_address', 'hostname',
   'network_location', 'department', 'groups', 'commissioning_date', 'warranty_expiry', 'status',
 ] as const
 const COL_ORDER_KEY = 'runyang-asset-col-order'
@@ -1926,25 +1982,7 @@ const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[n
       ? h('span', { style: { fontFamily: 'Consolas, Menlo, monospace', fontSize: '13px' } }, row.hostname)
       : h('span', { style: { color: '#999' } }, '—')
   },
-  device_model: {
-    title: '设备型号',
-    key: 'device_model',
-    width: colWidth('device_model'),
-    minWidth: 80,
-    resizable: true,
-    ellipsis: { tooltip: true }
-  },
-  system_version: {
-    title: '系统型号及版本',
-    key: 'system_version',
-    width: colWidth('system_version'),
-    minWidth: 90,
-    resizable: true,
-    ellipsis: { tooltip: true },
-    render: (row) => row.system_version
-      ? h('span', {}, row.system_version)
-      : h('span', { style: { color: '#999' } }, '—')
-  },
+  // 32.7：设备型号 / 系统型号及版本(应用版本) 移出表格列（收进"更多信息"折叠区与详情）
   network_location: {
     title: '所处网络',
     key: 'network_location',
@@ -2394,7 +2432,13 @@ const resetForm = () => {
     purpose: '',
     purchase_date: null,
     last_maintenance: null,
-    next_maintenance: null
+    next_maintenance: null,
+    // 32.7 新增字段复位
+    middleware_version: '',
+    dev_company: '',
+    ops_company: '',
+    contact_person: '',
+    contact_phone: ''
   })
   assetFormExpanded.value = []
   editingAsset.value = null
@@ -2457,6 +2501,12 @@ const handleSubmit = async () => {
         service_name: assetForm.service_name || '',
         application: assetForm.application || '',
         purpose: assetForm.purpose || '',
+        // 32.7：中间件版本 + 运维责任
+        middleware_version: assetForm.middleware_version || '',
+        dev_company: assetForm.dev_company || '',
+        ops_company: assetForm.ops_company || '',
+        contact_person: assetForm.contact_person || '',
+        contact_phone: assetForm.contact_phone || '',
         purchase_date: timestampToISO(assetForm.purchase_date) ?? null,
         last_maintenance: timestampToISO(assetForm.last_maintenance) ?? null,
         next_maintenance: timestampToISO(assetForm.next_maintenance) ?? null
@@ -2533,7 +2583,13 @@ const editAsset = async (asset: Asset) => {
       purpose: fullAsset.purpose || '',
       purchase_date: dateToTimestamp(fullAsset.purchase_date),
       last_maintenance: dateToTimestamp(fullAsset.last_maintenance),
-      next_maintenance: dateToTimestamp(fullAsset.next_maintenance)
+      next_maintenance: dateToTimestamp(fullAsset.next_maintenance),
+      // 32.7：新列回填
+      middleware_version: fullAsset.middleware_version || '',
+      dev_company: fullAsset.dev_company || '',
+      ops_company: fullAsset.ops_company || '',
+      contact_person: fullAsset.contact_person || '',
+      contact_phone: fullAsset.contact_phone || ''
     })
     // 任一扩展字段有值 → 折叠区自动展开，避免"数据存在但看不见"
     const extHasValue = !!(fullAsset.manufacturer || fullAsset.serial_number || fullAsset.mac_address
@@ -2541,7 +2597,9 @@ const editAsset = async (asset: Asset) => {
       || fullAsset.datacenter || fullAsset.os_version || fullAsset.cpu || fullAsset.memory
       || fullAsset.storage || fullAsset.service_name || fullAsset.application
       || fullAsset.purpose || fullAsset.purchase_date || fullAsset.last_maintenance
-      || fullAsset.next_maintenance)
+      || fullAsset.next_maintenance || fullAsset.middleware_version || fullAsset.dev_company
+      || fullAsset.ops_company || fullAsset.contact_person || fullAsset.contact_phone
+      || fullAsset.device_model || fullAsset.system_version)  // 32.7：型号/应用版本移入折叠区，也算扩展字段
     assetFormExpanded.value = extHasValue ? ['ext'] : []
     showCreateModal.value = true
   } catch (error: any) {
@@ -3097,7 +3155,13 @@ const copyAsset = async (assetId: number) => {
       purpose: originalAsset.purpose || '',
       purchase_date: dateToTimestamp(originalAsset.purchase_date),
       last_maintenance: dateToTimestamp(originalAsset.last_maintenance),
-      next_maintenance: dateToTimestamp(originalAsset.next_maintenance)
+      next_maintenance: dateToTimestamp(originalAsset.next_maintenance),
+      // 32.7：新列一并复制
+      middleware_version: originalAsset.middleware_version || '',
+      dev_company: originalAsset.dev_company || '',
+      ops_company: originalAsset.ops_company || '',
+      contact_person: originalAsset.contact_person || '',
+      contact_phone: originalAsset.contact_phone || ''
     })
     // 复制场景扩展字段多半有值 → 展开可见
     assetFormExpanded.value = ['ext']
@@ -3398,7 +3462,7 @@ const exportFieldDefs: Array<{ key: string; label: string }> = [
   { key: 'username', label: '用户名' },
   { key: 'password', label: '密码' },
   { key: 'device_model', label: '设备型号' },
-  { key: 'system_version', label: '系统型号及版本' },
+  { key: 'system_version', label: '应用版本' },  // 32.7：原"系统型号及版本"
   { key: 'network_location', label: '所处网络' },
   { key: 'department', label: '所属部门' },
   { key: 'groups', label: '分组' },
@@ -3408,13 +3472,21 @@ const exportFieldDefs: Array<{ key: string; label: string }> = [
   { key: 'manufacturer', label: '制造商' },
   { key: 'serial_number', label: '序列号' },
   { key: 'mac_address', label: 'MAC地址' },
+  { key: 'port', label: '管理端口' },  // 32.7：补齐表单已有字段
   { key: 'location', label: '物理位置' },
   { key: 'rack_position', label: '机柜位置' },
+  { key: 'datacenter', label: '数据中心' },
   { key: 'os_version', label: '操作系统' },
+  { key: 'middleware_version', label: '中间件版本' },  // 32.7 新增列
+  { key: 'service_name', label: '信息系统名称' },  // 32.7：原"服务名称"
+  { key: 'dev_company', label: '开发单位' },      // 32.7 新增列
+  { key: 'ops_company', label: '运维单位' },      // 32.7 新增列
+  { key: 'contact_person', label: '联系人' },      // 32.7 新增列
+  { key: 'contact_phone', label: '联系电话' },    // 32.7 新增列
+  { key: 'purpose', label: '用途说明' },
   { key: 'purchase_date', label: '采购日期' },
   { key: 'last_maintenance', label: '上次维护时间' },
   { key: 'next_maintenance', label: '下次维护时间' },
-  { key: 'purpose', label: '用途说明' },
   { key: 'notes', label: '备注' },
   { key: 'created_at', label: '创建时间' },
   { key: 'updated_at', label: '更新时间' }
@@ -3462,6 +3534,19 @@ onMounted(async () => {
 </style>
 
 <style>
+/* 32.7：更多信息三段小节标题——弹窗 teleport 到 body，用全局块（同 30.2 列设置套路） */
+.ext-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  padding-left: 8px;
+  border-left: 3px solid currentColor;
+  line-height: 1.4;
+}
+.ext-section-title.ext-hw { color: #2080f0; }
+.ext-section-title.ext-sw { color: #18a058; margin-top: 14px; }
+.ext-section-title.ext-ops { color: #f0a020; margin-top: 14px; }
+
 /* 30.2：列设置面板——NPopover 内容 teleport 到 body，scoped 样式不生效，用全局块 */
 .col-settings-title {
   font-size: 12px;

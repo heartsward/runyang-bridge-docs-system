@@ -91,6 +91,8 @@ def _build_asset_search_filter(search: str):
         return None
 
     def term_filter(t: str):
+        # 32.7：搜索覆盖全部台账文本列（含扩展字段与新列）——
+        # 多关键词仍词间 AND、字段间 OR
         return or_(
             AssetModel.name.contains(t),
             AssetModel.ip_address.contains(t),
@@ -98,6 +100,26 @@ def _build_asset_search_filter(search: str):
             AssetModel.device_model.contains(t),
             AssetModel.department.contains(t),
             AssetModel.notes.contains(t),
+            # —— 32.7 扩充：标识与凭据
+            AssetModel.manufacturer.contains(t),
+            AssetModel.serial_number.contains(t),
+            AssetModel.mac_address.contains(t),
+            AssetModel.username.contains(t),
+            # —— 位置
+            AssetModel.location.contains(t),
+            AssetModel.rack_position.contains(t),
+            AssetModel.datacenter.contains(t),
+            # —— 软件
+            AssetModel.os_version.contains(t),
+            AssetModel.system_version.contains(t),
+            AssetModel.middleware_version.contains(t),
+            AssetModel.service_name.contains(t),
+            AssetModel.purpose.contains(t),
+            # —— 运维责任
+            AssetModel.dev_company.contains(t),
+            AssetModel.ops_company.contains(t),
+            AssetModel.contact_person.contains(t),
+            AssetModel.contact_phone.contains(t),
         )
 
     if len(terms) == 1:
@@ -1069,7 +1091,9 @@ async def export_assets(
 
             "os_version": "操作系统",
 
-            "system_version": "系统型号及版本",
+            "system_version": "应用版本",  # 32.7：原"系统型号及版本"
+
+            "middleware_version": "中间件版本",  # 32.7 新增
 
             "cpu": "CPU信息",
 
@@ -1081,11 +1105,19 @@ async def export_assets(
 
             "department": "所属部门",
 
-            "service_name": "服务名称",
+            "service_name": "信息系统名称",  # 32.7：原"服务名称"
 
             "application": "应用程序",
 
             "purpose": "用途说明",
+
+            "dev_company": "开发单位",  # 32.7 新增
+
+            "ops_company": "运维单位",  # 32.7 新增
+
+            "contact_person": "联系人",  # 32.7 新增
+
+            "contact_phone": "联系电话",  # 32.7 新增
 
             "purchase_date": "采购日期",
 
