@@ -1690,13 +1690,7 @@ const sortByOptions = computed(() => [
   { label: 'IP地址', value: 'ip_address' },
   { label: '状态', value: 'status' },
   { label: '启用日期', value: 'commissioning_date' },
-  { label: '维保到期', value: 'warranty_expiry' },
-  // 32.5：补全字段里的可排序项（日期类后端已支持空值排最后）
-  { label: '采购日期', value: 'purchase_date' },
-  { label: '上次维护', value: 'last_maintenance' },
-  { label: '下次维护', value: 'next_maintenance' },
-  { label: '制造商', value: 'manufacturer' },
-  { label: '序列号', value: 'serial_number' }
+  { label: '维保到期', value: 'warranty_expiry' }
 ])
 
 // 排序顺序选项
@@ -1767,11 +1761,6 @@ const defaultColWidths: Record<string, number> = {
   device_model: 120, system_version: 140, network_location: 100,
   department: 100, groups: 160, commissioning_date: 110,
   warranty_expiry: 120, status: 80, actions: 150,
-  // 32.5：扩展列默认宽度（默认隐藏，用户在列设置里打开后生效）
-  manufacturer: 110, serial_number: 140, mac_address: 140, port: 80,
-  location: 140, rack_position: 110, datacenter: 110, os_version: 140,
-  cpu: 100, memory: 90, storage: 120, service_name: 120, application: 120,
-  purpose: 150, purchase_date: 110, last_maintenance: 110, next_maintenance: 110,
 }
 const loadSavedColWidths = (): Record<string, number> => {
   try {
@@ -1814,20 +1803,12 @@ const colWidth = (key: string): number => savedColWidths.value[key] ?? defaultCo
 
 // ============ 30.2：列显隐 + 排序配置（localStorage 持久化） ============
 // 可配置列（selection/actions 固定不参与）
+// 32.5：「更多信息」扩展字段不进列设置/排序（陈工：表格会横向超宽）——
+// 它们只在添加/编辑表单和详情「扩展信息」tab 里维护/查看
 const CONFIGURABLE_COL_KEYS = [
   'name', 'asset_type', 'ip_address', 'hostname', 'device_model', 'system_version',
   'network_location', 'department', 'groups', 'commissioning_date', 'warranty_expiry', 'status',
-  // 32.5：模型补全字段进列设置（默认隐藏，用时在"列设置"里打开）
-  'manufacturer', 'serial_number', 'mac_address', 'port', 'location', 'rack_position',
-  'datacenter', 'os_version', 'cpu', 'memory', 'storage', 'service_name', 'application',
-  'purpose', 'purchase_date', 'last_maintenance', 'next_maintenance',
 ] as const
-// 32.5：扩展列首次无存档时默认隐藏（保持表格原有紧凑观感）
-const DEFAULT_HIDDEN_COLS = [
-  'manufacturer', 'serial_number', 'mac_address', 'port', 'location', 'rack_position',
-  'datacenter', 'os_version', 'cpu', 'memory', 'storage', 'service_name', 'application',
-  'purpose', 'purchase_date', 'last_maintenance', 'next_maintenance',
-]
 const COL_ORDER_KEY = 'runyang-asset-col-order'
 const COL_HIDDEN_KEY = 'runyang-asset-col-hidden'
 
@@ -1850,11 +1831,11 @@ const loadColOrder = (): string[] => {
 const loadHiddenCols = (): string[] => {
   try {
     const raw = localStorage.getItem(COL_HIDDEN_KEY)
-    if (!raw) return [...DEFAULT_HIDDEN_COLS]  // 32.5：扩展列默认隐藏
+    if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed.map(String) : []
   } catch {
-    return [...DEFAULT_HIDDEN_COLS]
+    return []
   }
 }
 const colOrder = ref<string[]>(loadColOrder())
@@ -1883,7 +1864,7 @@ const moveCol = (key: string, dir: -1 | 1): void => {
 }
 const resetColLayout = (): void => {
   colOrder.value = [...CONFIGURABLE_COL_KEYS]
-  hiddenCols.value = [...DEFAULT_HIDDEN_COLS]  // 32.5：重置后扩展列仍默认隐藏
+  hiddenCols.value = []
   persistColLayout()
   message.success('列布局已重置')
 }
@@ -2047,64 +2028,6 @@ const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[n
       default: () => assetService.getAssetStatusName(row.status)
     })
   },
-  // ===== 32.5：模型补全字段列（列设置里默认隐藏，按需打开） =====
-  ...Object.fromEntries(
-    ([
-      ['manufacturer', '制造商'],
-      ['serial_number', '序列号'],
-      ['mac_address', 'MAC地址'],
-      ['location', '物理位置'],
-      ['rack_position', '机柜位置'],
-      ['datacenter', '数据中心'],
-      ['os_version', '操作系统'],
-      ['cpu', 'CPU'],
-      ['memory', '内存'],
-      ['storage', '存储'],
-      ['service_name', '服务名称'],
-      ['application', '应用程序'],
-      ['purpose', '用途说明'],
-    ] as const).map(([k, t]) => [k, {
-      title: t,
-      key: k,
-      width: colWidth(k),
-      minWidth: 70,
-      resizable: true,
-      ellipsis: { tooltip: true },
-      render: (row: Asset) => {
-        const v = (row as any)[k]
-        return v ? h('span', {}, String(v)) : h('span', { style: { color: '#999' } }, '—')
-      }
-    }])
-  ),
-  port: {
-    title: '端口',
-    key: 'port',
-    width: colWidth('port'),
-    minWidth: 60,
-    resizable: true,
-    render: (row) => row.port
-      ? h('span', { style: { fontFamily: 'Consolas, Menlo, monospace' } }, String(row.port))
-      : h('span', { style: { color: '#999' } }, '—')
-  },
-  ...Object.fromEntries(
-    ([
-      ['purchase_date', '采购日期'],
-      ['last_maintenance', '上次维护'],
-      ['next_maintenance', '下次维护'],
-    ] as const).map(([k, t]) => [k, {
-      title: t,
-      key: k,
-      width: colWidth(k),
-      minWidth: 90,
-      resizable: true,
-      render: (row: Asset) => {
-        const v = (row as any)[k]
-        return v
-          ? h('span', {}, formatDate(v))
-          : h('span', { style: { color: '#999' } }, '未设置')
-      }
-    }])
-  ),
 }))
 
 const colTitle = (key: string): string => {
