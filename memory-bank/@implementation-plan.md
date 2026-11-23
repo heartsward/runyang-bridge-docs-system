@@ -2875,3 +2875,11 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 🔴 坑：bat 内中文注释会被 cmd 按 OEM 码页拆碎（实测报"不是内部或外部命令"）——bat 保持纯 ASCII，中文放 py 文件
 - 定时任务（管理员运行一次）：schtasks /Create /TN "rywd-daily-backup" /TR "...scripts\backup_daily.bat" /SC DAILY /ST 03:10 /RU SYSTEM /RL HIGHEST /F（完整命令见 bat 头注释）
 - 验证：本机端到端跑通（隔离测试根），快照含 db(2.6MB校验ok)+uploads(73M)+wiki(39M)+task_status；本机无 .env 正确 WARN；测试目录已清理
+
+### 步骤 32.6 — 修 PUT /assets/87 500：serial_number 空串撞 UNIQUE（2026-11-24）
+> 陈工改 87 号资产部门报 500。根因：assets.serial_number 列带 UNIQUE 约束（防真实序列号重复），32.5 把扩展字段补进表单后"未填"以前端空串落库；SQLite 允许多个 NULL 但只允许一个 ''，第二条空 serial 即 IntegrityError。此前该列恒为 NULL 所以从未触发。
+- schemas：AssetBase/AssetUpdate 均加 serial_number validator（空串/全空格→None，其余 strip）——覆盖 create/update 两条 API 路径
+- endpoints：create/update 捕获 IntegrityError，serial_number 撞车时给 400"序列号已存在于其他设备"（友好文案，非 500）
+- fix_empty_serial.py：一次性迁移，把存量 serial_number='' 归一为 NULL（幂等、带重复非空体检）；126 上拉代码后需运行一次
+- 确认端点（confirm_single_asset）写库带 if value 守卫、提取器不产生空 serial——空串只可能来自表单/API 路径，schema 层已兜住
+- 验证：新增 test_serial_unique_326.py 3 例（两行空 serial 都 200→NULL；真重复 400 文案；创建空白 serial OK）；全量 61 passed

@@ -71,6 +71,13 @@ class AssetBase(BaseModel):
             return [tag.strip() for tag in v.split(',') if tag.strip()]
         return v
 
+    @validator('serial_number')
+    def empty_serial_to_none(cls, v):
+        # 32.6：serial_number 列有 UNIQUE 约束（防真实序列号重复）。
+        # SQLite 允许多个 NULL 但只允许一个 ''——表单"未填"发空串会在第二条撞
+        # IntegrityError（陈工实测 PUT /assets/87 500）。空串一律归一为 NULL。
+        return v.strip() if isinstance(v, str) and v.strip() else None
+
     @validator('groups', pre=True)
     def parse_groups(cls, v):
         # 兼容三种输入：JSON 字符串（DB 列原值）、逗号分隔串、已是 list
@@ -131,6 +138,11 @@ class AssetUpdate(BaseModel):
     tags: Optional[List[str]] = None
     groups: Optional[List[str]] = None
     confidence_score: Optional[int] = None
+
+    @validator('serial_number')
+    def empty_serial_to_none(cls, v):
+        # 32.6：同 AssetBase——PUT 也走这里，空串归一 NULL，防撞 UNIQUE
+        return v.strip() if isinstance(v, str) and v.strip() else None
 
 
 class Asset(AssetBase):

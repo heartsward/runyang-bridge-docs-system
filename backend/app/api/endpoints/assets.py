@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFi
 from fastapi.responses import StreamingResponse
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError  # 32.6：serial_number UNIQUE 友好处理
 
 from sqlalchemy import func, desc, asc, or_, and_
 
@@ -588,6 +589,18 @@ async def create_asset(
 
         raise
 
+    except IntegrityError as e:
+
+        # 32.6：serial_number UNIQUE——真填了重复序列号时给 400 而非 500
+
+        db.rollback()
+
+        if 'serial_number' in str(e):
+
+            raise HTTPException(status_code=400, detail="序列号已存在于其他设备，请检查后更换")
+
+        raise HTTPException(status_code=500, detail=f"创建资产失败: {str(e)}")
+
     except Exception as e:
 
         db.rollback()
@@ -690,6 +703,18 @@ async def update_asset(
     except HTTPException:
 
         raise
+
+    except IntegrityError as e:
+
+        # 32.6：serial_number UNIQUE——真填了重复序列号时给 400 而非 500
+
+        db.rollback()
+
+        if 'serial_number' in str(e):
+
+            raise HTTPException(status_code=400, detail="序列号已存在于其他设备，请检查后更换")
+
+        raise HTTPException(status_code=500, detail=f"更新资产失败: {str(e)}")
 
     except Exception as e:
 
