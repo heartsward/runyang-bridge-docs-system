@@ -3,6 +3,8 @@
 # ===== 敏感数据和用户数据 =====
 # 数据库文件
 *.db
+*.db.bak*
+*.sqlite
 *.sqlite
 *.sqlite3
 
