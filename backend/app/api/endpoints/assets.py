@@ -14,6 +14,8 @@ import json
 
 import io
 
+import re
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -68,6 +70,34 @@ router = APIRouter()
 
 
 
+# 31.1：资产多词搜索（与智能搜索同语义）——空白切分查询，
+# 每词在可搜索列（名称/IP/主机名/型号/部门/备注）任一命中即可（列间 OR），
+# 词与词之间 AND：所有词都要有命中（允许命中不同字段，如"华为 交换机"
+# ——华为命中型号、交换机命中名称）。单词查询保持原语义。
+_ASSET_TERM_SPLIT_RE = re.compile(r'\s+')
+
+
+def _build_asset_search_filter(search: str):
+    """构建资产搜索 SQLAlchemy 过滤表达式；search 为空返回 None"""
+    terms = [t for t in _ASSET_TERM_SPLIT_RE.split((search or '').strip()) if t]
+    if not terms:
+        return None
+
+    def term_filter(t: str):
+        return or_(
+            AssetModel.name.contains(t),
+            AssetModel.ip_address.contains(t),
+            AssetModel.hostname.contains(t),
+            AssetModel.device_model.contains(t),
+            AssetModel.department.contains(t),
+            AssetModel.notes.contains(t),
+        )
+
+    if len(terms) == 1:
+        return term_filter(terms[0])
+    return and_(*[term_filter(t) for t in terms])
+
+
 @router.get("/", response_model=AssetList)
 
 async def list_assets(
@@ -106,27 +136,15 @@ async def list_assets(
 
         
 
-        # 搜索过滤
+        # 搜索过滤（31.1：多词空格分隔，词间 AND、字段间 OR）
 
         if search:
 
-            search_filter = or_(
+            search_filter = _build_asset_search_filter(search)
 
-                AssetModel.name.contains(search),
+            if search_filter is not None:
 
-                AssetModel.ip_address.contains(search),
-
-                AssetModel.hostname.contains(search),
-
-                AssetModel.device_model.contains(search),
-
-                AssetModel.department.contains(search),
-
-                AssetModel.notes.contains(search)
-
-            )
-
-            query = query.filter(search_filter)
+                query = query.filter(search_filter)
 
         
 
@@ -266,23 +284,11 @@ async def count_assets(
 
         if search:
 
-            search_filter = or_(
+            search_filter = _build_asset_search_filter(search)
 
-                AssetModel.name.contains(search),
+            if search_filter is not None:
 
-                AssetModel.ip_address.contains(search),
-
-                AssetModel.hostname.contains(search),
-
-                AssetModel.device_model.contains(search),
-
-                AssetModel.department.contains(search),
-
-                AssetModel.notes.contains(search)
-
-            )
-
-            query = query.filter(search_filter)
+                query = query.filter(search_filter)
 
         
 

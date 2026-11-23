@@ -2745,3 +2745,13 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **修法**：columns 组装时统一注入 `align: 'center'`（naive-ui 列属性，表头 th + 单元格 td 一起居中）；selection 列、actions 列也居中；分组列 NSpace 是 flex 布局 text-align 无效 → 加 `justify:'center'` + `width:100%`
 - **能改什么**：`frontend/src/views/AssetView.vue`
 - **验证**：vue-tsc 改动相关 0 错误 + vite build 通过
+
+## 阶段三十一：资产搜索多词匹配（2026-11-23）
+
+### 步骤 31.1 — 设备资产搜索支持多词空格分隔（2026-11-23）
+> 陈工需求：资产搜索也像智能搜索一样，多词空格匹配（如"华为 交换机"）
+- **语义**（与智能搜索 29.x 一致）：空白切分；**词间 AND**（每个词都必须命中）、**字段间 OR**（一个词命中名称/IP/主机名/型号/部门/备注任一列即可；不同词允许命中不同列）。单词查询保持原语义不变。
+- **实现**：`assets.py` 新增 `_build_asset_search_filter(search)` 共用函数——list_assets 与 count_assets 两处重复的 or_ 过滤收拢进来（两处过滤条件本来就要求一致，抽函数消除漂移风险）
+- **配套**：前端搜索框 placeholder 改"搜索设备，多词空格分隔（如：华为 交换机）"；suggestions 端点前端未调用、不改动
+- **能改什么**：`backend/app/api/endpoints/assets.py` + `frontend/src/views/AssetView.vue`
+- **验证**：py_compile + import 烟测（91 paths）+ 内存 SQLite 8 组语义用例全对（跨字段 AND、无交集空结果、三词多字段、单词/IP 完整匹配、空串）+ pytest 41 passed + vite build 通过

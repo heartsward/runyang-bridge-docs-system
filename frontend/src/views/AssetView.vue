@@ -3,7 +3,7 @@
     <template #header-actions>
       <n-input
         v-model:value="searchQuery"
-        placeholder="搜索设备..."
+        placeholder="搜索设备，多词空格分隔（如：华为 交换机）"
         style="width: 300px"
         clearable
         @update:value="handleSearch"
