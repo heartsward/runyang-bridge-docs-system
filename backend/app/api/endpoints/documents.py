@@ -105,6 +105,15 @@ def read_documents(
         category_id=category_id, status=status,
         visibility=visibility,
     )
+
+    # 32.4：注入分享状态（列表行加"分享"标签/按钮变色用；一次批量查）
+    from app.core.visibility import shared_counts_map
+    counts = shared_counts_map(db, "document", [d.id for d in documents])
+    for d in documents:
+        cnt = counts.get(d.id, 0)
+        d.shared = cnt > 0
+        d.shared_count = cnt
+
     total_count = crud_document.count(
         db, category_id=category_id, status=status, visibility=visibility
     )

@@ -124,6 +124,8 @@ async def list_assets(
 
     group: Optional[str] = Query(None, description="自定义分组筛选（分组名，JSON数组包含匹配）"),
 
+    share_filter: Optional[str] = Query(None, description="分享状态筛选：shared=已分享 / unshared=未分享（32.4）"),
+
     sort_by: str = Query("created_at", description="排序字段"),
 
     sort_order: str = Query("desc", description="排序顺序 asc/desc"),
@@ -210,6 +212,28 @@ async def list_assets(
 
         
 
+        # 32.4：分享状态筛选（shared=已分享给至少一个用户 / unshared=未分享）
+
+        if share_filter in ("shared", "unshared"):
+
+            from app.models.share import Share
+
+            from sqlalchemy import select as sa_select
+
+            shared_subq = (
+
+                sa_select(Share.item_id)
+
+                .where(Share.item_type == "asset", Share.item_id == AssetModel.id)
+
+                .exists()
+
+            )
+
+            query = query.filter(shared_subq if share_filter == "shared" else ~shared_subq)
+
+        
+
         # 排序
 
         if hasattr(AssetModel, sort_by):
@@ -244,7 +268,21 @@ async def list_assets(
 
         assets = query.offset(skip).limit(limit).all()
 
-        
+
+        # 32.4：注入分享状态（一次 GROUP BY 批量查，不 N+1）
+
+        from app.core.visibility import shared_counts_map
+
+        counts = shared_counts_map(db, "asset", [a.id for a in assets])
+
+        for a in assets:
+
+            cnt = counts.get(a.id, 0)
+
+            a.shared = cnt > 0
+
+            a.shared_count = cnt
+
 
         return AssetList(
 

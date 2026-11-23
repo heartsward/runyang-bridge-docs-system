@@ -133,6 +133,15 @@
             style="width: 150px"
             @update:value="handleSearch"
           />
+          <!-- 32.4：分享状态筛选（管理员视角：已分享/未分享） -->
+          <n-select
+            v-model:value="filters.share_filter"
+            placeholder="分享状态"
+            :options="shareFilterOptions"
+            clearable
+            style="width: 130px"
+            @update:value="handleSearch"
+          />
         </n-space>
         
         <!-- 第二行：排序选项 + 列宽工具 -->
@@ -1129,8 +1138,15 @@ const filters = reactive({
   status: null as AssetStatus | null,
   department: null as string | null,
   network_location: null as string | null,
-  group: null as string | null
+  group: null as string | null,
+  share_filter: null as 'shared' | 'unshared' | null  // 32.4：分享状态筛选
 })
+
+// 32.4：分享状态筛选选项（管理员视角）
+const shareFilterOptions = [
+  { label: '已分享', value: 'shared' },
+  { label: '未分享', value: 'unshared' }
+]
 
 // 排序配置
 const sortConfig = reactive({
@@ -1903,9 +1919,11 @@ const columns = computed<DataTableColumns<Asset>>(() => [
         ...(currentUser.value?.is_superuser ? [
           h(NButton, {
             size: 'small',
+            // 32.4：已分享→绿色（一眼可见），未分享→默认
+            type: row.shared ? 'success' : 'default',
             onClick: () => openShareModal(row)
           }, {
-            default: () => '分享'
+            default: () => row.shared ? `已分享${row.shared_count ? `(${row.shared_count})` : ''}` : '分享'
           })
         ] : [])
       ]
@@ -2107,7 +2125,8 @@ const debouncedSearch = debounce(async (resetPage = true) => {
     const hasFilters = filters.asset_type || filters.status || 
                      filters.department || 
                      filters.network_location ||
-                     filters.group
+                     filters.group ||
+                     filters.share_filter
     
     const query = {
       query: searchQuery.value || '',
@@ -2116,6 +2135,7 @@ const debouncedSearch = debounce(async (resetPage = true) => {
       department: filters.department || undefined,
       network_location: filters.network_location || undefined,
       group: filters.group || undefined,
+      share_filter: filters.share_filter || undefined,
       sort_by: sortConfig.sortBy,
       sort_order: sortConfig.sortOrder,
       page: 1,

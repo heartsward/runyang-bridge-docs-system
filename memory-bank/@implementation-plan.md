@@ -2837,3 +2837,18 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **32.3 补充（126 实测）**：126 生产库存在历史 api_client 行（阶段二十八建、超管标志）。代码移除后它**不会被 UI 删除**（delete_user 保护超管不可删+前端按钮隐藏），需手动 SQL：
   `venv\Scripts\python.exe -c "from app.db.database import SessionLocal; from app.models.user import User; db=SessionLocal(); n=db.query(User).filter(User.username=='api_client').delete(); db.commit(); print(n); db.close()"`
   删后其历史创建条目的 owner/creator_id 成悬空 ID（内容不丢、显示为空、管理员仍可管）。
+
+### 步骤 32.4 — 分享状态可视化 + 快捷操作（2026-11-23）
+> 陈工需求：①能快速添加资产分享；②分享后按钮变色（变绿）；③一键取消所有分享；④资产列表加"分享/未分享"筛选下拉；⑤分享出去的文档自动加"分享"标签、固定最前、颜色区别于普通标签
+- **后端**：
+  - schemas：Asset / DocumentInDBBase 加 shared: bool / shared_count: int（列表注入，默认 None 不影响详情）
+  - core/visibility.py：shared_counts_map()——一次 GROUP BY 批量查整页分享数（不 N+1）；缺表容错返回空 map（老库未迁移列表页降级不 500）
+  - assets 列表：注入 shared/shared_count + share_filter 参数（shared=EXISTS shares 子查询 / unshared=~EXISTS）
+  - documents 列表：注入 shared/shared_count（crud 返回 ORM 对象上直接 setattr）
+  - shares.py：DELETE /shares/by-item（一键撤销条目全部分享，返回 deleted 数）
+  - 🔴 **路由顺序坑**：/shares/by-item 必须注册在 /shares/{share_id} **之前**，否则 FastAPI 按声明序匹配，"by-item" 被当 share_id int 解析 → 422（已踩，代码留注释）
+- **前端**：
+  - DocumentView：标题列标签区——shared 时固定最前加绿色 NTag"分享"（hover 显示"已分享给 N 个用户（只读）"，虚拟标签不入库、不进 allTags 聚合）；分享按钮 shared→type=success 绿+"已分享(N)"
+  - AssetView：分享按钮同款变色；筛选行加「分享状态」下拉（已分享/未分享，走 share_filter 服务端筛选）
+  - ShareModal：已有分享时顶部加「一键取消所有分享」（Popconfirm 确认，调 revokeAll）；services/shares.ts + revokeAll
+- **验证**：pytest 58 passed（新增 test_share_status.py 5 例：资产/文档注入、share_filter 正反选、一键撤销+计数归零、普通用户 403）；vue-tsc 无新增错误（基线 25 条提取区历史类型错与本改动无关，stash 对账）；vite build OK

@@ -93,6 +93,32 @@ def can_modify(current_user: User, owner_id: int) -> bool:
     return current_user.is_superuser or owner_id == current_user.id
 
 
+def shared_counts_map(db: Session, item_type: str, item_ids: list) -> dict:
+    """批量查一组条目各自的分享数（32.4 列表注入 shared/shared_count）。
+
+    一条 GROUP BY 查询覆盖整页，避免 N+1。返回 {item_id: count}，
+    未分享的 id 不出现在结果里（调用方 .get(id, 0)）。
+
+    容错：shares 表缺失（老库未跑 32.1 迁移的极端环境）→ 返回空 map，
+    列表页降级显示"未分享"而不是 500。
+    """
+    if not item_ids:
+        return {}
+    from sqlalchemy import func
+    from sqlalchemy.exc import OperationalError
+    try:
+        rows = (
+            db.query(Share.item_id, func.count(Share.id))
+            .filter(Share.item_type == item_type, Share.item_id.in_(item_ids))
+            .group_by(Share.item_id)
+            .all()
+        )
+    except OperationalError:
+        db.rollback()
+        return {}
+    return {item_id: cnt for item_id, cnt in rows}
+
+
 def ensure_document_readable(db: Session, current_user: User, document) -> None:
     """详情/预览读权限：管理员 / owner / 被分享 → 放行；否则 404（不泄露存在性）"""
     from fastapi import HTTPException

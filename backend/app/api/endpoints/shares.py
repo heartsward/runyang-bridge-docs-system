@@ -98,6 +98,28 @@ async def create_share(
     )
 
 
+# 注意路由顺序：具体路径 /by-item 必须在 /{share_id} 之前注册，
+# 否则 FastAPI 会把 "by-item" 当 share_id 去 int 解析 → 422（32.4 实测踩坑）
+
+@router.delete("/by-item", summary="一键撤销条目全部分享（仅管理员，32.4）")
+async def delete_shares_by_item(
+    item_type: str = Query(..., description="document | asset"),
+    item_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """把该文档/资产分享给所有人的记录一次清空（分享弹窗「一键取消所有分享」）"""
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="只有管理员可以撤销分享")
+    if item_type not in ("document", "asset"):
+        raise HTTPException(status_code=400, detail="item_type 必须是 document 或 asset")
+    n = db.query(Share).filter(
+        Share.item_type == item_type, Share.item_id == item_id
+    ).delete()
+    db.commit()
+    return {"message": f"已撤销 {n} 条分享", "deleted": n}
+
+
 @router.delete("/{share_id}", summary="撤销分享（仅管理员）")
 async def delete_share(
     share_id: int,

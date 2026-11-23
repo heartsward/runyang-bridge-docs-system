@@ -62,6 +62,9 @@ export interface Document {
   owner_id: number
   created_at: string
   updated_at?: string
+  // 32.4：分享状态（列表注入）
+  shared?: boolean | null
+  shared_count?: number | null
 }
 
 export interface DocumentCreate {

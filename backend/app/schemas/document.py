@@ -83,6 +83,9 @@ class DocumentInDBBase(DocumentBase):
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # 32.4：分享状态（列表端点注入；True=至少分享给了一个用户）
+    shared: Optional[bool] = None
+    shared_count: Optional[int] = None
 
     class Config:
         from_attributes = True

@@ -37,6 +37,18 @@
 
       <n-empty v-if="existingShares.length === 0" description="尚未分享给任何用户" size="small" />
       <div v-else>
+        <!-- 32.4：一键取消该条目的全部分享 -->
+        <div class="share-row" style="border-bottom: 1px solid #efeff5; margin-bottom: 4px;">
+          <n-text depth="3">共分享给 {{ existingShares.length }} 个用户</n-text>
+          <n-popconfirm @positive-click="doRevokeAll">
+            <template #trigger>
+              <n-button size="tiny" type="error" ghost :loading="revokingAll">
+                一键取消所有分享
+              </n-button>
+            </template>
+            将撤销该{{ typeLabel }}对全部 {{ existingShares.length }} 个用户的分享，被分享者立即不可见。确定？
+          </n-popconfirm>
+        </div>
         <div v-for="s in existingShares" :key="s.id" class="share-row">
           <n-space align="center" size="small">
             <n-icon :component="PersonOutline" />
@@ -60,7 +72,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import {
-  NModal, NSpace, NText, NFormItem, NSelect, NButton, NDivider, NEmpty, NIcon, useMessage,
+  NModal, NSpace, NText, NFormItem, NSelect, NButton, NDivider, NEmpty, NIcon, NPopconfirm, useMessage,
 } from 'naive-ui'
 import { PersonOutline } from '@vicons/ionicons5'
 import { shareService, type ShareOut } from '@/services/shares'
@@ -90,6 +102,7 @@ const selectedUserIds = ref<number[]>([])
 const existingShares = ref<ShareOut[]>([])
 const sharing = ref(false)
 const revokingId = ref<number | null>(null)
+const revokingAll = ref(false)
 
 const userOptions = computed(() =>
   allUsers.value
@@ -139,6 +152,21 @@ const doShare = async () => {
     message.error(e?.response?.data?.detail || '分享失败')
   } finally {
     sharing.value = false
+  }
+}
+
+// 32.4：一键取消该条目的全部分享
+const doRevokeAll = async () => {
+  revokingAll.value = true
+  try {
+    const r = await shareService.revokeAll(props.itemType, props.itemId)
+    message.success(r.message || '已取消所有分享')
+    await loadAll()
+    emit('changed')
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '撤销失败')
+  } finally {
+    revokingAll.value = false
   }
 }
 

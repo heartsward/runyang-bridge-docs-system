@@ -784,19 +784,31 @@ const columns = [
       [
         h('div', { style: { fontWeight: '600', fontSize: '14px', marginBottom: '4px' } }, row.title),
         h('div', { style: { color: '#999', fontSize: '12px', marginBottom: '4px' } }, row.description || '暂无描述'),
-        // 显示用户标签
-        row.tags && row.tags.length > 0 ? h(
+        // 显示用户标签（32.4：已分享的文档固定加绿色"分享"标签在最前）
+        (row.shared || (row.tags && row.tags.length > 0)) ? h(
           'div',
           { style: { marginTop: '4px' } },
-          row.tags.slice(0, 3).map((tag: string) => 
-            h(NTag, {
-              size: 'small',
-              type: 'info',
-              style: { marginRight: '4px', fontSize: '10px' }
-            }, {
-              default: () => tag
-            })
-          )
+          [
+            ...(row.shared ? [
+              h(NTooltip, null, {
+                trigger: () => h(NTag, {
+                  size: 'small',
+                  type: 'success',
+                  style: { marginRight: '4px', fontSize: '10px', fontWeight: '600' }
+                }, { default: () => '分享' }),
+                default: () => `已分享给 ${row.shared_count ?? 1} 个用户（只读）`,
+              })
+            ] : []),
+            ...(row.tags && Array.isArray(row.tags) ? row.tags.slice(0, 3).map((tag: string) =>
+              h(NTag, {
+                size: 'small',
+                type: 'info',
+                style: { marginRight: '4px', fontSize: '10px' }
+              }, {
+                default: () => tag
+              })
+            ) : [])
+          ]
         ) : null,
       ]
     )
@@ -917,9 +929,11 @@ const columns = [
         ...(currentUser.value?.is_superuser ? [
           h(NButton, {
             size: 'small',
+            // 32.4：已分享→绿色（一眼可见分享状态），未分享→默认灰
+            type: row.shared ? 'success' : 'default',
             onClick: () => openShareModal(row)
           }, {
-            default: () => '分享'
+            default: () => row.shared ? `已分享${row.shared_count ? `(${row.shared_count})` : ''}` : '分享'
           })
         ] : [])
       ]

@@ -23,6 +23,7 @@ sys.path.insert(0, str(BACKEND))
 from app.db.database import Base  # noqa: E402
 from app.models.asset import Asset as AssetModel  # noqa: E402
 from app.models.user import User as UserModel  # noqa: E402
+from app.models.share import Share  # 32.4：列表注入 shared 计数需要 shares 表
 from app.models.system_config import SystemConfig  # noqa: E402
 from app.schemas.asset import AssetBase, AssetUpdate  # noqa: E402
 from app.core import deps  # noqa: E402
@@ -52,7 +53,7 @@ def client():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(bind=engine, tables=[AssetModel.__table__, UserModel.__table__, SystemConfig.__table__])
+    Base.metadata.create_all(bind=engine, tables=[AssetModel.__table__, UserModel.__table__, Share.__table__, SystemConfig.__table__])
     Session = sessionmaker(bind=engine)
     db = Session()
     u = UserModel(username="tuser", email="tuser@test.local", hashed_password="x", is_active=True, is_superuser=True)

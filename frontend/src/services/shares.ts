@@ -25,6 +25,13 @@ export class ShareService {
     return await apiService.delete<{ message: string }>(`/shares/${shareId}`)
   }
 
+  // 一键撤销该条目的全部分享（32.4，仅管理员）
+  async revokeAll(itemType: 'document' | 'asset', itemId: number): Promise<{ message: string; deleted: number }> {
+    return await apiService.delete<{ message: string; deleted: number }>(
+      `/shares/by-item?item_type=${itemType}&item_id=${itemId}`
+    )
+  }
+
   // 某条目已分享给哪些用户（仅管理员）
   async byItem(itemType: 'document' | 'asset', itemId: number): Promise<ShareOut[]> {
     return await apiService.get<ShareOut[]>('/shares/by-item', {

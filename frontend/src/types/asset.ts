@@ -90,6 +90,10 @@ export interface Asset {
   created_at: string
   updated_at?: string
   creator_id: number
+
+  // 32.4：分享状态（列表注入）
+  shared?: boolean | null
+  shared_count?: number | null
 }
 
 export interface AssetCreate {
@@ -179,6 +183,7 @@ export interface AssetSearchQuery {
   network_location?: string
   group?: string
   tags?: string[]
+  share_filter?: 'shared' | 'unshared'  // 32.4：分享状态筛选
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   page?: number

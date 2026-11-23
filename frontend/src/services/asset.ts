@@ -28,6 +28,7 @@ export class AssetService {
     if (query.department) params.append('department', query.department)
     if (query.network_location) params.append('network_location', query.network_location)
     if (query.group) params.append('group', query.group)
+    if (query.share_filter) params.append('share_filter', query.share_filter)
     if (query.tags) {
       query.tags.forEach(tag => params.append('tags', tag))
     }
