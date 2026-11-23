@@ -101,56 +101,57 @@ def get_or_create_admin_token(db: Session) -> str:
     return token
 
 
-def authenticate_mcp_token(db: Session, bearer: Optional[str]) -> Optional[MCPIdentity]:
-    """Bearer → MCPIdentity；任何不匹配返回 None（调用方 401）"""
+def _normalize_bearer(bearer: Optional[str]) -> str:
     if not bearer:
-        return None
+        return ""
     token = bearer.strip()
     if token.lower().startswith("bearer "):
         token = token[7:].strip()
+    return token
+
+
+def resolve_user_by_token(db: Session, bearer: Optional[str]):
+    """32.3：把 MCP 验证码解析成真实 User（ORM），供 REST 认证通道复用。
+
+    与 authenticate_mcp_token 同一套口径（MCP/REST 通用一个码）：
+    - 命中管理员统一码（admin_mcp_token）→ 第一个启用的超管账号
+    - 命中某用户 mcp_token → 该用户
+    - 不匹配 / 用户被禁用 → None（调用方按未认证处理）
+
+    注：验证码等价的权限 = 所映射用户的完整登录权限（含 REST 写操作）。
+    个人码/统一码都能在 UI 一键重置，泄露即换码撤销（旧码当场失效）。
+    """
+    from app.models.user import User
+
+    token = _normalize_bearer(bearer)
     if not token:
         return None
 
-    from app.models.user import User
-
-    # 1) 管理员统一码（先查：管理员码不会与个人码冲突——个人码只发给普通用户，
-    #    且两边都是 32 字符随机串，碰撞概率可忽略；hmac 常数时间比较防时序）
+    # 1) 管理员统一码 → 挂到第一个启用的超管（所有管理员共用这一个码）
     admin_token = get_or_create_admin_token(db)
-    admin_hit = _const_eq(token, admin_token)
-
-    # 1b) 兼容向后兼容：若已启用 API_TOKEN 且匹配，同样按管理员身份放行
-    if not admin_hit:
-        try:
-            from app.core.config import settings
-            if settings.API_TOKEN_ENABLED and settings.API_TOKEN and _const_eq(token, settings.API_TOKEN):
-                admin_hit = True
-        except Exception:
-            pass
-
-    if admin_hit:
-        # 管理员身份挂到第一个启用的超管（审计用，与 API_TOKEN→服务账号同思路）
-        admin_user = (
+    if _const_eq(token, admin_token):
+        return (
             db.query(User)
             .filter(User.is_superuser == True, User.is_active == True)  # noqa: E712
             .order_by(User.id)
             .first()
         )
-        if admin_user is None:
-            return None
-        return MCPIdentity(
-            user_id=admin_user.id,
-            username=admin_user.username,
-            is_superuser=True,
-            via="admin",
-        )
 
-    # 2) 个人码
+    # 2) 个人码 → 该用户（禁用用户不认）
     user = db.query(User).filter(User.mcp_token == token).first()
+    if user is not None and not user.is_active:
+        return None
+    return user
+
+
+def authenticate_mcp_token(db: Session, bearer: Optional[str]) -> Optional[MCPIdentity]:
+    """Bearer → MCPIdentity；任何不匹配返回 None（调用方 401）。
+
+    核心解析委托给 resolve_user_by_token（MCP 与 REST 共用同一认证口径）。
+    """
+    user = resolve_user_by_token(db, bearer)
     if user is None:
         return None
-    if not user.is_active:
-        return None
-    # 降级竞态兜底：已是管理员但个人码未清 → 按管理员口径（清空由升级钩子做，这里防御）
     return MCPIdentity(
         user_id=user.id,
         username=user.username,

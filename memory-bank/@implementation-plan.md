@@ -2821,3 +2821,16 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **验证**：pytest 65 passed（新增 test_mcp_tokens.py 11 例：生成/认证/升降级/端点门禁/注入防护；
   test_mcp_e2e.py 4 例：真实挂载结构 无码401/错码401/个人码只见自己(不泄露密码)/统一码见全部）
   + import 烟测 100 paths + vue-tsc 改动 0 错误 + vite build + skill py_compile
+
+### 步骤 32.3 — 移除 api_client/API_TOKEN 通道，验证码 MCP+REST 通用（2026-11-23）
+> 陈工问"统一码是否可删 api_client 及相关内容注释"。确认：该通道本地/生产均未启用（.env 无 API_TOKEN、库里无 api_client 账号），属死代码。经确认选择"统一码也认 REST"——一个验证码 MCP 与 REST 全通用。
+- **新认证口径（resolve_user_by_token，core/mcp_auth.py）**：
+  - 管理员统一码（system_configs.admin_mcp_token）→ 第一个启用超管（真实 User 对象）
+  - 用户个人码（users.mcp_token）→ 该用户（禁用不认）
+  - MCP（authenticate_mcp_token→MCPIdentity）与 REST（deps._authenticate_mcp_token→User）**共用同一解析**
+- **deps.py**：get_current_user / get_optional_user 通道 1 由"API_TOKEN→服务账号"换成"验证码→映射用户"，未命中回落 JWT；删 hmac 死 import
+- **删除**：init_api_service_user.py、tests/test_api_token_auth.py(15例)、tests/test_service_account_guard.py(6例)；config.py 三键（API_TOKEN_ENABLED/API_TOKEN/API_SERVICE_USERNAME，extra=ignore 故 126 旧 .env 残留键不炸启动）；settings.py 保留名保护块 + 服务账号改名/改密防护；.env.template 对应段换成验证码说明
+- **skill**：WIKI_MCP_TOKEN 环境变量（WIKI_API_TOKEN 旧名兼容），一个码喂 MCP+REST；SKILL.md 方式0 改写（UI 取码、重置即撤销无需重启）
+- **安全语义变化**（已在代码注释+SKILL.md 标注）：验证码从"只调 MCP"升级为"等价该身份完整 REST 权限"；优点=UI 一键重置即撤销（旧 API_TOKEN 要改 .env+重启），管理员统一码要妥善保管
+- 若生产库曾有 api_client 账号：代码移除后它退化为普通账号（随机密码登不了，无害）；可在 UI 删除
+- **验证**：pytest 53 passed（新增 test_mcp_token_rest_auth.py 9 例：resolve 三口径/REST 统一码全见/个人码隔离+写403/JWT回落/无认证401/旧配置字段移除确认/保留名限制解除）；65-15-6+9=53 对账一致 + 100 路由烟测 + skill py_compile + vite build
