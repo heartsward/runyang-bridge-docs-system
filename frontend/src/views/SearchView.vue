@@ -323,18 +323,22 @@
         
         <!-- 原文件模式 (仅对支持的文件类型显示) -->
         <div v-else-if="shouldShowViewToggle(previewDocumentData) && previewMode === 'original'" class="original-file-preview" style="height: 60vh;">
+          <!-- 32.1：原文端点要求登录+可见性——fetch+blob 加载（wiki 图片 18.8 同模式） -->
+          <n-spin v-if="originalBlobLoading" size="small" style="margin: 24px auto; display: block;" />
+          <n-empty v-else-if="originalBlobFailed" description="原文加载失败（登录状态或权限问题）" style="margin: 24px 0;" />
+
           <!-- PDF 文件使用 iframe 预览 -->
           <iframe
-            v-if="isPDFFile(previewDocumentData)"
-            :src="getFileUrl(previewDocumentData)"
+            v-else-if="isPDFFile(previewDocumentData) && originalBlobUrl"
+            :src="originalBlobUrl"
             style="width: 100%; height: 100%; border: none; border-radius: 4px;"
             title="PDF预览"
           ></iframe>
 
           <!-- 图片文件预览 -->
-          <div v-else-if="isImageFile(previewDocumentData?.file_type)" style="text-align: center; height: 100%; display: flex; align-items: center; justify-content: center;">
+          <div v-else-if="isImageFile(previewDocumentData?.file_type) && originalBlobUrl" style="text-align: center; height: 100%; display: flex; align-items: center; justify-content: center;">
             <img
-              :src="getFileUrl(previewDocumentData)"
+              :src="originalBlobUrl"
               style="max-width: 100%; max-height: 100%; object-fit: contain;"
               :alt="previewDocumentData.title"
             />
@@ -425,7 +429,7 @@ import { apiService } from '@/services/api'
 import { authService } from '@/services'
 import { wikiService } from '@/services/wiki'
 import type { User } from '@/types/api'
-import { downloadWikiDocument, hydrateWikiImages } from '@/utils/file-download'
+import { downloadWikiDocument, hydrateWikiImages, fetchAuthenticatedBlobUrl } from '@/utils/file-download'
 import { renderMarkdown } from '@/utils/markdown-renderer'
 
 interface DocumentSearchResult {
@@ -1060,32 +1064,32 @@ const savePreviewEdit = async () => {
   }
 }
 
-// 获取文件URL用于预览
-const getFileUrl = (document: any): string => {
-  if (!document) return ''
-  
-  // 动态检测服务器地址，支持多机器访问
-  const currentHost = window.location.hostname
-  const currentProtocol = window.location.protocol
-  let baseUrl = import.meta.env.VITE_API_BASE_URL
-  
-  // 如果没有环境变量配置，自动推断API地址
-  if (!baseUrl) {
-    if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
-      // 如果是通过IP访问，使用相同IP的8002端口
-      baseUrl = `${currentProtocol}//${currentHost}:8002`
+// ============ 32.1：原文预览带 JWT 加载（fetch → blob） ============
+// 原文端点 GET /search/original/{id} 要求登录 + 可见性过滤，
+// <iframe>/<img> 带不了 Authorization 头 → fetch+blob（同 wiki 图片 18.8）
+const originalBlobUrl = ref<string>('')
+const originalBlobLoading = ref(false)
+const originalBlobFailed = ref(false)
+let originalBlobRevoke: (() => void) | null = null
+
+const loadOriginalBlob = async () => {
+  if (originalBlobRevoke) { originalBlobRevoke(); originalBlobRevoke = null }
+  originalBlobUrl.value = ''
+  originalBlobFailed.value = false
+  const doc = previewDocumentData.value
+  if (!doc || previewMode.value !== 'original') return
+  originalBlobLoading.value = true
+  try {
+    const result = await fetchAuthenticatedBlobUrl(`/api/v1/search/original/${doc.document_id}`)
+    if (result) {
+      originalBlobUrl.value = result.url
+      originalBlobRevoke = result.revoke
     } else {
-      // 本地访问使用localhost
-      baseUrl = 'http://localhost:8002'
+      originalBlobFailed.value = true
     }
+  } finally {
+    originalBlobLoading.value = false
   }
-  
-  // 确保baseUrl不包含/api/v1后缀，避免重复
-  if (baseUrl.endsWith('/api/v1')) {
-    baseUrl = baseUrl.replace('/api/v1', '')
-  }
-  
-  return `${baseUrl}/api/v1/search/original/${document.document_id}`
 }
 
 // 已移除预览来源切换功能，直接使用预处理内容
@@ -1175,6 +1179,8 @@ watch(previewMode, async (newMode) => {
       })
       previewDocumentData.value = response
       previewContent.value = response.content
+      // 32.1：带 JWT 拉原文 blob（iframe/img 无法带 Authorization 头）
+      loadOriginalBlob()
     } else {
       // 内容提取模式
       const response = await apiService.get(`/search/preview/${previewDocumentData.value.document_id}`, {

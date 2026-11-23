@@ -92,6 +92,10 @@ def get_onlyoffice_preview_url(
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
 
+    # 32.1：OnlyOffice 预览同样受可见性约束（管理员/owner/被分享）
+    from app.core.visibility import ensure_document_readable
+    ensure_document_readable(db, current_user, document)
+
     if not document.file_path or not os.path.exists(document.file_path):
         raise HTTPException(status_code=404, detail="文档文件不存在")
 

@@ -43,6 +43,10 @@ try:
     # 阶段二十七：OnlyOffice Document Server 在线编辑集成
     api_router.include_router(onlyoffice.router, tags=["OnlyOffice"])
 
+    # 阶段三十二：分享 API（管理员→普通用户只读授权）
+    from app.api.endpoints import shares
+    api_router.include_router(shares.router, prefix="/shares", tags=["分享"])
+
 except Exception as e:
     print(f"警告：API路由加载失败: {e}")
     # 至少包含认证路由

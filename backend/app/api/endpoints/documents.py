@@ -5,6 +5,11 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 import os
 from app.core.deps import get_db, get_current_active_user
+from app.core.visibility import (
+    visible_documents_filter,
+    ensure_document_readable,
+    can_modify,
+)
 from app.crud import document as crud_document
 from app.models.user import User
 from app.models.document import Document as DocumentModel
@@ -45,7 +50,13 @@ async def check_filename(
     print(f"[DEBUG] 冲突检查: 原始={filename}, 安全文件名={safe_filename}")
     
     # 查询所有同名文档（使用处理后的安全文件名）
-    existing_docs = db.query(DocumentModel).filter(DocumentModel.file_name == safe_filename).all()
+    # 32.1：普通用户只比对 自己 + 被分享 的文档——别人的同名文档不进入冲突列表，
+    #       避免"覆盖上传"误删他人文件
+    visibility = visible_documents_filter(current_user)
+    fq = db.query(DocumentModel).filter(DocumentModel.file_name == safe_filename)
+    if visibility is not None:
+        fq = fq.filter(visibility)
+    existing_docs = fq.all()
     
     if existing_docs:
         # 返回详细的冲突信息
@@ -86,12 +97,17 @@ def read_documents(
 ):
     """
     获取文档列表（需登录）
+    32.1：普通用户只看 自己创建 + 被分享 的文档；管理员看全部
     """
+    visibility = visible_documents_filter(current_user)
     documents = crud_document.get_multi(
         db, skip=skip, limit=limit, 
-        category_id=category_id, status=status
+        category_id=category_id, status=status,
+        visibility=visibility,
     )
-    total_count = crud_document.count(db, category_id=category_id, status=status)
+    total_count = crud_document.count(
+        db, category_id=category_id, status=status, visibility=visibility
+    )
     
     return DocumentList(
         items=documents,
@@ -110,12 +126,8 @@ def create_document(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    创建新文档 - 仅管理员可操作
+    创建新文档 - 32.1：登录用户均可创建（普通用户创建的只有自己和管理员可见）
     """
-    # 检查权限：只有管理员才能创建文档
-    if not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="只有管理员可以创建文档")
-    
     document = crud_document.create(db=db, obj_in=document_in, owner_id=current_user.id)
     return document
 
@@ -129,10 +141,12 @@ def read_document(
 ):
     """
     获取指定文档的详细信息
+    32.1：普通用户可读 自己创建 + 被分享 的文档；其余按不存在处理（不泄露存在性）
     """
     document = crud_document.get(db=db, id=document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
+    ensure_document_readable(db, current_user, document)
     
     # 增加查看次数
     user_id = current_user.id if current_user else None
@@ -198,16 +212,15 @@ def delete_document(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    删除文档 - 仅管理员可操作
+    删除文档 - 32.1：owner 或管理员可删（普通用户可删自己创建的）
     使用原子性删除机制，确保数据库记录和物理文件同时删除
     """
-    # 检查权限：只有管理员才能删除文档
-    if not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="只有管理员可以删除文档")
-    
     document = crud_document.get(db=db, id=document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
+
+    if not can_modify(current_user, document.owner_id):
+        raise HTTPException(status_code=403, detail="只有文档创建者或管理员可以删除文档")
     
     # 使用新的原子性删除方法
     delete_result = crud_document.delete_with_file(
@@ -432,8 +445,10 @@ def create_category(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    创建新分类
+    创建新分类（32.1：分类是全局管理项，仅管理员）
     """
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="只有管理员可以创建分类")
     category = crud_document.create_category(
         db=db, obj_in=category_in, creator_id=current_user.id
     )
@@ -449,8 +464,10 @@ def update_category(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    更新分类信息
+    更新分类信息（32.1：仅管理员）
     """
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="只有管理员可以更新分类")
     category = crud_document.get_category(db=db, id=category_id)
     if not category:
         raise HTTPException(status_code=404, detail="分类不存在")
@@ -467,8 +484,10 @@ def delete_category(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    删除分类
+    删除分类（32.1：仅管理员）
     """
+    if not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="只有管理员可以删除分类")
     category = crud_document.get_category(db=db, id=category_id)
     if not category:
         raise HTTPException(status_code=404, detail="分类不存在")
@@ -485,11 +504,12 @@ def download_document(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    下载文档文件
+    下载文档文件（32.1：读权限与详情一致——自有/被分享/管理员）
     """
     document = crud_document.get(db=db, id=document_id)
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
+    ensure_document_readable(db, current_user, document)
     
     if not document.file_path or not os.path.exists(document.file_path):
         raise HTTPException(status_code=404, detail="文档文件不存在")

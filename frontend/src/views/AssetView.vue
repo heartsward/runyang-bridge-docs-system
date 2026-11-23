@@ -12,7 +12,7 @@
           <n-icon :component="SearchOutline" />
         </template>
       </n-input>
-      <n-button v-if="currentUser?.is_superuser" type="primary" @click="showCreateModal = true" style="background-color: #2563eb; border-color: #2563eb;">
+      <n-button v-if="currentUser" type="primary" @click="showCreateModal = true" style="background-color: #2563eb; border-color: #2563eb;">
         <template #icon>
           <n-icon :component="AddOutline" />
         </template>
@@ -30,7 +30,7 @@
         </template>
         批量删除 ({{ selectedAssetIds.size }})
       </n-button>
-      <n-button v-if="currentUser?.is_superuser" type="success" @click="showExportModal = true" :disabled="selectedAssetIds.size === 0">
+      <n-button v-if="currentUser" type="success" @click="showExportModal = true" :disabled="selectedAssetIds.size === 0">
         <template #icon>
           <n-icon :component="DownloadOutline" />
         </template>
@@ -39,7 +39,8 @@
       <n-button @click="clearAllSelection" :disabled="selectedAssetIds.size === 0" quaternary>
         清空选择
       </n-button>
-      <n-button @click="showOptionsModal = true">
+      <!-- 32.1：管理选项（设备类型/部门/网络配置）=管理项，仅管理员 -->
+      <n-button v-if="currentUser?.is_superuser" @click="showOptionsModal = true">
         <template #icon>
           <n-icon :component="SettingsOutline" />
         </template>
@@ -918,6 +919,15 @@
         </n-tab-pane>
       </n-tabs>
     </n-modal>
+
+    <!-- 32.1：分享弹窗（仅管理员） -->
+    <ShareModal
+      v-model:show="showShareModal"
+      :item-type="'asset'"
+      :item-id="shareTargetAsset?.id ?? 0"
+      :item-title="shareTargetAsset?.name ?? ''"
+      @changed="handleSearch(false)"
+    />
 </template>
 
 <script setup lang="ts">
@@ -988,6 +998,7 @@ import {
   SettingsOutline
 } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
+import ShareModal from '../components/ShareModal.vue'  // 32.1:管理员分享资产给用户（只读）
 import { assetService, documentService, authService } from '@/services'
 import { getAssetTypes, updateAssetTypes, getDepartments, updateDepartments, getAssetGroups, updateAssetGroups, deleteAssetGroup } from '@/services/system-config'
 import apiService from '@/services/api'
@@ -1076,6 +1087,21 @@ const exportFields = ref(['name', 'asset_type', 'ip_address', 'hostname', 'devic
 const fileList = ref<UploadFileInfo[]>([])
 const uploadRef = ref(null)
 const currentUser = ref<User | null>(null)
+
+// ============ 32.1：权限三态（creator / 管理员 / 被分享只读） ============
+// 与后端 can_modify 同口径：管理员 或 creator_id === 当前用户 才能编辑/复制/删除
+const canModifyAsset = (row: Asset | null): boolean => {
+  if (!row || !currentUser.value) return false
+  return currentUser.value.is_superuser || row.creator_id === currentUser.value.id
+}
+
+// 分享弹窗（仅管理员）
+const showShareModal = ref(false)
+const shareTargetAsset = ref<Asset | null>(null)
+const openShareModal = (row: Asset) => {
+  shareTargetAsset.value = row
+  showShareModal.value = true
+}
 
 // 单个资产编辑相关
 const showEditSingleAsset = ref(false)
@@ -1834,7 +1860,7 @@ const columns = computed<DataTableColumns<Asset>>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 150,
+    width: 300,
     align: 'center',
     render: (row) => h(NSpace, { size: 'small', justify: 'center' }, {
       default: () => [
@@ -1847,8 +1873,9 @@ const columns = computed<DataTableColumns<Asset>>(() => [
           icon: () => h(NIcon, { component: EyeOutline }),
           default: () => '查看'
         }),
-        // 只有管理员才能看到编辑、复制和删除按钮
-        ...(currentUser.value?.is_superuser ? [
+        // 32.1：编辑/复制/删除——creator 或管理员可见（被分享条目只读不显示）；
+        // 分享——仅管理员
+        ...(canModifyAsset(row) ? [
           h(NButton, {
             size: 'small',
             onClick: () => editAsset(row)
@@ -1871,6 +1898,14 @@ const columns = computed<DataTableColumns<Asset>>(() => [
           }, {
             icon: () => h(NIcon, { component: TrashOutline }),
             default: () => '删除'
+          })
+        ] : []),
+        ...(currentUser.value?.is_superuser ? [
+          h(NButton, {
+            size: 'small',
+            onClick: () => openShareModal(row)
+          }, {
+            default: () => '分享'
           })
         ] : [])
       ]

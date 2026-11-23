@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="passlib.*")
 from app.api.api_v1 import api_router
 from app.core.config import settings
 from app.db.database import engine
-from app.models import user, document, asset, ai_config, system_config
+from app.models import user, document, asset, ai_config, system_config, share
 
 # 设置时区环境变量
 os.environ['TZ'] = settings.TIMEZONE
@@ -43,6 +43,8 @@ def verify_bcrypt_functionality():
 user.Base.metadata.create_all(bind=engine)
 document.Base.metadata.create_all(bind=engine)
 asset.Base.metadata.create_all(bind=engine)
+# 32.1：分享表（管理员→普通用户只读授权）
+share.Base.metadata.create_all(bind=engine)
 ai_config.Base.metadata.create_all(bind=engine)
 system_config.Base.metadata.create_all(bind=engine)
 

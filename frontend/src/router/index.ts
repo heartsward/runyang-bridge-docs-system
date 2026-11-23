@@ -46,7 +46,8 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('../views/SettingsView.vue'),
-      meta: { requiresAuth: true }
+      // 32.1：系统设置=管理选项——仅管理员（后端 settings 端点同样 gate）
+      meta: { requiresAuth: true, requiresAdmin: true }
     },
     // 阶段二十七：OnlyOffice 在线编辑器
     {

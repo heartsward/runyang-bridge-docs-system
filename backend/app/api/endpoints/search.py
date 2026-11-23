@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
 from app.core.deps import get_db, get_current_active_user, get_optional_user
+from app.core.visibility import visible_documents_filter, ensure_document_readable
 from app.models.user import User
 from app.models.document import Document, SearchLog
 from app.services.search_service import SearchService
@@ -97,8 +98,12 @@ async def search_documents(
     try:
         search_service = SearchService()
         
-        # 构建基础查询 - 所有用户都可以搜索所有文档
+        # 构建基础查询
+        # 32.1：可见性过滤——管理员搜全部；普通用户只搜 自己创建 + 被分享 的文档
         query = db.query(Document)
+        visibility = visible_documents_filter(current_user)
+        if visibility is not None:
+            query = query.filter(visibility)
         
         # 文档类型过滤
         if doc_type:
@@ -375,13 +380,15 @@ async def preview_document(
 ):
     """预览文档内容"""
     try:
-        # 获取文档 - 所有用户都可以预览所有文档
+        # 获取文档
+        # 32.1：读权限——管理员 / owner / 被分享 可预览；其余按不存在处理
         document = db.query(Document).filter(
             Document.id == document_id
         ).first()
         
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
+        ensure_document_readable(db, current_user, document)
         
         # PDF/图片文件原文查看模式
         is_pdf_file = document.file_type and document.file_type.lower() == 'pdf'
@@ -586,7 +593,8 @@ async def preview_document(
 async def get_original_file(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_user)
+    # 32.1：原文查看与预览/详情同权——必须登录（原 optional 会让匿名拿到任意 PDF/图片）
+    current_user: User = Depends(get_current_active_user)
 ):
     """获取原始PDF/图片文件用于前端直接显示"""
     try:
@@ -597,6 +605,8 @@ async def get_original_file(
         
         if not document:
             raise HTTPException(status_code=404, detail="文档不存在")
+        # 32.1：原文查看同样受可见性约束
+        ensure_document_readable(db, current_user, document)
         
         # 检查是否为PDF或图片文件
         is_pdf_file = document.file_type and document.file_type.lower() == 'pdf'

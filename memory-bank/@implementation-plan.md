@@ -2763,3 +2763,26 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **核查**：独立脚本 init_default_user.py 无自动激活问题；settings.py 的 is_active=True 仅用于新建用户，正常
 - **能改什么**：`backend/app/main.py`
 - **验证**：py_compile + import 烟测（91 paths）+ 内存 SQLite 两场景断言（禁用 admin 重启后保持禁用；降权 admin 仍自动恢复超管）+ pytest 41 passed
+
+## 阶段三十二：用户数据隔离 + 分享（2026-11-23）
+
+### 步骤 32.1 — 权限模型改造（普通用户自建自见、管理员全局、分享只读）（2026-11-23）
+> 陈工需求：①普通用户获得与管理员同等的文档/资产增改权利，但每人的界面只含自己创建的内容；②普通用户禁用"管理选项"（批量删除/从文档提取/孤儿清理/系统设置）；③普通用户创建的内容出现在管理员界面；④所有管理员界面一致、看全部；⑤补充：管理员可把指定文档/资产分享给某用户，分享的只读不可改；⑥普通用户可改自己密码（已有 /auth/change-password，菜单入口对所有用户开放）
+- **权限模型**：
+  - 管理员（is_superuser）：看/改/删全部；唯一可发起分享
+  - 普通用户：只看到 自己创建（documents.owner_id / assets.creator_id）∪ 被分享（shares 表）；可创建/编辑/删除自己的；被分享条目只读
+  - 管理选项仅管理员：资产批量删除、从文档提取（file-extract）、文档孤儿文件清理、批量删除、系统设置（路由 requiresAdmin + 菜单隐藏）
+  - 文档创建/上传（POST /documents、upload、upload-multiple）放开给所有登录用户；文档删除改 owner 或管理员
+- **新增**：models/share.py（item_type/item_id/shared_by_id/shared_with_id + 唯一约束）、endpoints/shares.py（POST/DELETE 仅管理员、by-item、mine）、core/visibility.py（visible_*_filter / ensure_*_readable / can_modify）、前端 ShareModal.vue + services/shares.ts（管理员分享弹窗）
+- **可见性覆盖端点**：documents 列表/详情/下载、search 文档搜索/preview/original、wiki search/report/backlinks/doc/download/images/markdown（FTS5 不感知权限→API 层按可见 id 集合过滤）、assets 列表/count/statistics/statistics-summary/详情/export/suggestions
+- **顺手修的安全洞**：
+  - assets update_asset 原本**完全没有权限检查**（任何登录用户可改任何资产）→ 补 can_modify
+  - search/original/{id} 从 optional（可匿名）→ 强制登录 + ensure_document_readable
+  - 覆盖上传（overwrite）非管理员只能覆盖自己 owner 的文档；check-filename 同名比对按可见性过滤
+  - categories 写操作补管理员门禁（读保持开放——文档列表依赖分类下拉）
+- **前端三态渲染**：DocumentView/AssetView 编辑/删除按钮 = owner 或管理员；分享按钮 = 管理员；普通用户放开"上传文档/添加设备/导出"（导出后端按可见性过滤）；原文预览（PDF/图片 iframe/img）改 fetch+blob 带 JWT（fetchAuthenticatedBlobUrl）
+- **能改什么**：backend {models/share.py, core/visibility.py, api/endpoints/{shares,documents,assets,search,wiki,upload,upload_multiple,onlyoffice}.py, crud/document.py, main.py, api_v1.py} + frontend {ShareModal.vue, services/shares.ts, views/{DocumentView,AssetView,SearchView}.vue, router/index.ts, components/NavigationMenu.vue, utils/file-download.ts}
+- **验证**：pytest 50 passed（新增 tests/test_permissions_share.py 9 例权限矩阵：列表可见性/创建归属/编辑删除三态/分享只读/撤销/批量删除与提取门禁）+ py_compile + import 烟测 95 paths + vue-tsc 改动相关 0 错误 + vite build 通过
+- **遗留/风险**：
+  - 🔴 MCP wiki 内部工具（get_doc_images/search_images 等）未加权限过滤——MCP 走服务账号（API_TOKEN），服务账号是超管口径，如需 MCP 也隔离要单独改造
+  - categories 读保持全员开放（文档表单依赖），写仅管理员

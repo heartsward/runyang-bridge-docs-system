@@ -298,7 +298,7 @@ async def upload_file(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    上传文档文件并创建文档记录 - 仅管理员可操作
+    上传文档文件并创建文档记录 - 32.1：登录用户均可上传（归属自己，owner_id=当前用户）
     """
     # 调试：打印接收到的数据
     try:
@@ -312,9 +312,7 @@ async def upload_file(
     except Exception as debug_error:
         print(f"[ERROR] 调试输出失败: {debug_error}")
     
-    # 检查权限：只有管理员才能上传文档
-    if not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="只有管理员可以上传文档")
+    # 32.1：普通用户可上传（316-317 的管理员限制已移除，归属当前用户）
 
     # ---- 覆盖上传（27.13）：先级联删除旧文档，再走正常上传流程（天然触发新提取）----
     # overwrite_ids 是前端冲突弹窗 check-filename 返回的既有同 file_name 文档 id 列表，
@@ -339,6 +337,14 @@ async def upload_file(
                 status_code=400,
                 detail="覆盖上传失败：未找到指定的既有文档（可能已被删除），请刷新列表重试"
             )
+        # 32.1 防护：非管理员只能覆盖自己 owner 的文档（防止跨用户覆盖删除）
+        if not current_user.is_superuser:
+            foreign = [d for d in existing if d.owner_id != current_user.id]
+            if foreign:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"覆盖上传失败：文档 {foreign[0].id}（{foreign[0].title}）不属于当前用户"
+                )
         # 二次确认：命中的文档数必须与传入 id 数一致（防止部分 id 失效仍继续删）
         if len(existing) != len(id_list):
             raise HTTPException(

@@ -12,7 +12,7 @@
         </template>
       </n-input>
       <n-button 
-        v-if="currentUser?.is_superuser" 
+        v-if="currentUser" 
         type="primary" 
         @click="showUploadModal = true"
         style="color: white; background-color: #18a058;"
@@ -90,7 +90,7 @@
       <n-empty description="暂无文档">
         <template #extra>
           <n-button 
-            v-if="currentUser?.is_superuser" 
+            v-if="currentUser" 
             type="primary" 
             @click="showUploadModal = true"
             style="color: white; background-color: #18a058;"
@@ -203,9 +203,9 @@
       <!-- 阶段二十三·23.2：工具栏 — 左侧放编辑/搜索辅助，右侧放"提取内容/原文件"切换（支持所有格式） -->
       <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
         <n-space align="center" size="small">
-          <!-- W4：编辑模式切换（仅管理员可编辑 Markdown 副本） -->
+          <!-- W4：编辑模式切换（32.1：owner 或管理员可编辑 Markdown 副本；被分享者只读） -->
           <n-button
-            v-if="currentUser?.is_superuser && previewMode === 'extracted'"
+            v-if="canModifyDocument(currentDocument) && previewMode === 'extracted'"
             size="small"
             type="primary"
             @click="togglePreviewEdit"
@@ -270,18 +270,23 @@
 
       <!-- 原文件模式 (仅对支持的文件类型显示) -->
       <div v-else-if="shouldShowViewToggle(currentDocument) && previewMode === 'original'" class="original-file-preview">
+          <!-- 32.1：原文端点已要求登录+可见性——<iframe>/<img> 带不了 Authorization 头，
+               改为 fetch+blob 加载（同 wiki 图片 18.8 模式） -->
+          <n-spin v-if="originalBlobLoading" size="small" style="margin: 24px auto; display: block;" />
+          <n-empty v-else-if="originalBlobFailed" description="原文加载失败（登录状态或权限问题）" style="margin: 24px 0;" />
+
           <!-- PDF 文件使用 iframe 预览 -->
           <iframe
-            v-if="isPDFFile(currentDocument)"
-            :src="getFileUrl(currentDocument)"
+            v-else-if="isPDFFile(currentDocument) && originalBlobUrl"
+            :src="originalBlobUrl"
             style="width: 100%; height: 600px; border: none; border-radius: 4px;"
             title="PDF预览"
           ></iframe>
 
           <!-- 图片文件预览 -->
-          <div v-else-if="isImageFile(currentDocument)" style="text-align: center;">
+          <div v-else-if="isImageFile(currentDocument) && originalBlobUrl" style="text-align: center;">
             <n-image
-              :src="getFileUrl(currentDocument)"
+              :src="originalBlobUrl"
               style="max-width: 100%; max-height: 600px;"
               :alt="currentDocument.title"
             />
@@ -490,6 +495,15 @@
       </n-space>
     </template>
   </n-modal>
+
+  <!-- 32.1：分享弹窗（仅管理员） -->
+  <ShareModal
+    v-model:show="showShareModal"
+    :item-type="'document'"
+    :item-id="shareTargetDoc?.id ?? 0"
+    :item-title="shareTargetDoc?.title ?? ''"
+    @changed="loadDocuments()"
+  />
 </template>
 
 <script setup lang="ts">
@@ -529,12 +543,13 @@ import {
 import { SearchOutline, CloudUploadOutline, DocumentTextOutline, SparklesOutline, DownloadOutline, PencilOutline, EyeOutline, RefreshOutline } from '@vicons/ionicons5'
 import PageLayout from '../components/PageLayout.vue'
 import MarkdownPreviewBody from '../components/MarkdownPreviewBody.vue'  // 29.5:共享预览核心(渲染+高亮+焦点)
+import ShareModal from '../components/ShareModal.vue'  // 32.1:管理员分享文档给用户（只读）
 import { documentService, uploadService, authService, taskService } from '@/services'
 import { wikiService } from '@/services/wiki'
 import type { Document, Category, User } from '@/types/api'
 import apiService from '@/services/api'
 import { debounce } from '@/utils'
-import { downloadWikiDocument, hydrateWikiImages } from '@/utils/file-download'
+import { downloadWikiDocument, hydrateWikiImages, fetchAuthenticatedBlobUrl } from '@/utils/file-download'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 
 const message = useMessage()
@@ -563,6 +578,21 @@ const conflictFiles = ref<any[]>([])
 
 // 当前用户状态
 const currentUser = ref<User | null>(null)
+
+// ============ 32.1：权限三态（owner / 管理员 / 被分享只读） ============
+// 与后端 can_modify 同口径：管理员 或 owner_id === 当前用户 才能编辑/删除
+const canModifyDocument = (doc: Document | null): boolean => {
+  if (!doc || !currentUser.value) return false
+  return currentUser.value.is_superuser || doc.owner_id === currentUser.value.id
+}
+
+// 分享弹窗（仅管理员）
+const showShareModal = ref(false)
+const shareTargetDoc = ref<Document | null>(null)
+const openShareModal = (doc: Document) => {
+  shareTargetDoc.value = doc
+  showShareModal.value = true
+}
 
 // 预览和详情相关
 const showPreviewModal = ref(false)
@@ -843,7 +873,8 @@ const columns = [
   {
     title: '操作',
     key: 'actions',
-    width: 180,
+    // 32.1：预览/下载 + 编辑/删除（owner/管理员） + 分享（管理员）——列加宽
+    width: 300,
     render: (row: Document) => h(NSpace, { size: 'small' }, {
       default: () => [
         h(NButton, {
@@ -865,8 +896,9 @@ const columns = [
             type: 'info'
           }, { default: () => '下载' })
         }),
-        // 只有管理员才能看到编辑和删除按钮
-        ...(currentUser.value?.is_superuser ? [
+        // 32.1：编辑/删除——owner 或管理员可见（被分享条目只读不显示）；
+        // 分享按钮——仅管理员（文档 owner 不能分享自己的给别人，可见性由管理员统筹）
+        ...(canModifyDocument(row) ? [
           h(NButton, {
             size: 'small',
             type: 'warning',
@@ -880,6 +912,14 @@ const columns = [
             onClick: () => deleteDocument(row)
           }, {
             default: () => '删除'
+          })
+        ] : []),
+        ...(currentUser.value?.is_superuser ? [
+          h(NButton, {
+            size: 'small',
+            onClick: () => openShareModal(row)
+          }, {
+            default: () => '分享'
           })
         ] : [])
       ]
@@ -1980,6 +2020,39 @@ const getFileUrl = (document: Document | null): string => {
   // 对于内容提取模式，使用documents端点
   return `${baseUrl}/api/v1/documents/${document.id}/preview`
 }
+
+// ============ 32.1：原文预览带 JWT 加载（fetch → blob） ============
+const originalBlobUrl = ref<string>('')
+const originalBlobLoading = ref(false)
+const originalBlobFailed = ref(false)
+let originalBlobRevoke: (() => void) | null = null
+
+const loadOriginalBlob = async () => {
+  // 释放旧 blob
+  if (originalBlobRevoke) { originalBlobRevoke(); originalBlobRevoke = null }
+  originalBlobUrl.value = ''
+  originalBlobFailed.value = false
+  const doc = currentDocument.value
+  if (!doc || previewMode.value !== 'original') return
+  originalBlobLoading.value = true
+  try {
+    const result = await fetchAuthenticatedBlobUrl(`/api/v1/search/original/${doc.id}`)
+    if (result) {
+      originalBlobUrl.value = result.url
+      originalBlobRevoke = result.revoke
+    } else {
+      originalBlobFailed.value = true
+    }
+  } finally {
+    originalBlobLoading.value = false
+  }
+}
+
+// 切到原文模式 / 切换文档时重新拉 blob
+watch(previewMode, (m) => { if (m === 'original') loadOriginalBlob() })
+watch(() => currentDocument.value?.id, () => {
+  if (previewMode.value === 'original') loadOriginalBlob()
+})
 
 // 29.2：内部锚链接（[text](#anchor)）→ 不再拦截，**让浏览器 native 处理**。
 // 29.1 过度工程：preventDefault + scrollIntoView 反倒干扰了浏览器 native 跳转。

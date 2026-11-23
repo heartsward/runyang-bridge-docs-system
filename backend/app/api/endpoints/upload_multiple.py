@@ -16,12 +16,8 @@ async def upload_multiple_files(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    批量上传文档文件 - 仅管理员可操作
+    批量上传文档文件 - 32.1：登录用户均可（与 upload.py 单/多上传同口径）
     """
-    # 检查权限
-    if not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="只有管理员可以上传文档")
-    
     if len(files) > 10:
         raise HTTPException(status_code=400, detail="最多只能同时上传10个文件")
     

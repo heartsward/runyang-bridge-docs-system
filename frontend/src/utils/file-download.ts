@@ -13,6 +13,35 @@
 
 export type DownloadType = 'original' | 'markdown'
 
+/**
+ * 32.1：带 JWT 拉取受保护端点 → blob URL（iframe/img 的 src 带不了 Authorization 头）
+ * 用于 search/original/{id} 这类必须登录 + 可见性过滤的资源预览。
+ * 失败返回 null（调用方显示占位/错误）。用完必须 revokeObjectUrl 释放。
+ */
+export async function fetchAuthenticatedBlobUrl(
+  path: string,           // 如 /api/v1/search/original/123
+  mimeHint = ''
+): Promise<{ url: string; revoke: () => void } | null> {
+  const token = localStorage.getItem('access_token')
+  let base = resolveApiBaseUrl()
+  // resolveApiBaseUrl 在配置了 VITE_API_BASE_URL 时已含 /api/v1 后缀——去重
+  if (base.endsWith('/api/v1')) base = base.slice(0, -'/api/v1'.length)
+  const url = `${base}${path.startsWith('/') ? '' : '/'}${path}`
+  try {
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!response.ok) return null
+    const blob = await response.blob()
+    const typed = mimeHint ? new Blob([blob], { type: mimeHint }) : blob
+    const objectUrl = window.URL.createObjectURL(typed)
+    return { url: objectUrl, revoke: () => window.URL.revokeObjectURL(objectUrl) }
+  } catch (e) {
+    console.warn('[auth-blob] 拉取失败:', url, e)
+    return null
+  }
+}
+
 function resolveApiBaseUrl(): string {
   const currentHost = window.location.hostname
   const currentProtocol = window.location.protocol

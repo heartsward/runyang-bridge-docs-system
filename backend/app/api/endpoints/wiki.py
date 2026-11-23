@@ -18,6 +18,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_active_user, get_db
+from app.core.visibility import (
+    visible_documents_filter,
+    ensure_document_readable,
+    can_modify,
+)
 from app.models.document import Document
 from app.models.user import User
 from app.services.wiki.index import WikiIndex
@@ -34,6 +39,24 @@ def _index() -> WikiIndex:
 
 def _storage() -> WikiStorage:
     return WikiStorage()
+
+
+def _visible_doc_id_set(db: Session, current_user: User) -> Optional[set]:
+    """32.1：当前用户可见的文档 id 集合；管理员返回 None（不限制）。
+    wiki FTS5 索引不感知权限，检索结果需在 API 层按 id 集合过滤。"""
+    if current_user.is_superuser:
+        return None
+    vis = visible_documents_filter(current_user)
+    rows = db.query(Document.id).filter(vis).all()
+    return {r[0] for r in rows}
+
+
+def _ensure_wiki_doc_readable(db: Session, current_user: User, doc_id: int) -> None:
+    """wiki 各 doc 端点统一的读权限检查（文档已删但索引残留 → 按不存在处理）"""
+    document = db.query(Document).filter(Document.id == doc_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    ensure_document_readable(db, current_user, document)
 
 
 @router.post("/rebuild", summary="全量重建 Wiki 索引（含存量 PDF 补提图片）")
@@ -121,18 +144,29 @@ async def search(
     tag: Optional[str] = Query(None, description="按 tag 过滤"),
     doc_type: Optional[str] = Query(None, description="按文档类型过滤"),
     top_k: int = Query(5, ge=1, le=50),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     idx = _index()
-    results = idx.search(q, top_k=top_k, tag=tag, doc_type=doc_type)
+    # 32.1：FTS5 索引不感知权限——普通用户结果按可见 id 集合过滤
+    # （多取候选再截断，避免过滤后不足 top_k）
+    allowed = _visible_doc_id_set(db, current_user)
+    if allowed is None:
+        results = idx.search(q, top_k=top_k, tag=tag, doc_type=doc_type)
+    else:
+        pool = idx.search(q, top_k=max(top_k * 10, 50), tag=tag, doc_type=doc_type)
+        results = [r for r in pool if r.get("doc_id") in allowed][:top_k]
     return {"query": q, "tag": tag, "doc_type": doc_type, "results": results}
 
 
 @router.get("/doc/{doc_id}", summary="获取单文档元数据")
 async def get_doc(
     doc_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    # 32.1：可见性检查
+    _ensure_wiki_doc_readable(db, current_user, doc_id)
     idx = _index()
     meta = idx.get_doc(doc_id)
     if not meta:
@@ -143,10 +177,20 @@ async def get_doc(
 @router.get("/doc/{doc_id}/backlinks", summary="反向链接列表")
 async def get_backlinks(
     doc_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    # 32.1：先验目标文档可见，再过滤反向链接列表（来源文档也可能不可见）
+    _ensure_wiki_doc_readable(db, current_user, doc_id)
     idx = _index()
-    return {"doc_id": doc_id, "backlinks": idx.list_backlinks(doc_id)}
+    links = idx.list_backlinks(doc_id)
+    allowed = _visible_doc_id_set(db, current_user)
+    if allowed is not None:
+        links = [
+            l for l in links
+            if (l.get("doc_id") if isinstance(l, dict) else l) in allowed
+        ]
+    return {"doc_id": doc_id, "backlinks": links}
 
 
 @router.get("/tags", summary="列出所有标签")
@@ -169,6 +213,7 @@ async def get_stats(
 @router.post("/report", summary="按主题生成报告骨架")
 async def make_report(
     payload: dict = Body(...),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     topic = payload.get("topic", "")
@@ -177,7 +222,11 @@ async def make_report(
     fmt = payload.get("format", "markdown")
 
     idx = _index()
-    docs = idx.search(topic, top_k=max_docs, tag=tag)
+    # 32.1：报告引用文档内容片段——普通用户只统计可见文档
+    allowed = _visible_doc_id_set(db, current_user)
+    docs = idx.search(topic, top_k=(max_docs if allowed is None else max(max_docs * 10, 50)), tag=tag)
+    if allowed is not None:
+        docs = [d for d in docs if d.get("doc_id") in allowed][:max_docs]
     sources = [
         {"doc_id": d["doc_id"], "title": d["title"], "snippet": d["snippet"]}
         for d in docs
@@ -224,6 +273,7 @@ async def make_report(
 async def download_doc(
     doc_id: int,
     type: str = Query("original", pattern="^(original|markdown)$"),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """下载文档。type=original 下载原文件，type=markdown 下载 MD 副本"""
@@ -231,6 +281,9 @@ async def download_doc(
 
     from app.db.database import engine
     from sqlalchemy import text as sa_text
+
+    # 32.1：读权限检查
+    _ensure_wiki_doc_readable(db, current_user, doc_id)
 
     # 查文档记录
     with engine.connect() as conn:
@@ -304,6 +357,7 @@ async def download_doc(
 async def get_image(
     doc_id: int,
     filename: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """下载 wiki/images/{doc_id}/ 下的图片。
@@ -313,6 +367,9 @@ async def get_image(
     """
     from fastapi.responses import FileResponse
     from app.services.wiki.image_extractor import WIKI_DIR
+
+    # 32.1：图片属于文档内容——可见性同详情
+    _ensure_wiki_doc_readable(db, current_user, doc_id)
 
     # 防穿越：文件名只允许 [A-Za-z0-9._-]，禁止 / \ ..
     if not filename or "/" in filename or "\\" in filename or ".." in filename:
@@ -341,9 +398,12 @@ async def get_image(
 @router.get("/doc/{doc_id}/images", summary="列出文档图片（阶段十八）")
 async def list_images(
     doc_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """列出某文档的已索引图片（含 caption + 下载 URL）"""
+    # 32.1：图片列表属于文档内容——可见性同详情
+    _ensure_wiki_doc_readable(db, current_user, doc_id)
     idx = _index()
     images = idx.get_doc_images(doc_id)
     base = _request_base_url()
@@ -366,6 +426,7 @@ def _request_base_url() -> str:
 @router.get("/doc/{doc_id}/markdown", summary="读取 MD 副本内容")
 async def get_markdown(
     doc_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """前端编辑器加载内容用
@@ -376,6 +437,8 @@ async def get_markdown(
     导致每保存一次就多一段重复的 frontmatter。
     frontmatter 原文仍随响应返回，需要展示"来源/标签"时可直接用。
     """
+    # 32.1：读权限同详情
+    _ensure_wiki_doc_readable(db, current_user, doc_id)
     storage = _storage()
     content = storage.read(doc_id)
     if not content:
@@ -402,8 +465,12 @@ async def save_markdown(
        `GET /search/preview`（source=auto）读的是数据库里的 content，
        只写 MD 副本不回写 DB，就会出现"保存成功但再预览还是老内容"。
     """
-    if not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="仅管理员可保存")
+    # 32.1：保存 MD——owner 或管理员可写（被分享者只读）
+    doc_for_perm = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc_for_perm:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if not can_modify(current_user, doc_for_perm.owner_id):
+        raise HTTPException(status_code=403, detail="只有文档创建者或管理员可以编辑")
 
     new_content = payload.get("content", "")
     if not new_content.strip():

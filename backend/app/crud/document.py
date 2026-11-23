@@ -17,11 +17,14 @@ class CRUDDocument:
         limit: int = 100,
         owner_id: Optional[int] = None,
         category_id: Optional[int] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        visibility = None,
     ) -> List[Document]:
-        """获取文档列表"""
+        """获取文档列表（32.1：visibility 为 SQLAlchemy 过滤表达式，None=不过滤）"""
         query = db.query(Document)
         
+        if visibility is not None:
+            query = query.filter(visibility)
         if owner_id:
             query = query.filter(Document.owner_id == owner_id)
         if category_id:
@@ -36,11 +39,14 @@ class CRUDDocument:
         db: Session,
         owner_id: Optional[int] = None,
         category_id: Optional[int] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        visibility = None,
     ) -> int:
-        """统计文档数量"""
+        """统计文档数量（32.1：支持 visibility 过滤）"""
         query = db.query(Document)
         
+        if visibility is not None:
+            query = query.filter(visibility)
         if owner_id:
             query = query.filter(Document.owner_id == owner_id)
         if category_id:
@@ -56,9 +62,10 @@ class CRUDDocument:
         days: int = 7,
         owner_id: Optional[int] = None,
         category_id: Optional[int] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        visibility = None,
     ) -> int:
-        """统计最近几天的文档数量"""
+        """统计最近几天的文档数量（32.1：支持 visibility 过滤）"""
         from datetime import datetime, timedelta
         
         query = db.query(Document)
@@ -67,6 +74,8 @@ class CRUDDocument:
         recent_date = datetime.utcnow() - timedelta(days=days)
         query = query.filter(Document.created_at >= recent_date)
         
+        if visibility is not None:
+            query = query.filter(visibility)
         if owner_id:
             query = query.filter(Document.owner_id == owner_id)
         if category_id:

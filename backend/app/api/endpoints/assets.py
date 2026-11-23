@@ -34,6 +34,12 @@ from sqlalchemy import func, desc, asc, or_, and_
 
 from app.core.deps import get_db, get_current_active_user, require_test_endpoints_enabled
 
+from app.core.visibility import (
+    visible_assets_filter,
+    ensure_asset_readable,
+    can_modify,
+)
+
 from app.models.user import User
 
 from app.models.asset import Asset as AssetModel, AssetStatus, NetworkLocation
@@ -133,6 +139,16 @@ async def list_assets(
     try:
 
         query = db.query(AssetModel)
+
+        
+
+        # 32.1：可见性过滤——管理员看全部；普通用户=自己创建 + 被分享（只读）
+
+        visibility = visible_assets_filter(current_user)
+
+        if visibility is not None:
+
+            query = query.filter(visibility)
 
         
 
@@ -282,6 +298,16 @@ async def count_assets(
 
         # 应用相同的筛选条件
 
+        # 32.1：与列表端点同可见性口径
+
+        visibility = visible_assets_filter(current_user)
+
+        if visibility is not None:
+
+            query = query.filter(visibility)
+
+        
+
         if search:
 
             search_filter = _build_asset_search_filter(search)
@@ -344,23 +370,43 @@ async def get_simple_asset_statistics(
 
     try:
 
+        # 32.1：统计按可见性口径（普通用户只统计 自己创建 + 被分享）
+
+        visibility = visible_assets_filter(current_user)
+
+
+        def _count(extra=None):
+
+            q = db.query(func.count(AssetModel.id))
+
+            if visibility is not None:
+
+                q = q.filter(visibility)
+
+            if extra is not None:
+
+                q = q.filter(extra)
+
+            return q.scalar()
+
+
         # 总数统计
 
-        total_assets = db.query(func.count(AssetModel.id)).scalar()
+        total_assets = _count()
 
         
 
         # 按类型统计
 
-        server_count = db.query(func.count(AssetModel.id)).filter(AssetModel.asset_type == 'server').scalar()
+        server_count = _count(AssetModel.asset_type == 'server')
 
-        network_count = db.query(func.count(AssetModel.id)).filter(AssetModel.asset_type == 'network').scalar()
+        network_count = _count(AssetModel.asset_type == 'network')
 
         
 
         # 按状态统计  
 
-        active_count = db.query(func.count(AssetModel.id)).filter(AssetModel.status == 'active').scalar()
+        active_count = _count(AssetModel.status == 'active')
 
         
 
@@ -413,6 +459,12 @@ async def get_asset(
         if not asset:
 
             raise HTTPException(status_code=404, detail="资产不存在")
+
+        
+
+        # 32.1：读权限——管理员 / creator / 被分享 可看
+
+        ensure_asset_readable(db, current_user, asset)
 
         
 
@@ -532,7 +584,16 @@ async def update_asset(
 
             raise HTTPException(status_code=404, detail="资产不存在")
 
-        
+
+        # 32.1 修（原代码缺权限检查——任何登录用户可改任何资产）：
+
+        # 仅 creator 本人或管理员可改；被分享者只读
+
+        if not can_modify(current_user, db_asset.creator_id):
+
+            raise HTTPException(status_code=403, detail="只有资产创建者或管理员可以修改此资产")
+
+                
 
         # 检查IP地址冲突（如果更新了IP）
 
@@ -752,49 +813,63 @@ async def get_asset_statistics(
 
     try:
 
+        # 32.1：统计按可见性口径（普通用户只统计 自己创建 + 被分享）
+
+        visibility = visible_assets_filter(current_user)
+
+
+        def _apply(q):
+
+            if visibility is not None:
+
+                q = q.filter(visibility)
+
+            return q
+
+
         # 总数统计
 
-        total_assets = db.query(func.count(AssetModel.id)).scalar()
+        total_assets = _apply(db.query(func.count(AssetModel.id))).scalar()
 
         
 
         # 按类型统计
 
-        type_stats = db.query(
+        type_stats = _apply(db.query(
 
             AssetModel.asset_type, func.count(AssetModel.id).label('count')
 
-        ).group_by(AssetModel.asset_type).all()
+        ).group_by(AssetModel.asset_type)).all()
 
         
 
         # 按状态统计
 
-        status_stats = db.query(
+        status_stats = _apply(db.query(
 
             AssetModel.status, func.count(AssetModel.id).label('count')
 
-        ).group_by(AssetModel.status).all()
+        ).group_by(AssetModel.status)).all()
 
         
 
         # 按网络位置统计
 
-        network_stats = db.query(
+        network_stats = _apply(db.query(
 
             AssetModel.network_location, func.count(AssetModel.id).label('count')
 
-        ).group_by(AssetModel.network_location).all()
+        ).group_by(AssetModel.network_location)).all()
 
         
 
         # 按部门统计
 
-        department_stats = db.query(
+        department_stats = _apply(db.query(
 
             AssetModel.department, func.count(AssetModel.id).label('count')
 
-        ).group_by(AssetModel.department).all()
+        ).group_by(AssetModel.department)).all()
 
         
 
@@ -858,13 +933,8 @@ async def export_assets(
 
     try:
 
-        # 检查权限
-
-        if not current_user.is_superuser:
-
-            raise HTTPException(status_code=403, detail="只有管理员可以导出资产数据")
-
-        
+        # 32.1：导出对登录用户开放（陈工未列入管理选项），但只允许导出可见资产——
+        # 原"仅管理员"限制放开，查询叠加可见性过滤兜底
 
         if not export_request.asset_ids:
 
@@ -878,9 +948,17 @@ async def export_assets(
 
         
 
-        # 查询资产数据
+        # 查询资产数据（32.1：叠加可见性——普通用户导不出别人的资产）
 
-        assets = db.query(AssetModel).filter(AssetModel.id.in_(export_request.asset_ids)).all()
+        eq = db.query(AssetModel).filter(AssetModel.id.in_(export_request.asset_ids))
+
+        visibility = visible_assets_filter(current_user)
+
+        if visibility is not None:
+
+            eq = eq.filter(visibility)
+
+        assets = eq.all()
 
         
 
@@ -1511,7 +1589,15 @@ async def extract_assets_from_file(
 
 ):
 
-    """从文件内容中提取资产信息 - 支持AI提取和传统规则提取"""
+    """从文件内容中提取资产信息 - 支持AI提取和传统规则提取
+
+    32.1：从文档提取资产是"管理选项"——仅管理员（陈工指定；前端已 gate，此处后端防御纵深）
+    """
+
+    if not current_user.is_superuser:
+
+        raise HTTPException(status_code=403, detail="只有管理员可以从文档提取资产")
+
 
     import asyncio
 
@@ -2031,17 +2117,31 @@ async def get_search_suggestions(
 
     try:
 
+        # 32.1：建议同样按可见性口径（普通用户不能借建议窥探别人的设备名/IP）
+
+        visibility = visible_assets_filter(current_user)
+
+
+        def _sq(q_):
+
+            if visibility is not None:
+
+                q_ = q_.filter(visibility)
+
+            return q_
+
+
         suggestions = []
 
         
 
         # IP地址建议
 
-        ip_matches = db.query(AssetModel.ip_address).filter(
+        ip_matches = _sq(db.query(AssetModel.ip_address).filter(
 
             AssetModel.ip_address.contains(q)
 
-        ).limit(limit).all()
+        )).limit(limit).all()
 
         suggestions.extend([{"type": "ip", "value": match[0], "label": f"IP: {match[0]}"} for match in ip_matches])
 
@@ -2049,11 +2149,11 @@ async def get_search_suggestions(
 
         # 设备名称建议
 
-        name_matches = db.query(AssetModel.name).filter(
+        name_matches = _sq(db.query(AssetModel.name).filter(
 
             AssetModel.name.contains(q)
 
-        ).limit(limit).all()
+        )).limit(limit).all()
 
         suggestions.extend([{"type": "name", "value": match[0], "label": f"设备: {match[0]}"} for match in name_matches])
 
@@ -2061,11 +2161,11 @@ async def get_search_suggestions(
 
         # 部门建议
 
-        dept_matches = db.query(AssetModel.department).filter(
+        dept_matches = _sq(db.query(AssetModel.department).filter(
 
             and_(AssetModel.department.is_not(None), AssetModel.department.contains(q))
 
-        ).distinct().limit(limit).all()
+        ).distinct()).limit(limit).all()
 
         suggestions.extend([{"type": "department", "value": match[0], "label": f"部门: {match[0]}"} for match in dept_matches])
 

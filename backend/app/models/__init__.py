@@ -1,6 +1,7 @@
 from .user import User
 from .document import Document, Category, SearchLog, DocumentView, DocumentDownload
 from .ai_config import AIUserConfig
+from .share import Share
 
 __all__ = [
     "User",
@@ -9,5 +10,6 @@ __all__ = [
     "SearchLog",
     "DocumentView",
     "DocumentDownload",
-    "AIUserConfig"
+    "AIUserConfig",
+    "Share"
 ]

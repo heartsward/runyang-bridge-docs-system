@@ -220,11 +220,14 @@ const menuOptions = computed(() => {
       key: 'search',
       icon: () => h(NIcon, { component: SearchOutline })
     },
-    {
-      label: '系统设置',
-      key: 'settings',
-      icon: () => h(NIcon, { component: SettingsOutline })
-    }
+    // 32.1：系统设置=管理选项——仅管理员可见（路由守卫同步 requiresAdmin）
+    ...(currentUser.value?.is_superuser ? [
+      {
+        label: '系统设置',
+        key: 'settings',
+        icon: () => h(NIcon, { component: SettingsOutline })
+      }
+    ] : [])
   ]
 
 
