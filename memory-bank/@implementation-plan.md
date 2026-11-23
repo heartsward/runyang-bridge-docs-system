@@ -2755,3 +2755,11 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **配套**：前端搜索框 placeholder 改"搜索设备，多词空格分隔（如：华为 交换机）"；suggestions 端点前端未调用、不改动
 - **能改什么**：`backend/app/api/endpoints/assets.py` + `frontend/src/views/AssetView.vue`
 - **验证**：py_compile + import 烟测（91 paths）+ 内存 SQLite 8 组语义用例全对（跨字段 AND、无交集空结果、三词多字段、单词/IP 完整匹配、空串）+ pytest 41 passed + vite build 通过
+
+### 步骤 31.2 — 修复服务重启自动重新启用被禁用的 admin（2026-11-23）
+> 陈工反馈：把 admin 用户禁用了，每次服务重启又被自动启用
+- **根因**：`main.py` `init_default_users()` 启动钩子里有"admin 存在但 is_active=False → 自动激活"的修复逻辑，每次启动都覆盖管理员的禁用操作
+- **修法**：去掉自动激活分支——`is_active` 完全尊重人工设置，启动时只打印状态提示；**保留** `is_superuser` 自动修复（防止误降权导致系统失去管理员锁死，这是合理兜底）
+- **核查**：独立脚本 init_default_user.py 无自动激活问题；settings.py 的 is_active=True 仅用于新建用户，正常
+- **能改什么**：`backend/app/main.py`
+- **验证**：py_compile + import 烟测（91 paths）+ 内存 SQLite 两场景断言（禁用 admin 重启后保持禁用；降权 admin 仍自动恢复超管）+ pytest 41 passed

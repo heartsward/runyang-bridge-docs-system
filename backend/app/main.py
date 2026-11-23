@@ -75,20 +75,21 @@ def init_default_users():
                 created_user = crud_user.create(db, obj_in=admin_user)
                 print("OK: 默认管理员用户创建成功 (admin/admin123)")
             else:
-                # 检查现有admin用户是否具有管理员权限与激活状态
+                # 检查现有admin用户是否具有管理员权限
+                # 31.2 修：**不再自动激活 is_active**——陈工手动禁用 admin 是主动管理操作，
+                # 之前的"自动激活"把禁用状态每次重启都覆盖掉，与管理员意图相悖。
+                # 只保留 is_superuser 修复（防止误降权导致系统失去管理员锁死）。
                 needs_save = False
                 if not existing_admin.is_superuser:
                     print("INFO: admin用户存在但缺少管理员权限，正在修复...")
                     existing_admin.is_superuser = True
                     needs_save = True
                 if not existing_admin.is_active:
-                    print("INFO: admin用户存在但处于未激活，正在自动激活...")
-                    existing_admin.is_active = True
-                    needs_save = True
+                    print("INFO: admin用户已被禁用（保持禁用状态，不再自动激活）")
                 if needs_save:
                     db.add(existing_admin)
                     db.commit()
-                    print("OK: admin用户状态已修复")
+                    print("OK: admin用户权限已修复")
                 else:
                     print("OK: 管理员用户已存在且状态正常")
         finally:
