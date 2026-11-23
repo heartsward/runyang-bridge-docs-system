@@ -829,38 +829,7 @@
               </n-descriptions>
             </n-tab-pane>
 
-            <!-- 登录凭据标签页 -->
-            <n-tab-pane name="credentials" tab="登录凭据">
-              <n-form label-placement="left" label-width="80px">
-                <n-form-item label="用户名">
-                  <n-text code v-if="viewingAsset.username">{{ viewingAsset.username }}</n-text>
-                  <n-text depth="3" v-else>未设置</n-text>
-                </n-form-item>
-                <n-form-item label="密码">
-                  <n-input
-                    v-if="viewingAsset.password"
-                    :value="viewingAsset.password"
-                    type="password"
-                    readonly
-                    show-password-on="click"
-                    style="max-width: 250px;"
-                    autocomplete="off"
-                  />
-                  <n-text depth="3" v-else>未设置</n-text>
-                </n-form-item>
-                <n-form-item label="SSH密钥" v-if="viewingAsset.ssh_key">
-                  <n-input
-                    :value="viewingAsset.ssh_key"
-                    type="textarea"
-                    readonly
-                    :rows="4"
-                    style="max-width: 400px;"
-                  />
-                </n-form-item>
-              </n-form>
-            </n-tab-pane>
-
-            <!-- 32.5：扩展信息标签页（模型补全字段完整展示） -->
+            <!-- 32.5：扩展信息标签页（模型补全字段完整展示）——第二列（陈工指定顺序） -->
             <n-tab-pane name="extended" tab="扩展信息">
               <n-descriptions bordered :column="2">
                 <n-descriptions-item label="制造商">{{ viewingAsset.manufacturer || '未设置' }}</n-descriptions-item>
@@ -899,6 +868,37 @@
                   {{ viewingAsset.source_file || (viewingAsset.source_document_id ? `文档#${viewingAsset.source_document_id}` : '手工录入') }}
                 </n-descriptions-item>
               </n-descriptions>
+            </n-tab-pane>
+
+            <!-- 登录凭据标签页——第三列（陈工指定顺序） -->
+            <n-tab-pane name="credentials" tab="登录凭据">
+              <n-form label-placement="left" label-width="80px">
+                <n-form-item label="用户名">
+                  <n-text code v-if="viewingAsset.username">{{ viewingAsset.username }}</n-text>
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-form-item>
+                <n-form-item label="密码">
+                  <n-input
+                    v-if="viewingAsset.password"
+                    :value="viewingAsset.password"
+                    type="password"
+                    readonly
+                    show-password-on="click"
+                    style="max-width: 250px;"
+                    autocomplete="off"
+                  />
+                  <n-text depth="3" v-else>未设置</n-text>
+                </n-form-item>
+                <n-form-item label="SSH密钥" v-if="viewingAsset.ssh_key">
+                  <n-input
+                    :value="viewingAsset.ssh_key"
+                    type="textarea"
+                    readonly
+                    :rows="4"
+                    style="max-width: 400px;"
+                  />
+                </n-form-item>
+              </n-form>
             </n-tab-pane>
 
           </n-tabs>
