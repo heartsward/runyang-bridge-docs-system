@@ -2864,3 +2864,4 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **导出清单不变**（27 字段现在全部界面可维护，脱节消除）
 - 顺手修基线：详情 4 处 `span="2"` 字符串写法（NDescriptionsItem span 是 number prop → TS2322 ×3）改 `:span="2"`——vue-tsc 归一化对账净 -3 零新增
 - **验证**：vue-tsc 错误数 215→212（修3基线，新增0）；vite build OK；后端无改动（AssetUpdate 原生接受全字段，PUT 走 exclude_unset）
+- **32.5 修正（陈工反馈）**：扩展字段不进列设置/排序（表格横向超宽）——撤回 CONFIGURABLE_COL_KEYS/排序项/colDefsMap 扩展列与 DEFAULT_HIDDEN_COLS，扩展字段只活在表单折叠区+详情扩展tab。旧 localStorage 存档里的扩展列 key 由 columns 组装的存在性过滤自动丢弃，无需迁移。
