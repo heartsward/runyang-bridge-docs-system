@@ -19,6 +19,7 @@ interface User {
   is_active: boolean
   is_superuser: boolean
   created_at?: string
+  mcp_token?: string | null  // 32.2：普通用户 MCP 个人码；管理员为 null（用统一码）
 }
 
 interface UserCreate {
@@ -42,6 +43,14 @@ interface UserUpdate {
   is_active?: boolean
   is_superuser?: boolean
   password?: string  // 添加密码字段支持
+}
+
+// MCP 验证码状态（32.2）
+interface McpTokenStatus {
+  mode: 'admin' | 'personal'
+  token: string
+  can_regenerate_personal: boolean
+  note?: string
 }
 
 // AI配置相关接口
@@ -107,7 +116,7 @@ export class SettingsService {
     try {
       // 首先尝试原始API
       const response = await apiService.post('/settings/users', userData)
-      return response as UserSettings
+      return response as User  // 32.2 修基线：原 as UserSettings 类型错
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API
@@ -141,8 +150,52 @@ export class SettingsService {
    * 更新用户信息 - 仅管理员
    */
   async updateUser(userId: number, userData: UserUpdate): Promise<User> {
-    const response = await apiService.put(`/settings/users/${userId}`, userData)
+    // 32.2 修基线：补泛型（原无泛型返回 unknown）
+    const response = await apiService.put<User>(`/settings/users/${userId}`, userData)
     return response
+  }
+
+  // ============ 32.2：MCP 验证码管理 ============
+
+  /**
+   * 查看我的 MCP 验证码状态（普通用户=个人码，管理员=统一码）
+   */
+  async getMyMcpToken(): Promise<McpTokenStatus> {
+    return await apiService.get<McpTokenStatus>('/settings/mcp-token/me')
+  }
+
+  /**
+   * 重新随机我的 MCP 个人码（普通用户）
+   */
+  async regenerateMyMcpToken(): Promise<{ message: string; token: string }> {
+    return await apiService.post<{ message: string; token: string }>(
+      '/settings/mcp-token/me/regenerate'
+    )
+  }
+
+  /**
+   * 查看管理员统一 MCP 码 - 仅管理员
+   */
+  async getAdminMcpToken(): Promise<{ token: string }> {
+    return await apiService.get<{ token: string }>('/settings/mcp-token/admin')
+  }
+
+  /**
+   * 重置管理员统一 MCP 码 - 仅管理员（所有管理员客户端需同步换码）
+   */
+  async regenerateAdminMcpToken(): Promise<{ message: string; token: string }> {
+    return await apiService.post<{ message: string; token: string }>(
+      '/settings/mcp-token/admin/regenerate'
+    )
+  }
+
+  /**
+   * 重置指定普通用户的 MCP 码 - 仅管理员（泄露应急）
+   */
+  async regenerateUserMcpToken(userId: number): Promise<{ message: string; token: string }> {
+    return await apiService.post<{ message: string; token: string }>(
+      `/settings/mcp-token/users/${userId}/regenerate`
+    )
   }
 
   /**
@@ -152,7 +205,7 @@ export class SettingsService {
     try {
       // 首先尝试原始API
       const response = await apiService.delete(`/settings/users/${userId}`)
-      return response as UserSettings
+      return response as unknown as { message: string }  // 32.2 修基线：原 as UserSettings 类型错
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API
@@ -217,4 +270,4 @@ export const settingsService = new SettingsService()
 export default settingsService
 
 // Export interfaces for use in components
-export type { UserSettings, UserSettingsUpdate, User, UserCreate, UserUpdate, AIConfigData }
+export type { UserSettings, UserSettingsUpdate, User, UserCreate, UserUpdate, McpTokenStatus, AIConfigData }

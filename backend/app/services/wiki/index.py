@@ -578,36 +578,63 @@ class WikiIndex:
                 })
             return results[:top_k]
 
-    def list_categories(self) -> List[Dict[str, Any]]:
-        """列出所有业务分类及文档数（阶段十八·18.5）"""
-        with self._conn() as conn:
-            rows = conn.execute(
-                """SELECT COALESCE(NULLIF(doc_category, ''), '其他') AS doc_category,
-                          COUNT(*) AS doc_count
-                   FROM doc_meta
-                   GROUP BY doc_category
-                   ORDER BY doc_count DESC"""
-            ).fetchall()
-            return [dict(r) for r in rows]
+    def list_categories(self, doc_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+        """列出所有业务分类及文档数（阶段十八·18.5）
 
-    def list_tags(self, prefix: str = "") -> List[Dict[str, Any]]:
-        """列出所有标签（按文档数排序）"""
+        32.2：doc_ids 给定时只统计这批可见文档（普通用户 MCP 口径）；None=全部。
+        """
         with self._conn() as conn:
-            if prefix:
+            if doc_ids:
+                marks = ",".join("?" * len(doc_ids))
                 rows = conn.execute(
-                    """SELECT tag, COUNT(DISTINCT doc_id) AS doc_count
-                       FROM doc_tags
-                       WHERE tag LIKE ?
-                       GROUP BY tag
+                    f"""SELECT COALESCE(NULLIF(doc_category, ''), '其他') AS doc_category,
+                              COUNT(*) AS doc_count
+                       FROM doc_meta
+                       WHERE doc_id IN ({marks})
+                       GROUP BY doc_category
                        ORDER BY doc_count DESC""",
-                    (prefix + "%",),
+                    tuple(doc_ids),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """SELECT tag, COUNT(DISTINCT doc_id) AS doc_count
+                    """SELECT COALESCE(NULLIF(doc_category, ''), '其他') AS doc_category,
+                              COUNT(*) AS doc_count
+                       FROM doc_meta
+                       GROUP BY doc_category
+                       ORDER BY doc_count DESC"""
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def list_tags(self, prefix: str = "", doc_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+        """列出所有标签（按文档数排序）
+
+        32.2：doc_ids 给定时只统计这批可见文档的标签（普通用户 MCP 口径）。
+        """
+        with self._conn() as conn:
+            id_clause = ""
+            params: List[Any] = []
+            if doc_ids:
+                marks = ",".join("?" * len(doc_ids))
+                id_clause = f" AND doc_id IN ({marks})"
+                params.extend(doc_ids)
+            if prefix:
+                rows = conn.execute(
+                    f"""SELECT tag, COUNT(DISTINCT doc_id) AS doc_count
                        FROM doc_tags
+                       WHERE tag LIKE ?{id_clause}
                        GROUP BY tag
                        ORDER BY doc_count DESC""",
+                    [prefix + "%", *params],
+                ).fetchall()
+            else:
+                where = f"WHERE 1=1{id_clause}" if id_clause else ""
+                rows = conn.execute(
+                    f"""SELECT tag, COUNT(DISTINCT doc_id) AS doc_count
+                       FROM doc_tags
+                       {where}
+                       GROUP BY tag
+                       ORDER BY doc_count DESC""",
+                    params,
                 ).fetchall()
             return [dict(r) for r in rows]
 

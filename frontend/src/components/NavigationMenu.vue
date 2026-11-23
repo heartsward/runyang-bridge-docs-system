@@ -112,6 +112,9 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 32.2：MCP 调用验证码弹窗（普通用户个人码 / 管理员统一码） -->
+    <McpTokenModal v-model:show="showMcpTokenModal" />
   </n-layout>
 </template>
 
@@ -145,10 +148,12 @@ import {
   SettingsOutline,
   PersonOutline,
   LogOutOutline,
-  HardwareChipOutline
+  HardwareChipOutline,
+  KeyOutline
 } from '@vicons/ionicons5'
 import { authService } from '@/services'
 import type { User } from '@/types/api'
+import McpTokenModal from './McpTokenModal.vue'  // 32.2
 
 const router = useRouter()
 const route = useRoute()
@@ -160,6 +165,8 @@ const userLoading = ref(true)
 
 // 修改密码相关
 const showChangePasswordModal = ref(false)
+// 32.2：MCP 验证码弹窗
+const showMcpTokenModal = ref(false)
 const changingPassword = ref(false)
 const passwordFormRef = ref()
 const passwordForm = ref({
@@ -240,6 +247,12 @@ const userDropdownOptions = [
     key: 'profile',
     icon: () => h(NIcon, { component: PersonOutline })
   },
+  // 32.2：MCP 调用验证码（普通用户=个人码可重置；管理员=统一码展示）
+  {
+    label: 'MCP 验证码',
+    key: 'mcp-token',
+    icon: () => h(NIcon, { component: KeyOutline })
+  },
   {
     label: '修改密码',
     key: 'change-password',
@@ -278,6 +291,10 @@ const handleUserAction = (key: string) => {
     case 'profile':
       // TODO: 实现个人设置页面
       message.info('个人设置功能开发中...')
+      break
+    case 'mcp-token':
+      // 32.2：MCP 调用验证码弹窗
+      showMcpTokenModal.value = true
       break
     case 'change-password':
       showChangePasswordModal.value = true

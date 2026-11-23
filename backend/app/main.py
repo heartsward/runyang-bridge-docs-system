@@ -164,19 +164,22 @@ app = FastAPI(
 
 # 阶段十·W3：挂载 FastMCP（HTTP transport）
 # 注意：必须用 lifespan=mcp_app.lifespan，否则 FastMCP 内部 task group 不能初始化
+# 32.2：MCP 加认证中间件——Bearer <验证码>（管理员统一码 / 普通用户个人码），
+# 未带有效验证码一律 401；工具层按用户可见性过滤数据
 try:
     from fastmcp import FastMCP
     from app.services.wiki.mcp_server import register_tools
+    from app.core.mcp_auth import MCPAuthMiddleware
 
     wiki_mcp = FastMCP("AI-Wiki")
     register_tools(wiki_mcp)
 
     mcp_app = wiki_mcp.http_app(path="/")
-    app.mount("/mcp", mcp_app)
+    app.mount("/mcp", MCPAuthMiddleware(mcp_app))
     # 阶段十五：不再覆盖 app.router.lifespan_context（那会让主应用 startup 不执行）。
     # 改为把 MCP 的 lifespan 交给主 lifespan 在启动时 `async with` 调用。
     mcp_lifespan = mcp_app.lifespan
-    print("AI Wiki MCP server 已挂载到 /mcp (HTTP transport)")
+    print("AI Wiki MCP server 已挂载到 /mcp (HTTP transport + 32.2 验证码认证)")
 except Exception as e:
     print(f"WARN: FastMCP 挂载失败: {e}")
 

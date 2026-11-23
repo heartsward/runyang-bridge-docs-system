@@ -27,6 +27,38 @@
         />
       </div>
     </n-card>
+
+    <!-- 32.2：管理员统一 MCP 验证码 -->
+    <n-card v-if="currentUser?.is_superuser" title="管理员统一 MCP 验证码" style="margin-bottom: 24px;">
+      <template #header-extra>
+        <n-button size="small" @click="loadAdminMcpToken" :loading="adminMcpLoading">
+          <template #icon><n-icon><RefreshOutline /></n-icon></template>
+          刷新
+        </n-button>
+      </template>
+      <n-space vertical size="medium">
+        <n-text depth="3">
+          所有管理员共用这一个 MCP 验证码（调用 http://…/mcp 时 Authorization: Bearer 填它）。
+          重置后所有管理员的 MCP 客户端都要更换新码。
+        </n-text>
+        <n-input-group>
+          <n-input
+            :value="revealedAdminMcp ? adminMcpToken : (adminMcpToken ? adminMcpToken.slice(0,4) + '•'.repeat(12) + adminMcpToken.slice(-4) : '')"
+            readonly
+            style="font-family: 'Consolas', 'Monaco', monospace;"
+            placeholder="加载中…"
+          />
+          <n-button quaternary @click="revealedAdminMcp = !revealedAdminMcp">{{ revealedAdminMcp ? '隐藏' : '显示' }}</n-button>
+          <n-button type="primary" ghost :disabled="!adminMcpToken" @click="copyAdminMcpToken">复制</n-button>
+          <n-popconfirm @positive-click="doRegenerateAdminMcp">
+            <template #trigger>
+              <n-button type="error" :loading="adminMcpRegenerating" :disabled="!adminMcpToken">重置统一码</n-button>
+            </template>
+            重置后所有管理员客户端都要换新码，旧码立即失效。确定？
+          </n-popconfirm>
+        </n-input-group>
+      </n-space>
+    </n-card>
     
     <!-- 阶段七：统一 AI 多模态服务 -->
     <n-card title="统一 AI 多模态服务（文档提取）" style="margin-bottom: 24px;">
@@ -299,6 +331,7 @@ import {
   NDataTable,
   NModal,
   NInput,
+  NInputGroup,
   NSwitch,
   NTag,
   NPopconfirm,
@@ -320,6 +353,8 @@ import {
 } from '@vicons/ionicons5'
 import PageLayout from '@/components/PageLayout.vue'
 import { settingsService, authService } from '@/services'
+// 32.2：修基线遗留——User/UserCreate/UserUpdate 此前未导入（vue-tsc 一直报错）
+import type { User, UserCreate, UserUpdate } from '@/services/settings'
 import { RefreshOutline } from '@vicons/ionicons5'
 import {
   extractionConfigService,
@@ -336,6 +371,19 @@ const usersLoading = ref(false)
 const showCreateUserModal = ref(false)
 const showEditUserModal = ref(false)
 const editingUser = ref<User | null>(null)
+
+// 32.2：MCP 验证码管理
+const revealedMcp = ref<Set<number>>(new Set())
+const adminMcpToken = ref('')
+const revealedAdminMcp = ref(false)
+const adminMcpLoading = ref(false)
+const adminMcpRegenerating = ref(false)
+
+const toggleRevealMcp = (id: number) => {
+  const s = new Set(revealedMcp.value)
+  s.has(id) ? s.delete(id) : s.add(id)
+  revealedMcp.value = s
+}
 
 // 新用户表单
 const newUserForm = ref<UserCreate>({
@@ -416,6 +464,44 @@ const userColumns = [
     }
   },
   {
+    // 32.2：MCP 验证码——普通用户显示个人码（可显示/复制/重置）；管理员显示"统一码"
+    title: 'MCP 验证码',
+    key: 'mcp_token',
+    width: 230,
+    render: (row: User) => {
+      if (row.is_superuser) {
+        return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '用统一码' })
+      }
+      const tok = row.mcp_token || ''
+      const shown = revealedMcp.value.has(row.id) ? tok : (tok ? tok.slice(0, 4) + '•'.repeat(12) + tok.slice(-4) : '未生成')
+      return h(NSpace, { size: 4, align: 'center' }, {
+        default: () => [
+          h(NText, { depth: 3, style: 'font-family: Consolas, Monaco, monospace; font-size: 12px;' }, { default: () => shown }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => toggleRevealMcp(row.id) }, { default: () => revealedMcp.value.has(row.id) ? '隐藏' : '显示' }),
+          tok ? h(NButton, {
+            size: 'tiny', quaternary: true,
+            onClick: async () => {
+              try { await navigator.clipboard.writeText(tok); message.success('已复制') }
+              catch { message.error('复制失败') }
+            }
+          }, { default: () => '复制' }) : null,
+          h(NPopconfirm, {
+            onPositiveClick: async () => {
+              try {
+                const r = await settingsService.regenerateUserMcpToken(row.id)
+                message.success(r.message || '已重置')
+                await loadUsers()
+              } catch (e: any) { message.error(e?.response?.data?.detail || '重置失败') }
+            }
+          }, {
+            trigger: () => h(NButton, { size: 'tiny', quaternary: true, type: 'error' }, { default: () => '重置' }),
+            default: () => `重置用户 ${row.username} 的 MCP 码？旧码立即失效。`
+          })
+        ].filter(Boolean)
+      })
+    }
+  },
+  {
     title: '操作',
     key: 'actions',
     width: 150,
@@ -472,6 +558,43 @@ const loadUsers = async () => {
     message.error('获取用户列表失败')
   } finally {
     usersLoading.value = false
+  }
+}
+
+// 32.2：管理员统一 MCP 码
+const loadAdminMcpToken = async () => {
+  adminMcpLoading.value = true
+  try {
+    const r = await settingsService.getAdminMcpToken()
+    adminMcpToken.value = r.token
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '获取管理员统一 MCP 码失败')
+  } finally {
+    adminMcpLoading.value = false
+  }
+}
+
+const copyAdminMcpToken = async () => {
+  if (!adminMcpToken.value) return
+  try {
+    await navigator.clipboard.writeText(adminMcpToken.value)
+    message.success('统一 MCP 码已复制')
+  } catch {
+    message.error('复制失败，请手动选择复制')
+  }
+}
+
+const doRegenerateAdminMcp = async () => {
+  adminMcpRegenerating.value = true
+  try {
+    const r = await settingsService.regenerateAdminMcpToken()
+    message.success(r.message || '已重置统一码')
+    revealedAdminMcp.value = true
+    await loadAdminMcpToken()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '重置失败')
+  } finally {
+    adminMcpRegenerating.value = false
   }
 }
 
@@ -625,6 +748,7 @@ onMounted(() => {
   loadCurrentUser().then(() => {
     if (currentUser.value?.is_superuser) {
       loadUsers()
+      loadAdminMcpToken()  // 32.2：管理员统一 MCP 码
     }
   }).catch((error) => {
     console.error('加载用户信息失败:', error)

@@ -49,6 +49,8 @@ class UserResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     created_at: Optional[str] = None
+    # 32.2：MCP 个人验证码（普通用户有值；管理员为 None——用统一码）
+    mcp_token: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -83,7 +85,8 @@ async def get_all_users(
                 "phone": user.phone or "",
                 "is_active": bool(user.is_active),
                 "is_superuser": bool(user.is_superuser),
-                "created_at": user.created_at.isoformat() if user.created_at else ""
+                "created_at": user.created_at.isoformat() if user.created_at else "",
+                "mcp_token": user.mcp_token,  # 32.2：管理员界面直接可见各用户码
             }
             result.append(UserResponse(**user_data))
         except Exception as e:
@@ -128,7 +131,12 @@ async def create_user(
         is_superuser=user_data.is_superuser,
         is_active=True
     )
-    
+
+    # 32.2：普通用户创建时自动发 MCP 个人验证码；管理员保持 NULL（用统一码）
+    if not user_data.is_superuser:
+        from app.core.mcp_auth import gen_mcp_token
+        db_user.mcp_token = gen_mcp_token()
+
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -143,7 +151,8 @@ async def create_user(
         phone=db_user.phone,
         is_active=db_user.is_active,
         is_superuser=db_user.is_superuser,
-        created_at=db_user.created_at.isoformat() if db_user.created_at else None
+        created_at=db_user.created_at.isoformat() if db_user.created_at else None,
+        mcp_token=db_user.mcp_token,
     )
 
 @router.put("/users/{user_id}", response_model=UserResponse, summary="更新用户信息")
@@ -192,6 +201,11 @@ async def update_user(
             detail=f"用户名 {settings.API_SERVICE_USERNAME} 为 API 服务账号保留名，不能用于其他账号。"
         )
     
+    # 32.2：升降级自动切换 MCP 验证码——
+    #   普通→管理员：清空个人码（改用统一管理员码）
+    #   管理员→普通：自动生成个人码
+    old_is_superuser = bool(db_user.is_superuser)
+
     # 更新用户信息
     for field, value in user_data.dict(exclude_unset=True).items():
         if field == "username" and value:
@@ -209,11 +223,23 @@ async def update_user(
             hashed_password = pwd_context.hash(value.strip())
             setattr(db_user, "hashed_password", hashed_password)
             continue  # 跳过设置原始密码
-        
+
+        # 32.2：mcp_token 不允许通过用户编辑表单直接改（防绕过升降级钩子/注入）
+        elif field == "mcp_token":
+            continue
+
         # 设置其他字段（跳过空的密码字段）
         if field != "password":
             setattr(db_user, field, value)
-    
+
+    # 32.2：根据升降级结果调整 mcp_token（old_is_superuser 在字段更新前已捕获）
+    new_is_superuser = bool(db_user.is_superuser)
+    if new_is_superuser and not old_is_superuser:
+        db_user.mcp_token = None  # 升级：去掉个人码，用管理员统一码
+    elif old_is_superuser and not new_is_superuser:
+        from app.core.mcp_auth import gen_mcp_token
+        db_user.mcp_token = gen_mcp_token()  # 降级：生成个人码
+
     db.commit()
     db.refresh(db_user)
     
@@ -227,7 +253,8 @@ async def update_user(
         phone=db_user.phone,
         is_active=db_user.is_active,
         is_superuser=db_user.is_superuser,
-        created_at=db_user.created_at.isoformat() if db_user.created_at else None
+        created_at=db_user.created_at.isoformat() if db_user.created_at else None,
+        mcp_token=db_user.mcp_token,
     )
 
 @router.delete("/users/{user_id}", summary="删除用户")
@@ -255,6 +282,104 @@ async def delete_user(
     db.commit()
     
     return {"message": "用户删除成功"}
+
+
+# ============ 32.2：MCP 验证码管理 ============
+
+@router.get("/mcp-token/me", summary="查看我的 MCP 验证码状态")
+async def get_my_mcp_token(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """当前用户的 MCP 调用验证码：
+    - 普通用户：返回个人码（mcp_token）
+    - 管理员：个人码为空，返回系统统一码（管理员统一用这一个）
+    """
+    if current_user.is_superuser:
+        from app.core.mcp_auth import get_or_create_admin_token
+        return {
+            "mode": "admin",
+            "token": get_or_create_admin_token(db),
+            "can_regenerate_personal": False,
+            "note": "管理员使用统一 MCP 验证码",
+        }
+    if not current_user.mcp_token:
+        # 兜底：历史普通用户没码（迁移脚本没跑的库）——读取时自动补发
+        from app.core.mcp_auth import gen_mcp_token
+        current_user.mcp_token = gen_mcp_token()
+        db.commit()
+        db.refresh(current_user)
+    return {
+        "mode": "personal",
+        "token": current_user.mcp_token,
+        "can_regenerate_personal": True,
+        "note": "个人 MCP 验证码，可随时重新随机",
+    }
+
+
+@router.post("/mcp-token/me/regenerate", summary="重新随机我的 MCP 验证码")
+async def regenerate_my_mcp_token(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """普通用户重新随机个人码（旧码立即失效）。管理员不适用（用统一码）。"""
+    if current_user.is_superuser:
+        raise HTTPException(status_code=400, detail="管理员使用统一 MCP 验证码，无个人码可重置")
+    from app.core.mcp_auth import gen_mcp_token
+    current_user.mcp_token = gen_mcp_token()
+    db.commit()
+    return {"message": "MCP 验证码已重新生成，旧码立即失效", "token": current_user.mcp_token}
+
+
+@router.get("/mcp-token/admin", summary="查看管理员统一 MCP 验证码")
+async def get_admin_mcp_token(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """仅管理员：查看统一 MCP 验证码（所有管理员共用）"""
+    check_admin_permission(current_user)
+    from app.core.mcp_auth import get_or_create_admin_token
+    return {"token": get_or_create_admin_token(db)}
+
+
+@router.post("/mcp-token/admin/regenerate", summary="重置管理员统一 MCP 验证码")
+async def regenerate_admin_mcp_token(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """仅管理员：重新随机统一码（所有管理员的 MCP 客户端需同步更换）"""
+    check_admin_permission(current_user)
+    from app.core.mcp_auth import gen_mcp_token, ADMIN_MCP_TOKEN_KEY
+    from app.models.system_config import SystemConfig
+    import json
+    new_token = gen_mcp_token()
+    row = db.query(SystemConfig).filter(SystemConfig.key == ADMIN_MCP_TOKEN_KEY).first()
+    if row:
+        row.value = json.dumps(new_token, ensure_ascii=False)
+    else:
+        db.add(SystemConfig(key=ADMIN_MCP_TOKEN_KEY, value=json.dumps(new_token, ensure_ascii=False),
+                            description="管理员统一 MCP 调用验证码（32.2）"))
+    db.commit()
+    return {"message": "管理员统一 MCP 验证码已重置，所有管理员客户端需更换新码", "token": new_token}
+
+
+@router.post("/mcp-token/users/{user_id}/regenerate", summary="重置指定用户的 MCP 验证码")
+async def regenerate_user_mcp_token(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """仅管理员：为某个普通用户重新随机个人码（泄露时应急用）"""
+    check_admin_permission(current_user)
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if db_user.is_superuser:
+        raise HTTPException(status_code=400, detail="管理员无个人码（用统一码）")
+    from app.core.mcp_auth import gen_mcp_token
+    db_user.mcp_token = gen_mcp_token()
+    db.commit()
+    return {"message": f"用户 {db_user.username} 的 MCP 验证码已重置", "token": db_user.mcp_token}
 
 # AI配置相关模型
 class AIProviderConfig(BaseModel):

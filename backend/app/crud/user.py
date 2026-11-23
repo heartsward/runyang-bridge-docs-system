@@ -31,6 +31,10 @@ class CRUDUser:
             is_active=obj_in.is_active,
             is_superuser=obj_in.is_superuser,
         )
+        # 32.2：普通用户自动发 MCP 个人验证码（自助注册路径）；管理员用统一码
+        if not obj_in.is_superuser:
+            from app.core.mcp_auth import gen_mcp_token
+            db_obj.mcp_token = gen_mcp_token()
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)

@@ -16,6 +16,11 @@ FastMCP 暴露 11 个 tools 给 WorkBuddy：
 
 Q1 决策：方案 A（HTTP transport via fastmcp.http_app()）
 - WorkBuddy 配置："url": "http://localhost:8002/mcp", "transport": "http"
+
+32.2：用户数据隔离——
+- 每个请求经 MCPAuthMiddleware 认证（Bearer 验证码），身份在 contextvar；
+- 工具层按 32.1 可见性口径过滤：普通用户只见 自己创建 + 被分享；管理员见全部。
+- 未认证请求在中间件层直接 401，不会进到工具。
 """
 import logging
 from typing import Optional, List, Dict, Any
@@ -27,6 +32,106 @@ logger = logging.getLogger(__name__)
 
 # 创建全局实例（main.py 导入）
 mcp = None  # 在 main.py 里赋值
+
+
+def _current_identity():
+    """取当前 MCP 请求身份（中间件设置）。None=未经认证（理论上不会到这）。"""
+    from app.core.mcp_auth import current_mcp_identity
+    return current_mcp_identity()
+
+
+# 32.2 性能优化：请求级可见集合缓存（**contextvar，每请求独立**——
+# 并发 MCP 请求下 global 缓存会跨请求串数据，必须隔离；实测集合查询 ~0.05ms，
+# 缓存主要省"一次请求内多个工具/多次过滤"的重复查询与 Session 开关开销）。
+from contextvars import ContextVar
+_visibility_cache: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "mcp_visibility_cache", default=None
+)
+
+
+def reset_visibility_cache() -> None:
+    """中间件每次请求开始时清空缓存（防跨请求串数据）"""
+    _visibility_cache.set(None)
+
+
+def _visible_doc_ids() -> Optional[set]:
+    """当前身份可见的文档 id 集合；管理员返回 None（=不限制）。
+    与 wiki.py 端点 _visible_doc_id_set 同口径（owner ∪ shares）。"""
+    cache = _visibility_cache.get()
+    if cache is not None and "doc" in cache:
+        return cache["doc"]
+    ident = _current_identity()
+    if ident is None or ident.is_superuser:
+        result = None
+    else:
+        from sqlalchemy import or_
+        from app.models.document import Document
+        from app.models.share import Share
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            shared_ids = {
+                r[0] for r in db.query(Share.item_id).filter(
+                    Share.shared_with_id == ident.user_id,
+                    Share.item_type == "document",
+                ).all()
+            }
+            cond = or_(Document.owner_id == ident.user_id, Document.id.in_(shared_ids or {-1}))
+            result = {r[0] for r in db.query(Document.id).filter(cond).all()}
+        finally:
+            db.close()
+    new_cache = dict(cache or {})
+    new_cache["doc"] = result
+    _visibility_cache.set(new_cache)
+    return result
+
+
+def _visible_asset_ids() -> Optional[set]:
+    """当前身份可见的资产 id 集合；管理员返回 None。creator ∪ shares。"""
+    cache = _visibility_cache.get()
+    if cache is not None and "asset" in cache:
+        return cache["asset"]
+    ident = _current_identity()
+    if ident is None or ident.is_superuser:
+        result = None
+    else:
+        from sqlalchemy import or_
+        from app.models.asset import Asset
+        from app.models.share import Share
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            shared_ids = {
+                r[0] for r in db.query(Share.item_id).filter(
+                    Share.shared_with_id == ident.user_id,
+                    Share.item_type == "asset",
+                ).all()
+            }
+            cond = or_(Asset.creator_id == ident.user_id, Asset.id.in_(shared_ids or {-1}))
+            result = {r[0] for r in db.query(Asset.id).filter(cond).all()}
+        finally:
+            db.close()
+    new_cache = dict(cache or {})
+    new_cache["asset"] = result
+    _visibility_cache.set(new_cache)
+    return result
+
+
+def _filter_docs(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按可见 id 集合过滤含 doc_id 的索引结果"""
+    allowed = _visible_doc_ids()
+    if allowed is None:
+        return rows
+    return [r for r in rows if r.get("doc_id") in allowed]
+
+
+def _filter_asset_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    allowed = _visible_asset_ids()
+    if allowed is None:
+        return rows
+    return [r for r in rows if r.get("id") in allowed]
 
 
 def _asset_to_dict(asset) -> Dict[str, Any]:
@@ -74,17 +179,29 @@ def register_tools(mcp_instance):
             category: 按业务分类过滤（运维报告/应急预案/操作规程/资产台账/
                       拓扑与配置/会议纪要/培训材料/其他）
 
+        32.2：普通用户只返回 自己创建 + 被分享 的文档；管理员全部。
+
         Returns:
             文档列表，每个含 doc_id / path / title / snippet / images（已提取图片数）
         """
-        return idx.search(query, top_k=top_k, tag=tag, doc_type=doc_type,
+        ident = _current_identity()
+        if ident is None or ident.is_superuser:
+            return idx.search(query, top_k=top_k, tag=tag, doc_type=doc_type,
+                              doc_category=category)
+        # 非管理员：FTS5 不感知权限——多取候选再按可见集合过滤（同 wiki.py 端点策略）
+        pool = idx.search(query, top_k=max(top_k * 10, 50), tag=tag, doc_type=doc_type,
                           doc_category=category)
+        return _filter_docs(pool)[:top_k]
 
     @mcp_instance.tool()
     def get_doc(doc_id: int) -> Dict[str, Any]:
         """取单文档的元数据 + tags"""
         meta = idx.get_doc(doc_id)
         if not meta:
+            return {"error": f"文档不存在: doc_id={doc_id}"}
+        # 32.2：不可见文档按不存在处理（不泄露存在性）
+        allowed = _visible_doc_ids()
+        if allowed is not None and doc_id not in allowed:
             return {"error": f"文档不存在: doc_id={doc_id}"}
         return meta
 
@@ -99,6 +216,10 @@ def register_tools(mcp_instance):
         Returns:
             {"doc_id": int, "content": str, "truncated": bool, "length": int}
         """
+        # 32.2：内容读取同样受可见性约束
+        allowed = _visible_doc_ids()
+        if allowed is not None and doc_id not in allowed:
+            return {"error": f"文档不存在: doc_id={doc_id}"}
         content = storage.read(doc_id)
         if not content:
             return {"error": f"MD 副本不存在: doc_id={doc_id}"}
@@ -120,7 +241,14 @@ def register_tools(mcp_instance):
         Returns:
             [{"src_doc_id": int, "anchor": str, "path": str, "title": str}]
         """
-        return idx.list_backlinks(doc_id)
+        links = idx.list_backlinks(doc_id)
+        # 32.2：目标不可见→空；可见则只保留来源文档也可见的链接
+        allowed = _visible_doc_ids()
+        if allowed is not None and doc_id not in allowed:
+            return []
+        if allowed is not None:
+            links = [l for l in links if l.get("src_doc_id") in allowed]
+        return links
 
     @mcp_instance.tool()
     def list_tags(prefix: str = "") -> List[Dict[str, Any]]:
@@ -131,8 +259,13 @@ def register_tools(mcp_instance):
 
         Returns:
             [{"tag": str, "doc_count": int}]
+
+        32.2：普通用户只统计可见文档的标签。
         """
-        return idx.list_tags(prefix)
+        allowed = _visible_doc_ids()
+        if allowed is None:
+            return idx.list_tags(prefix)
+        return idx.list_tags(prefix, doc_ids=list(allowed))
 
     def _base_url() -> str:
         try:
@@ -158,6 +291,10 @@ def register_tools(mcp_instance):
             - caption: AI 生成的图片中文描述
             - url: 图片下载地址（GET 需 Authorization: Bearer <token>）
         """
+        # 32.2：图片属于文档内容——不可见文档直接空
+        allowed = _visible_doc_ids()
+        if allowed is not None and doc_id not in allowed:
+            return []
         images = idx.get_doc_images(doc_id)
         base = _base_url()
         for img in images:
@@ -181,7 +318,9 @@ def register_tools(mcp_instance):
             [{"doc_id","title","file","page","caption","url"}]
             - url: 图片下载地址（GET 需 Authorization: Bearer <token>）
         """
-        results = idx.search_images(query, top_k=top_k, doc_id=doc_id)
+        results = idx.search_images(query, top_k=(top_k if _visible_doc_ids() is None else max(top_k * 10, 50)), doc_id=doc_id)
+        # 32.2：只保留可见文档的图片
+        results = _filter_docs(results)[:top_k]
         base = _base_url()
         for r in results:
             r["url"] = f"{base}/api/v1/wiki/images/{r['doc_id']}/{r['file']}"
@@ -195,8 +334,13 @@ def register_tools(mcp_instance):
 
         Returns:
             [{"doc_category": str, "doc_count": int}]
+
+        32.2：普通用户只统计可见文档。
         """
-        return idx.list_categories()
+        allowed = _visible_doc_ids()
+        if allowed is None:
+            return idx.list_categories()
+        return idx.list_categories(doc_ids=list(allowed))
 
     # ============ 设备资产域（阶段二十·20.8） ============
     # 直接查 assets 表（与资产导出端点同一数据源、同一口径）。
@@ -235,6 +379,11 @@ def register_tools(mcp_instance):
                 q = q.filter(Asset.network_location == network_location)
             if status:
                 q = q.filter(Asset.status == status)
+            # 32.2：非管理员只查可见资产（creator ∪ 被分享）——
+            # search_assets 唯一命中会返回明文账号密码，绝不能越权命中别人的设备
+            allowed = _visible_asset_ids()
+            if allowed is not None:
+                q = q.filter(Asset.id.in_(allowed or {-1}))
             rows = q.order_by(_desc(Asset.updated_at)).limit(top_k).all()
             return [_asset_to_dict(a) for a in rows]
         finally:
@@ -247,7 +396,13 @@ def register_tools(mcp_instance):
         db = SessionLocal()
         try:
             a = db.query(Asset).filter(Asset.id == asset_id).first()
-            return _asset_to_dict(a) if a else None
+            if not a:
+                return None
+            # 32.2：不可见按不存在处理
+            allowed = _visible_asset_ids()
+            if allowed is not None and asset_id not in allowed:
+                return None
+            return _asset_to_dict(a)
         finally:
             db.close()
 

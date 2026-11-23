@@ -2786,3 +2786,38 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - **遗留/风险**：
   - 🔴 MCP wiki 内部工具（get_doc_images/search_images 等）未加权限过滤——MCP 走服务账号（API_TOKEN），服务账号是超管口径，如需 MCP 也隔离要单独改造
   - categories 读保持全员开放（文档表单依赖），写仅管理员
+
+### 步骤 32.2 — MCP 用户隔离改造（2026-11-23）
+> 陈工需求：MCP 工具也按 32.1 口径隔离。每个普通用户随机生成 MCP 调用验证码（前端可见可重随机）；管理员用统一的一个；升级→自动去掉个人码改统一码，降级→自动生成个人码
+- **验证码体系**：
+  - users.mcp_token：普通用户个人码（secrets.token_urlsafe(24)）；管理员 NULL
+  - system_configs key=admin_mcp_token：管理员统一码（代码惰性生成；迁移脚本预生成）
+  - 兼容：API_TOKEN_ENABLED 时 API_TOKEN 也按管理员码认（向后兼容阶段二十八）
+- **认证链**：MCPAuthMiddleware（纯 ASGI，包 wiki_mcp.http_app）→ authenticate_mcp_token()
+  （hmac.compare_digest 防时序）→ MCPIdentity 进 contextvar → 工具层读取；
+  无/错码 → 401 直接挡在协议层外。错误码不泄露"存在性"（常数时间）。
+- **工具层隔离（11 工具全覆盖）**：_visible_doc_ids/_visible_asset_ids（contextvar
+  请求级缓存，与 wiki.py 端点同口径 owner/creator ∪ shares）；
+  search_kb/get_doc/get_doc_content/list_backlinks/list_tags/list_categories/
+  get_doc_images/search_images/generate_report 按文档集合过滤；
+  search_assets/get_asset/list_assets 按资产集合过滤（阻断跨用户明文密码泄露）
+- **升降级钩子**（settings.py update_user）：升→mcp_token=NULL；降→生成新个人码；
+  UserUpdate 表单的 mcp_token 字段直接忽略（防注入绕过钩子）；
+  create_user + crud_user.create（自助注册）自动给普通用户发码
+- **端点**（/api/v1/settings/mcp-token/*）：me（状态+码）、me/regenerate（普通用户重随机）、
+  admin（统一码，仅管理员）、admin/regenerate（重置统一码）、users/{id}/regenerate（管理员重置某用户码）
+- **前端**：NavigationMenu 头像菜单加「MCP 验证码」入口（所有人）→ McpTokenModal
+  （个人码显示/复制/重新随机；管理员显示统一码）；SettingsView 用户表加 MCP 码列
+  （显示/复制/重置）+「管理员统一 MCP 验证码」卡片（查看/复制/重置）
+- **顺手修基线洞**：SettingsView 的 User/UserCreate/UserUpdate 类型从未导入（vue-tsc 一直报错）→补；
+  settings.ts createUser/deleteUser/updateUser 三处错误 cast/缺泛型→修；
+  runyang-wiki-mcp-client skill：WikiClient 加 mcp_token 参数（WIKI_MCP_TOKEN 环境变量），
+  _post 带 Authorization，--token 同时喂两通道，SKILL.md 鉴权表更新（MCP 从"不鉴权"改"需要验证码"）
+- **性能实测**（真实库 129 文档/84 资产）：认证 0.34-0.37ms/次（唯一索引+主键查询+hmac），
+  可见集合查询 0.39ms（请求级缓存只查一次）；对照工具本体 search_kb 4.5-6ms——
+  新增开销 <1ms，占整条 MCP 往返 <1%，管理员零可见性开销。
+- **迁移**：add_mcp_tokens.py（幂等；本地库已执行：rydq 发码、admin/heartsward 管理员空、
+  统一码已生成；备份 yunwei_docs.db.bak-32.2；**126 生产机部署时需手动跑一次**）
+- **验证**：pytest 65 passed（新增 test_mcp_tokens.py 11 例：生成/认证/升降级/端点门禁/注入防护；
+  test_mcp_e2e.py 4 例：真实挂载结构 无码401/错码401/个人码只见自己(不泄露密码)/统一码见全部）
+  + import 烟测 100 paths + vue-tsc 改动 0 错误 + vite build + skill py_compile
