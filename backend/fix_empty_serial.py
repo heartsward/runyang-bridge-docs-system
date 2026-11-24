@@ -10,7 +10,7 @@ IntegrityError（陈工实测 PUT /assets/87 报 500）。
 （唯一约束列），其它列空串无害不动，避免多余变更。
 
 用法（项目 backend/ 目录）：
-    venv\\Scripts\\python.exe fix_empty_serial.py
+    venv/Scripts/python.exe fix_empty_serial.py
 """
 import sqlite3
 import sys

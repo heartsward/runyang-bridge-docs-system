@@ -502,6 +502,40 @@ const userColumns = [
     }
   },
   {
+    // 32.8：分享给该用户的条目计数（文档/资产分开）+ 一键取消按钮
+    title: '共享',
+    key: 'shares',
+    width: 210,
+    render: (row: User) => {
+      if (row.is_superuser) {
+        return h(NText, { depth: 3, style: 'font-size: 12px;' }, { default: () => '—' })
+      }
+      const dc = row.share_doc_count || 0
+      const ac = row.share_asset_count || 0
+      if (!dc && !ac) {
+        return h(NText, { depth: 3, style: 'font-size: 12px;' }, { default: () => '无共享' })
+      }
+      const mkBtn = (type: 'document' | 'asset', count: number, label: string) =>
+        count > 0 ? h(NPopconfirm, {
+          onPositiveClick: async () => {
+            try {
+              const r = await settingsService.cancelUserShares(row.id, type)
+              message.success(r.message || `已取消 ${count} 项${label}共享`)
+              await loadUsers()
+            } catch (e: any) { message.error(e?.response?.data?.detail || '取消共享失败') }
+          }
+        }, {
+          trigger: () => h(NButton, {
+            size: 'tiny', quaternary: true, type: 'warning'
+          }, { default: () => `${label}(${count}) 取消` }),
+          default: () => `确认取消分享给 ${row.username} 的全部${label}？该用户将无法再看到这些${label}。`
+        }) : null
+      return h(NSpace, { size: 6, align: 'center' }, {
+        default: () => [mkBtn('document', dc, '文档'), mkBtn('asset', ac, '资产')].filter(Boolean)
+      })
+    }
+  },
+  {
     title: '操作',
     key: 'actions',
     width: 150,
@@ -528,7 +562,15 @@ const userColumns = [
               default: () => '删除',
               icon: () => h(NIcon, { component: TrashOutline })
             }),
-            default: () => '确定删除此用户吗？'
+            // 32.8：删除会连带自动取消其全部共享——文案提示数量
+            default: () => {
+              const dc = row.share_doc_count || 0
+              const ac = row.share_asset_count || 0
+              const tail = (dc || ac)
+                ? `（将同时取消分享给该用户的 ${dc + ac} 项：文档 ${dc} / 资产 ${ac}）`
+                : ''
+              return `确定删除此用户吗？${tail}`
+            }
           })
         ].filter(Boolean)
       })
@@ -665,8 +707,10 @@ const handleUpdateUser = async () => {
   }
   
   try {
-    await settingsService.deleteUser(user.id)
-    message.success('用户删除成功')
+    const r = await settingsService.deleteUser(user.id)
+    // 32.8：删除会自动取消该用户全部共享——如有关联则提示数量
+    const n = (r as any)?.shares_cancelled || 0
+    message.success(n ? `用户删除成功（已自动取消 ${n} 项共享）` : '用户删除成功')
     // 重新加载用户列表
     loadUsers()
   } catch (error: any) {

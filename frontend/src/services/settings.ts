@@ -20,6 +20,9 @@ interface User {
   is_superuser: boolean
   created_at?: string
   mcp_token?: string | null  // 32.2：普通用户 MCP 个人码；管理员为 null（用统一码）
+  // 32.8：被分享条目计数（文档/资产分开）
+  share_doc_count?: number
+  share_asset_count?: number
 }
 
 interface UserCreate {
@@ -201,11 +204,11 @@ export class SettingsService {
   /**
    * 删除用户 - 仅管理员（使用直接API）
    */
-  async deleteUser(userId: number): Promise<{ message: string }> {
+  async deleteUser(userId: number): Promise<{ message: string; shares_cancelled?: number }> {
     try {
       // 首先尝试原始API
       const response = await apiService.delete(`/settings/users/${userId}`)
-      return response as unknown as { message: string }  // 32.2 修基线：原 as UserSettings 类型错
+      return response as unknown as { message: string; shares_cancelled?: number }  // 32.2 修基线：原 as UserSettings 类型错
     } catch (error) {
       console.log('原始API失败，使用直接API:', error)
       // 如果原始API失败，使用直接API
@@ -229,6 +232,17 @@ export class SettingsService {
       
       return await response.json()
     }
+  }
+
+  /**
+   * 32.8：一键取消分享给该用户的全部条目（文档/资产分开传 item_type，不传=全部）
+   */
+  async cancelUserShares(userId: number, itemType?: 'document' | 'asset'): Promise<{ message: string; cancelled: number }> {
+    const response = await apiService.delete<{ message: string; cancelled: number }>(
+      `/settings/users/${userId}/shares`,
+      { params: itemType ? { item_type: itemType } : {} }
+    )
+    return response
   }
 
   /**

@@ -3,7 +3,7 @@
 用户设置API端点
 """
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query  # 32.8：Query 用于取消共享端点
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from passlib.context import CryptContext
@@ -51,6 +51,9 @@ class UserResponse(BaseModel):
     created_at: Optional[str] = None
     # 32.2：MCP 个人验证码（普通用户有值；管理员为 None——用统一码）
     mcp_token: Optional[str] = None
+    # 32.8：被分享条目计数（文档/资产分开），管理员用户列表用于显示"取消共享"按钮
+    share_doc_count: int = 0
+    share_asset_count: int = 0
 
     class Config:
         from_attributes = True
@@ -73,8 +76,19 @@ async def get_all_users(
     
     users = db.query(User).all()
     result = []
+
+    # 32.8：一次聚合查出每个用户被分享的文档数/资产数（避免 N+1）
+    from app.models.share import Share
+    from sqlalchemy import func as _func
+    share_counts: dict = {}  # user_id -> {'document': n, 'asset': m}
+    for uid, itype, cnt in db.query(
+        Share.shared_with_id, Share.item_type, _func.count(Share.id)
+    ).group_by(Share.shared_with_id, Share.item_type).all():
+        share_counts.setdefault(uid, {})[itype] = cnt
+
     for user in users:
         try:
+            sc = share_counts.get(user.id, {})
             user_data = {
                 "id": user.id,
                 "username": user.username or "",
@@ -87,6 +101,8 @@ async def get_all_users(
                 "is_superuser": bool(user.is_superuser),
                 "created_at": user.created_at.isoformat() if user.created_at else "",
                 "mcp_token": user.mcp_token,  # 32.2：管理员界面直接可见各用户码
+                "share_doc_count": sc.get("document", 0),    # 32.8
+                "share_asset_count": sc.get("asset", 0),     # 32.8
             }
             result.append(UserResponse(**user_data))
         except Exception as e:
@@ -239,10 +255,42 @@ async def delete_user(
     if db_user.is_superuser:
         raise HTTPException(status_code=400, detail="不能删除管理员账户")
     
+    # 32.8：删除用户前，先撤销分享给该用户的所有文档/资产（否则留孤儿 Share 行）
+    from app.models.share import Share
+    cancelled = db.query(Share).filter(Share.shared_with_id == user_id).delete()
+    if cancelled:
+        print(f"[delete_user] 用户 {user_id} 删除前已自动取消 {cancelled} 条分享")
+
     db.delete(db_user)
     db.commit()
     
-    return {"message": "用户删除成功"}
+    return {"message": "用户删除成功", "shares_cancelled": cancelled}
+
+
+@router.delete("/users/{user_id}/shares", summary="一键取消分享给该用户的全部条目（仅管理员，32.8）")
+async def cancel_user_shares(
+    user_id: int,
+    item_type: Optional[str] = Query(None, description="document | asset；不传=两者都取消"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """用户管理界面「取消共享」按钮：撤销分享给该用户的所有文档/资产（可分开调用）。"""
+    check_admin_permission(current_user)
+    if item_type not in (None, "document", "asset"):
+        raise HTTPException(status_code=400, detail="item_type 必须是 document 或 asset")
+
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    from app.models.share import Share
+    q = db.query(Share).filter(Share.shared_with_id == user_id)
+    if item_type:
+        q = q.filter(Share.item_type == item_type)
+    cancelled = q.delete(synchronize_session=False)
+    db.commit()
+    return {"message": f"已取消 {cancelled} 条分享", "cancelled": cancelled,
+            "item_type": item_type or "all"}
 
 
 # ============ 32.2：MCP 验证码管理 ============
