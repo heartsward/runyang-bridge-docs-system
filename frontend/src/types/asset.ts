@@ -103,6 +103,8 @@ export interface Asset {
   shared_count?: number | null
   // 32.11：所有人用户名（=creator 用户名；后端仅对管理员注入）
   creator_username?: string | null
+  // 32.12：creator 是否超管（前端把多管理员聚合显示"管理员"）
+  creator_is_superuser?: boolean | null
 }
 
 export interface AssetCreate {
@@ -209,6 +211,7 @@ export interface AssetSearchQuery {
   group?: string
   tags?: string[]
   share_filter?: 'shared' | 'unshared'  // 32.4：分享状态筛选
+  owner?: string  // 32.12：所有人筛选（'管理员' 或用户名，仅管理员）
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   page?: number

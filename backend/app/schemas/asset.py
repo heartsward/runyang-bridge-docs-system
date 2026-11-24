@@ -173,6 +173,8 @@ class Asset(AssetBase):
     shared_count: Optional[int] = None
     # 32.11：所有人用户名（=creator 的用户名，列表/详情端点注入；仅前端管理员列展示）
     creator_username: Optional[str] = None
+    # 32.12：creator 是否超管（前端据此把多个管理员账号聚合显示为"管理员"）
+    creator_is_superuser: Optional[bool] = None
 
     class Config:
         from_attributes = True

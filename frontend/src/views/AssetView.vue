@@ -142,6 +142,16 @@
             style="width: 130px"
             @update:value="handleSearch"
           />
+          <!-- 32.12：所有人筛选（仅管理员，选项按字数升序） -->
+          <n-select
+            v-if="currentUser?.is_superuser"
+            v-model:value="filters.owner"
+            placeholder="所有人"
+            :options="ownerFilterOptions"
+            clearable
+            style="width: 130px"
+            @update:value="handleSearch"
+          />
         </n-space>
         
         <!-- 第二行：排序选项 + 列宽工具 -->
@@ -175,7 +185,9 @@
             </template>
             <div class="col-settings-panel">
               <div class="col-settings-title">显示 / 隐藏列，↑↓ 调整顺序</div>
-              <div v-for="(k, i) in colOrder" :key="k" class="col-settings-row">
+              <div v-for="(k, i) in colOrder" :key="k" class="col-settings-row"
+                   v-show="currentUser?.is_superuser || k !== 'creator_username'">
+                <!-- 32.12：所有人列进面板（仅管理员） -->
                 <n-checkbox
                   :checked="!hiddenCols.includes(k)"
                   @update:checked="toggleColVisible(k)"
@@ -837,8 +849,8 @@
                 </n-descriptions-item>
                 <!-- 32.11：所有人（仅管理员详情可见；改派入口在列表"所有人"列） -->
                 <n-descriptions-item v-if="currentUser?.is_superuser" label="所有人">
-                  <n-tag size="small" :bordered="false" :type="viewingAsset.creator_id === currentUser?.id ? 'info' : 'default'">
-                    {{ viewingAsset.creator_username || (viewingAsset.creator_id === currentUser?.id ? currentUser?.username : `用户#${viewingAsset.creator_id}`) }}
+                  <n-tag size="small" :bordered="false" :type="viewingAsset.creator_is_superuser ? 'info' : 'default'">
+                    {{ viewingAsset.creator_is_superuser ? '管理员' : (viewingAsset.creator_username || `用户#${viewingAsset.creator_id}`) }}
                   </n-tag>
                 </n-descriptions-item>
                 <n-descriptions-item label="维保到期">
@@ -1034,7 +1046,7 @@
               </n-button>
             </n-space>
             <n-list>
-              <n-list-item v-for="type in editableAssetTypeOptions" :key="type.value">
+              <n-list-item v-for="type in assetTypeOptions" :key="type.value">
                 <n-space justify="space-between" style="width: 100%;">
                   <n-space>
                     <n-tag>{{ type.value }}</n-tag>
@@ -1059,7 +1071,7 @@
               </n-button>
             </n-space>
             <n-list>
-              <n-list-item v-for="dept in editableDepartmentOptions" :key="dept">
+              <n-list-item v-for="dept in sortedDepartments" :key="dept">
                 <n-space justify="space-between" style="width: 100%;">
                   <span>{{ dept }}</span>
                   <n-button size="tiny" type="error" ghost @click="handleDeleteDepartment(dept)">
@@ -1084,7 +1096,7 @@
               删除分组时，所有设备上挂载的该分组标签会被自动移除。
             </n-text>
             <n-list>
-              <n-list-item v-for="grp in editableAssetGroupOptions" :key="grp">
+              <n-list-item v-for="grp in sortedAssetGroups" :key="grp">
                 <n-space justify="space-between" style="width: 100%;">
                   <n-space>
                     <n-tag type="info" :bordered="false">{{ grp }}</n-tag>
@@ -1109,7 +1121,7 @@
               </n-button>
             </n-space>
             <n-list>
-              <n-list-item v-for="loc in editableNetworkLocationOptions" :key="loc.value">
+              <n-list-item v-for="loc in networkLocationOptions" :key="loc.value">
                 <n-space justify="space-between" style="width: 100%;">
                   <n-space>
                     <n-tag>{{ loc.value }}</n-tag>
@@ -1307,62 +1319,77 @@ const canModifyAsset = (row: Asset | null): boolean => {
   return currentUser.value.is_superuser || row.creator_id === currentUser.value.id
 }
 
-// ============ 32.11：所有人（=creator）标注与管理员改派 ============
-// 默认：管理员创建的所有人就是管理员本身，不需手动分（creator_id 自然=管理员）。
-// 管理员可在"所有人"列点击改派给其他用户（走 32.10 的 PUT creator_id 通道）。
+// ============ 32.11/32.12：所有人（=creator）标注与管理员改派 ============
+// 32.12：无论哪个管理员账户创建，统一聚合显示"管理员"（creator_is_superuser 判定）；
+// 改派选项 = 管理员(聚合) + 各普通用户；所有下拉按字数少→多排序。
 const allUsers = ref<Array<{ id: number; username: string; is_superuser: boolean }>>([])
 const loadAllUsersForOwner = async () => {
   if (!currentUser.value?.is_superuser) return
   try {
-    const us = await apiService.get<Array<{ id: number; username: string; full_name?: string; is_superuser: boolean }>>('/settings/users')
-    allUsers.value = (us || []).map(u => ({
-      id: u.id,
-      username: u.full_name?.trim() ? `${u.username}（${u.full_name.trim()}）` : u.username,
-      is_superuser: u.is_superuser,
-    }))
+    const us = await apiService.get<Array<{ id: number; username: string; is_superuser: boolean }>>('/settings/users')
+    allUsers.value = (us || [])
+      .filter(u => u.username)
+      .map(u => ({ id: u.id, username: u.username, is_superuser: u.is_superuser }))
   } catch (e) {
     console.error('加载用户列表失败（所有人改派不可用）:', e)
   }
 }
+
+// 32.12：通用排序——按显示文字长度升序（字数少→多），长度相同按拼音/字母稳定序
+const byLabelLen = <T extends { label: string }>(arr: T[]): T[] =>
+  [...arr].sort((a, b) => a.label.length - b.label.length || a.label.localeCompare(b.label, 'zh'))
+const byStrLen = (arr: string[]): string[] =>
+  [...arr].sort((a, b) => a.length - b.length || a.localeCompare(b, 'zh'))
+
 // 改派所有人：NPopselect 选完直接 PUT（saving 用响应式单值，保证标签 loading 态触发重渲染）
 const ownerSavingId = ref<number | null>(null)
+const ADMIN_OWNER_TOKEN = -1  // 改派选项里"管理员"聚合项的虚拟值
 const handleChangeOwner = async (row: Asset, newUid: number) => {
-  if (newUid === row.creator_id) return
+  const target = newUid === ADMIN_OWNER_TOKEN ? currentUser.value?.id : newUid
+  if (!target || target === row.creator_id) return
   ownerSavingId.value = row.id
   try {
-    await assetService.updateAsset(row.id, { creator_id: newUid } as any)
-    const u = allUsers.value.find(x => x.id === newUid)
-    row.creator_id = newUid
-    row.creator_username = u?.username || row.creator_username
-    message.success(`已把「${row.name}」的所有人改为 ${u?.username || newUid}`)
+    await assetService.updateAsset(row.id, { creator_id: target } as any)
+    row.creator_id = target
+    row.creator_is_superuser = newUid === ADMIN_OWNER_TOKEN
+    row.creator_username = newUid === ADMIN_OWNER_TOKEN ? '管理员' : (allUsers.value.find(x => x.id === target)?.username || row.creator_username)
+    message.success(`已把「${row.name}」的所有人改为 ${newUid === ADMIN_OWNER_TOKEN ? '管理员' : row.creator_username}`)
   } catch (e: any) {
     message.error(e?.response?.data?.detail || '改派所有人失败')
   } finally {
     ownerSavingId.value = null
   }
 }
-// 所有人列的选项（NPopselect）
-const ownerOptions = computed(() => allUsers.value.map(u => ({ label: u.username, value: u.id })))
+// 改派下拉：管理员(聚合→转到当前操作者名下，仍显示"管理员") + 普通用户，按字数升序
+const ownerOptions = computed(() => byLabelLen([
+  { label: '管理员', value: ADMIN_OWNER_TOKEN as number },
+  ...allUsers.value.filter(u => !u.is_superuser).map(u => ({ label: u.username, value: u.id })),
+]))
 
-// 所有人单元格：管理员点击可改派（NPopselect），普通用户看不到该列
+// 所有人列显示：超管聚合"管理员"
 const ownerDisplay = (row: Asset) =>
-  row.creator_username
-  || (currentUser.value && row.creator_id === currentUser.value.id ? currentUser.value.username : `用户#${row.creator_id}`)
+  row.creator_is_superuser ? '管理员' : (row.creator_username || `用户#${row.creator_id}`)
 const renderOwnerCell = (row: Asset) => {
   const saving = ownerSavingId.value === row.id
-  const isMe = currentUser.value && row.creator_id === currentUser.value.id
   return h(NPopselect, {
     options: ownerOptions.value,
-    value: row.creator_id,
-    disabled: saving || ownerOptions.value.length === 0,
+    value: row.creator_is_superuser ? ADMIN_OWNER_TOKEN : row.creator_id,
+    disabled: saving || ownerOptions.value.length <= 1,
     'onUpdate:value': (v: number) => handleChangeOwner(row, v),
   }, {
     default: () => h(NTag, {
-      size: 'small', bordered: false, type: isMe ? 'info' : 'default', loading: saving,
+      size: 'small', bordered: false, type: row.creator_is_superuser ? 'info' : 'default', loading: saving,
       style: 'cursor: pointer;',
     }, { default: () => ownerDisplay(row) }),
   })
 }
+
+// 32.12：所有人筛选选项（仅管理员）：'__admin__' 聚合 + 普通用户名，字数升序
+const OWNER_FILTER_ADMIN = '__admin__'
+const ownerFilterOptions = computed(() => byLabelLen([
+  { label: '管理员', value: OWNER_FILTER_ADMIN },
+  ...allUsers.value.filter(u => !u.is_superuser).map(u => ({ label: u.username, value: u.username })),
+]))
 
 // 分享弹窗（仅管理员）
 const showShareModal = ref(false)
@@ -1399,14 +1426,15 @@ const filters = reactive({
   department: null as string | null,
   network_location: null as string | null,
   group: null as string | null,
-  share_filter: null as 'shared' | 'unshared' | null  // 32.4：分享状态筛选
+  share_filter: null as 'shared' | 'unshared' | null,  // 32.4：分享状态筛选
+  owner: null as string | null  // 32.12：所有人筛选（管理员）：'__admin__' 或用户名
 })
 
-// 32.4：分享状态筛选选项（管理员视角）
-const shareFilterOptions = [
+// 32.4：分享状态筛选选项（管理员视角；32.12：字数升序）
+const shareFilterOptions = byLabelLen([
   { label: '已分享', value: 'shared' },
   { label: '未分享', value: 'unshared' }
-]
+])
 
 // 排序配置
 const sortConfig = reactive({
@@ -1487,7 +1515,7 @@ const pagination = reactive({
 
 // 选项数据 - 设备类型（从后端加载）
 const editableAssetTypeOptions = ref<Array<{label: string, value: string}>>([])
-const assetTypeOptions = computed(() => editableAssetTypeOptions.value)
+const assetTypeOptions = computed(() => byLabelLen(editableAssetTypeOptions.value))  // 32.12：字数升序
 const loadAssetTypes = async () => {
   try {
     const types = await getAssetTypes()
@@ -1579,7 +1607,11 @@ const defaultNetworkLocations = [
   { label: '其它网络', value: 'other' }
 ]
 const editableNetworkLocationOptions = ref<Array<{label: string, value: string}>>([...defaultNetworkLocations])
-const networkLocationOptions = computed(() => editableNetworkLocationOptions.value)
+const networkLocationOptions = computed(() => byLabelLen(editableNetworkLocationOptions.value))  // 32.12：字数升序
+
+// 32.12：管理选项面板列表也按字数升序显示（存储顺序不动，只改渲染序）
+const sortedDepartments = computed(() => byStrLen(editableDepartmentOptions.value))
+const sortedAssetGroups = computed(() => byStrLen(editableAssetGroupOptions.value))
 
 // 新所处网络输入
 const newNetworkLocation = ref('')
@@ -1738,7 +1770,8 @@ const loadAssetGroups = async () => {
 
 // 分组下拉选项（筛选器与表单共用）
 const groupOptionsForSelect = computed(() =>
-  editableAssetGroupOptions.value.map(g => ({ label: g, value: g }))
+  // 32.12：分组下拉按字数升序
+  byLabelLen(editableAssetGroupOptions.value.map(g => ({ label: g, value: g })))
 )
 
 // 新分组输入
@@ -1794,14 +1827,16 @@ const handleDeleteAssetGroup = async (grp: string) => {
 }
 
 const assetStatusOptions = computed(() =>
-  Object.values(AssetStatus).map(status => ({
+  // 32.12：状态下拉按字数升序（运行中/停用/维护中/已报废）
+  byLabelLen(Object.values(AssetStatus).map(status => ({
     label: assetService.getAssetStatusName(status),
     value: status
-  }))
+  })))
 )
 
-// 排序字段选项
-const sortByOptions = computed(() => [
+// 排序字段选项（32.12：所有人加入 + 按字数升序；"所有人"仅管理员——非管理员后端不生效）
+const sortByOptions = computed(() => byLabelLen([
+  ...(currentUser.value?.is_superuser ? [{ label: '所有人', value: 'owner' }] : []),
   { label: '创建时间', value: 'created_at' },
   { label: '更新时间', value: 'updated_at' },
   { label: '设备名称', value: 'name' },
@@ -1812,20 +1847,21 @@ const sortByOptions = computed(() => [
   { label: '状态', value: 'status' },
   { label: '启用日期', value: 'commissioning_date' },
   { label: '维保到期', value: 'warranty_expiry' }
-])
+]))
 
-// 排序顺序选项
+// 排序顺序选项（32.12：字数同为2，按拼音：升序 sheng < 降序 jiang？localeCompare 拼音序 x< j 不成立——保持"升序,降序"人工序）
 const sortOrderOptions = computed(() => [
-  { label: '降序', value: 'desc' },
-  { label: '升序', value: 'asc' }
+  { label: '升序', value: 'asc' },
+  { label: '降序', value: 'desc' }
 ])
 
 // 从现有资产中获取部门选项（兼容格式）
 const departmentOptionsForSelect = computed(() => {
-  return editableDepartmentOptions.value.map(dept => ({
+  // 32.12：部门下拉按字数升序
+  return byLabelLen(editableDepartmentOptions.value.map(dept => ({
     label: dept,
     value: dept
-  }))
+  })))
 })
 
 // 提取结果确认相关计算属性
@@ -1882,6 +1918,7 @@ const defaultColWidths: Record<string, number> = {
   device_model: 120, system_version: 140, network_location: 100,
   department: 100, groups: 160, commissioning_date: 110,
   warranty_expiry: 120, status: 80, actions: 150,
+  creator_username: 100,  // 32.12：所有人列
 }
 const loadSavedColWidths = (): Record<string, number> => {
   try {
@@ -1928,6 +1965,7 @@ const colWidth = (key: string): number => savedColWidths.value[key] ?? defaultCo
 const CONFIGURABLE_COL_KEYS = [
   'name', 'asset_type', 'ip_address', 'hostname',
   'network_location', 'department', 'groups', 'commissioning_date', 'warranty_expiry', 'status',
+  'creator_username',  // 32.12：所有人列进列设置（可隐藏）；非管理员渲染/面板自动跳过
 ] as const
 const COL_ORDER_KEY = 'runyang-asset-col-order'
 const COL_HIDDEN_KEY = 'runyang-asset-col-hidden'
@@ -2146,6 +2184,16 @@ const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[n
       default: () => assetService.getAssetStatusName(row.status)
     })
   },
+  // 32.12：所有人列——进列设置（可隐藏可调序）；仅管理员渲染（非管理员在
+  // columns/面板两处过滤，列定义本身不区分）
+  creator_username: {
+    title: '所有人',
+    key: 'creator_username',
+    width: colWidth('creator_username'),
+    minWidth: 90,
+    resizable: true,
+    render: renderOwnerCell,
+  },
 }))
 
 const colTitle = (key: string): string => {
@@ -2159,18 +2207,11 @@ const columns = computed<DataTableColumns<Asset>>(() => [
     align: 'center'
   },
   // 30.3：全部列统一居中（表头 + 单元格内容）——陈工反馈左对齐观感不齐
+  // 32.12：所有人列并入 colOrder（可隐藏可调序）；非管理员过滤掉该 key
   ...colOrder.value
     .filter(k => !hiddenCols.value.includes(k) && colDefsMap.value[k])
+    .filter(k => currentUser.value?.is_superuser || k !== 'creator_username')
     .map(k => ({ ...colDefsMap.value[k], align: 'center' } as NonNullable<DataTableColumns<Asset>[number]>)),
-  // 32.11：所有人列——仅管理员可见（不进列设置面板，固定位置）
-  ...(currentUser.value?.is_superuser ? [{
-    title: '所有人',
-    key: 'creator_username',
-    width: 120,
-    minWidth: 90,
-    align: 'center' as const,
-    render: renderOwnerCell,
-  } as NonNullable<DataTableColumns<Asset>[number]>] : []),
   {
     title: '操作',
     key: 'actions',
@@ -2424,7 +2465,8 @@ const debouncedSearch = debounce(async (resetPage = true) => {
                      filters.department || 
                      filters.network_location ||
                      filters.group ||
-                     filters.share_filter
+                     filters.share_filter ||
+                     filters.owner
     
     const query = {
       query: searchQuery.value || '',
@@ -2434,6 +2476,8 @@ const debouncedSearch = debounce(async (resetPage = true) => {
       network_location: filters.network_location || undefined,
       group: filters.group || undefined,
       share_filter: filters.share_filter || undefined,
+      // 32.12：所有人筛选（后端 '管理员' 聚合值翻译）
+      owner: filters.owner === OWNER_FILTER_ADMIN ? '管理员' : (filters.owner || undefined),
       sort_by: sortConfig.sortBy,
       sort_order: sortConfig.sortOrder,
       page: 1,

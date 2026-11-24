@@ -2937,3 +2937,14 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 前端 AssetView：管理员专属"所有人"列（colOrder 过滤后、操作列前固定插入，不进列设置面板）；单元格 NPopselect 点击即改派（PUT creator_id，32.10 通道），成功就地更新 row.creator_id/creator_username；ownerSavingId 单值 ref（Set 不触发重渲染的坑）；详情基本信息加"所有人"行（仅管理员）；onMounted 在 Promise.all 后 loadAllUsersForOwner（依赖 currentUser，仅管理员拉 /settings/users）。
 - 默认无需分：管理员建的 creator_id 自然是管理员，列上直接显示其用户名。
 - 测试 test_owner_label_3211.py 4 例：列表注入/普通用户不注入(最小权限)/详情注入/改派后标注即时更新。全量 88 passed；vue-tsc 212 持平；build OK。
+
+### 步骤 32.12 — 所有人聚合/列设置/筛选排序 + 全下拉按字数升序（2026-11-24）
+> 陈工：管理员账户不分（统一显示"管理员"）；所有人进列设置(可隐藏)、进排序方式、进筛选；所有下拉按字数少→多排（含管理选项面板）。
+- 后端 assets.py：列表加 `owner` 查询参数（仅 superuser 生效：'管理员'=creator.is_superuser 聚合 / 其它=creator 用户名精确）；`sort_by=owner` 用 case(is_superuser→'管理员', else username) 聚合排序（管理员一组、普通用户按名；汉字码点>拉丁所以 asc 下管理员组排末，与"管理员/用户名"显示口径一致）；与 owner 筛选共用 users join 防重复。Asset 响应加 `creator_is_superuser`（列表批量+详情注入，均仅 superuser）。
+- 前端 AssetView：
+  - 所有人列并入列设置体系（CONFIGURABLE_COL_KEYS 末尾 +colDefsMap+defaultColWidths），可隐藏/调序/改列宽；columns 组装和列设置面板 v-for 两处对非管理员过滤 creator_username。
+  - 显示聚合：creator_is_superuser→"管理员"（不论哪个管理员账号）。改派下拉="管理员"聚合项(转到当前操作者id) + 各普通用户。筛选下拉同口径（'__admin__'→后端"管理员"）。
+  - sortByOptions 加"所有人"（仅管理员）；shareFilterOptions/assetTypeOptions/assetStatusOptions/department/group/network/owner 下拉全部 byLabelLen（字数升序、同长按 localeCompare('zh') 拼音序）；管理选项面板4个 v-for 换 sorted computed（存储顺序不动，只改渲染序）。
+  - byLabelLen/byStrLen 通用 helper（字数升序）。
+- 诊断踩坑：sqlite ORDER BY 汉字码点>拉丁，"管理员"组 asc 排末位属预期（不是 bug，测试断言别假设首位）；多次 order_by 语义不可靠→单次传双条件。
+- 验证：test_owner_filter_3212.py 5 例（管理员聚合筛选/用户名筛选/聚合排序相邻/is_superuser注入/普通用户忽略owner）；全量 93 passed；vue-tsc 212 持平；build OK。中途 shareFilterOptions 漏闭合括号致 TS1005（解析错会掩盖其余检查计数，对账时先确认无语法错再比数量）。

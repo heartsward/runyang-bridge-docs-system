@@ -147,6 +147,8 @@ async def list_assets(
 
     group: Optional[str] = Query(None, description="自定义分组筛选（分组名，JSON数组包含匹配）"),
 
+    owner: Optional[str] = Query(None, description="所有人筛选（32.12，仅管理员）：'管理员' 或具体用户名"),
+
     share_filter: Optional[str] = Query(None, description="分享状态筛选：shared=已分享 / unshared=未分享（32.4）"),
 
     sort_by: str = Query("created_at", description="排序字段"),
@@ -255,11 +257,34 @@ async def list_assets(
 
             query = query.filter(shared_subq if share_filter == "shared" else ~shared_subq)
 
-        
+
+        # 32.12：所有人筛选（仅管理员有该列/筛选器）：'管理员'=creator 是超管；
+        # 其它值按 creator 用户名精确匹配
+        owner_join = None
+        if owner and current_user.is_superuser:
+            if owner == "管理员":
+                query = query.join(User, AssetModel.creator_id == User.id).filter(User.is_superuser == True)  # noqa: E712
+                owner_join = "admin"
+            else:
+                query = query.join(User, AssetModel.creator_id == User.id).filter(User.username == owner)
+                owner_join = "name"
+
+
 
         # 排序
 
-        if hasattr(AssetModel, sort_by):
+        if sort_by == "owner" and current_user.is_superuser:
+            # 32.12：按所有人排序——需要 users join（与 owner 筛选共用，防重复 join）
+            if not owner_join:
+                query = query.join(User, AssetModel.creator_id == User.id)
+            order_func = asc if sort_order.lower() == "asc" else desc
+            # 排序键与前端显示同口径：超管聚合为"管理员"一组，普通用户按用户名。
+            # 一次 order_by 传双条件（多次 order_by 语义不可靠）
+            from sqlalchemy import case as sa_case
+            owner_expr = sa_case((User.is_superuser == True, "管理员"), else_=User.username)  # noqa: E712
+            query = query.order_by(order_func(owner_expr), desc(AssetModel.created_at))
+
+        elif hasattr(AssetModel, sort_by):
 
             col = getattr(AssetModel, sort_by)
 
@@ -311,23 +336,29 @@ async def list_assets(
 
         # 最小权限：普通用户列表响应里不带他人 creator 用户名，前端也只有管理员有该列
 
+        # 32.12：同时注入 creator_is_superuser（前端把多管理员聚合显示"管理员"）
+
         if current_user.is_superuser:
 
             creator_ids = {a.creator_id for a in assets if a.creator_id}
 
-            uname_map = {}
+            owner_map = {}
 
             if creator_ids:
 
-                for uid, uname in db.query(User.id, User.username).filter(
+                for uid, uname, is_su in db.query(User.id, User.username, User.is_superuser).filter(
 
                     User.id.in_(creator_ids)).all():
 
-                    uname_map[uid] = uname
+                    owner_map[uid] = (uname, bool(is_su))
 
             for a in assets:
 
-                a.creator_username = uname_map.get(a.creator_id)
+                info = owner_map.get(a.creator_id)
+
+                if info:
+
+                    a.creator_username, a.creator_is_superuser = info
 
 
         return AssetList(
@@ -552,9 +583,13 @@ async def get_asset(
 
         # 32.11：管理员时注入所有人用户名（与列表端点同口径，最小权限）
 
+        # 32.12：一并注入 creator_is_superuser
+
         if current_user.is_superuser and asset.creator:
 
             asset.creator_username = asset.creator.username
+
+            asset.creator_is_superuser = bool(asset.creator.is_superuser)
 
 
         return asset
