@@ -139,7 +139,7 @@ async def list_assets(
 
     asset_type: Optional[str] = Query(None, description="资产类型筛选"),
 
-    network_location: Optional[NetworkLocation] = Query(None, description="网络位置筛选"),
+    network_location: Optional[str] = Query(None, description="网络位置筛选（32.9：改 str，支持自定义网络如'互联网'；原 NetworkLocation 枚举导致 422）"),
 
     status: Optional[AssetStatus] = Query(None, description="状态筛选"),
 
@@ -337,7 +337,7 @@ async def count_assets(
 
     asset_type: Optional[str] = Query(None),
 
-    network_location: Optional[NetworkLocation] = Query(None),
+    network_location: Optional[str] = Query(None),  # 32.9：支持自定义网络（原枚举 422）
 
     status: Optional[AssetStatus] = Query(None),
 

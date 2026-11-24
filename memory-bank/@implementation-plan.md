@@ -2915,3 +2915,10 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - fix_empty_serial.py：一次性迁移，把存量 serial_number='' 归一为 NULL（幂等、带重复非空体检）；126 上拉代码后需运行一次
 - 确认端点（confirm_single_asset）写库带 if value 守卫、提取器不产生空 serial——空串只可能来自表单/API 路径，schema 层已兜住
 - 验证：新增 test_serial_unique_326.py 3 例（两行空 serial 都 200→NULL；真重复 400 文案；创建空白 serial OK）；全量 61 passed
+
+### 步骤 32.9 — 自定义网络筛选 422 + 自定义标签无色（2026-11-24）
+> 陈工新建自定义网络"互联网"后，下拉筛选报 422；"信息系统/互联网"等自定义标签黑白无色。
+- 后端：list_assets/export 的 network_location 查询参数 NetworkLocation 枚举 → Optional[str]（列本就是 String，存中文字面值；枚举校验把自定义值卡死）。筛选 .== 比较不受影响。
+- 前端：colorTagProps(raw, KNOWN) helper——已知枚举走 naive 色系，自定义值走 getDepartmentColor hash 调色板（浅底+同色字，同部门套路）；类型/网络 6 处标签（列表2+详情头2+详情descriptions2）统一改用。以后新建任何自定义类型/网络自动带底色。
+- 顺手修：搜索失败 message.error 直接塞 422 detail（数组）触发 naive "content got Array" 告警——统一转可读字符串（多错误 join）。
+- 验证：test_custom_network_329.py 4 例（互联网筛选命中/枚举仍工作/自定义类型/组合）全量 80 passed；vue-tsc 212 持平；build OK。126：git pull → 重启后端 → npm run build（后端改动必须重启才生效）。

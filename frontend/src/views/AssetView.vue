@@ -760,10 +760,10 @@
           <div style="text-align: center; margin-bottom: 20px;">
             <n-h3 style="margin: 0;">{{ viewingAsset.name }}</n-h3>
             <n-space justify="center" size="small" style="margin-top: 6px;">
-              <n-tag :type="assetService.getAssetTypeColor(viewingAsset.asset_type)" size="small">
+              <n-tag v-bind="colorTagProps(viewingAsset.asset_type, TYPE_KNOWN_COLORS)" size="small">
                 {{ getAssetTypeLabel(viewingAsset.asset_type) }}
               </n-tag>
-              <n-tag v-if="viewingAsset.network_location" :type="assetService.getNetworkLocationColor(viewingAsset.network_location)" size="small">
+              <n-tag v-if="viewingAsset.network_location" v-bind="colorTagProps(viewingAsset.network_location, NET_KNOWN_COLORS)" size="small">
                 {{ getNetworkLocationLabel(viewingAsset.network_location) }}
               </n-tag>
               <n-tag
@@ -790,7 +790,7 @@
                   {{ viewingAsset.name }}
                 </n-descriptions-item>
                 <n-descriptions-item label="设备类型">
-                  <n-tag :type="assetService.getAssetTypeColor(viewingAsset.asset_type)" size="small">
+                  <n-tag v-bind="colorTagProps(viewingAsset.asset_type, TYPE_KNOWN_COLORS)" size="small">
                     {{ getAssetTypeLabel(viewingAsset.asset_type) }}
                   </n-tag>
                 </n-descriptions-item>
@@ -804,7 +804,7 @@
                 </n-descriptions-item>
                 <!-- 32.7：设备型号 / 系统型号及版本(应用版本) 移至「扩展信息」tab -->
                 <n-descriptions-item label="所处网络">
-                  <n-tag v-if="viewingAsset.network_location" :type="assetService.getNetworkLocationColor(viewingAsset.network_location)" size="small">
+                  <n-tag v-if="viewingAsset.network_location" v-bind="colorTagProps(viewingAsset.network_location, NET_KNOWN_COLORS)" size="small">
                     {{ getNetworkLocationLabel(viewingAsset.network_location) }}
                   </n-tag>
                   <n-text depth="3" v-else>未设置</n-text>
@@ -1936,6 +1936,23 @@ const renderDeptTag = (dept?: string | null) => {
   }, { default: () => dept })
 }
 
+// 32.9：类型/网络标签统一上色——已知枚举走 naive 色系；
+// 自定义值（信息系统、互联网等）走 hash 调色板（同部门套路），
+// 保证任何新建的自定义类型/网络都自动带底色，无需改代码
+const TYPE_KNOWN_COLORS: Record<string, 'primary'|'info'|'warning'|'error'|'success'|'default'> = {
+  server: 'primary', network: 'info', storage: 'warning', security: 'error',
+  database: 'success', application: 'info', other: 'default',
+}
+const NET_KNOWN_COLORS: Record<string, 'success'|'warning'|'error'|'info'|'default'> = {
+  office: 'success', monitoring: 'warning', billing: 'error', other: 'info',
+}
+const colorTagProps = (raw: string | null | undefined, known: Record<string, any>) => {
+  const naiveType = known[raw || '']
+  if (naiveType) return { type: naiveType }
+  const c = assetService.getDepartmentColor(raw || '')
+  return { bordered: false, color: { color: c.color, borderColor: c.borderColor, textColor: c.textColor } }
+}
+
 // 列定义 map：key → 列配置（组装时按 colOrder 排序、hiddenCols 过滤）
 // 必须是 computed：width 依赖 savedColWidths，"重置列宽"后要能回到默认值
 const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[number]>>>(() => ({
@@ -1955,7 +1972,7 @@ const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[n
     resizable: true,
     render: (row) => h(NTag, {
       size: 'small',
-      type: assetService.getAssetTypeColor(row.asset_type),
+      ...colorTagProps(row.asset_type, TYPE_KNOWN_COLORS),
     }, {
       default: () => assetService.getAssetTypeName(row.asset_type)
     })
@@ -1994,10 +2011,9 @@ const colDefsMap = computed<Record<string, NonNullable<DataTableColumns<Asset>[n
         return h('span', { style: { color: '#999' } }, '未设置')
       }
       const locationName = assetService.getNetworkLocationName(row.network_location)
-      const locationColor = assetService.getNetworkLocationColor(row.network_location)
       return h(NTag, {
         size: 'small',
-        type: locationColor
+        ...colorTagProps(row.network_location, NET_KNOWN_COLORS)
       }, {
         default: () => locationName
       })
@@ -2366,7 +2382,13 @@ const debouncedSearch = debounce(async (resetPage = true) => {
     }
   } catch (error: any) {
     console.error('搜索失败:', error)
-    message.error(error.message || error.detail || '搜索失败')
+    // 32.9：422 的 detail 是校验错误数组——直接塞给 message 会触发
+    // "Invalid prop content got Array" 告警，统一转成可读字符串
+    const raw = error?.response?.data?.detail ?? error?.detail ?? error?.message
+    const text = Array.isArray(raw)
+      ? (raw.map((d: any) => d?.msg || String(d)).join('；') || '搜索失败')
+      : (raw || '搜索失败')
+    message.error(String(text))
     // 出错时不清空数据，保持当前状态
   } finally {
     loading.value = false
