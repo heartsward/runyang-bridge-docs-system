@@ -307,6 +307,29 @@ async def list_assets(
             a.shared_count = cnt
 
 
+        # 32.11：注入"所有人"用户名（=creator 用户名）。仅管理员注入——
+
+        # 最小权限：普通用户列表响应里不带他人 creator 用户名，前端也只有管理员有该列
+
+        if current_user.is_superuser:
+
+            creator_ids = {a.creator_id for a in assets if a.creator_id}
+
+            uname_map = {}
+
+            if creator_ids:
+
+                for uid, uname in db.query(User.id, User.username).filter(
+
+                    User.id.in_(creator_ids)).all():
+
+                    uname_map[uid] = uname
+
+            for a in assets:
+
+                a.creator_username = uname_map.get(a.creator_id)
+
+
         return AssetList(
 
             items=assets,
@@ -527,7 +550,12 @@ async def get_asset(
 
         ensure_asset_readable(db, current_user, asset)
 
-        
+        # 32.11：管理员时注入所有人用户名（与列表端点同口径，最小权限）
+
+        if current_user.is_superuser and asset.creator:
+
+            asset.creator_username = asset.creator.username
+
 
         return asset
 

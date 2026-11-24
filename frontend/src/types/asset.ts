@@ -101,6 +101,8 @@ export interface Asset {
   // 32.4：分享状态（列表注入）
   shared?: boolean | null
   shared_count?: number | null
+  // 32.11：所有人用户名（=creator 用户名；后端仅对管理员注入）
+  creator_username?: string | null
 }
 
 export interface AssetCreate {
@@ -144,6 +146,8 @@ export interface AssetCreate {
   notes?: string
   tags?: string[]
   groups?: string[]
+  // 32.10/32.11：所有权转移（仅管理员 PUT 生效）
+  creator_id?: number
   source_file?: string
   source_document_id?: number
   confidence_score?: number
@@ -191,6 +195,8 @@ export interface AssetUpdate {
   tags?: string[]
   groups?: string[]
   confidence_score?: number
+  // 32.10/32.11：所有权转移（仅管理员 PUT 生效）
+  creator_id?: number
 }
 
 export interface AssetSearchQuery {

@@ -2930,3 +2930,10 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 测试 test_owner_transfer_3210.py 4 例：管理员转移/被转移者可编辑/普通用户不能转/目标404。全量 84 passed。
 - 批量脚本（本机 .workbuddy/tmp/reassign_sys_to_yyb.py）：dry-run 列清单 → --apply 先"生效探测"（旧代码 PUT 会 200 但静默忽略 creator_id，探测不过即中止防假成功）→ 逐条 PUT+回读 → 最终分布核验。目标 yyb=#4。30 条待转。
 - 部署依赖：126 必须先 git pull + 重启后端（无数据库结构变化，不用跑迁移），再跑 --apply。
+
+### 步骤 32.11 — 所有人标注与管理员改派（仅资产，文档不加）（2026-11-24）
+> 陈工：创建的资产标注所有人、仅管理员界面可见、管理员可手动改归属；管理员权限创建的人就是管理员本身不用分。所有权复用 creator_id（32.10 已有转移通道），不新增列。
+- 后端：Asset 响应加 creator_username（列表批量查 users 注入、仅 superuser 才填——最小权限，普通用户抓包也看不到他人 creator 用户名；get_asset 单条从 asset.creator 关系注入）。
+- 前端 AssetView：管理员专属"所有人"列（colOrder 过滤后、操作列前固定插入，不进列设置面板）；单元格 NPopselect 点击即改派（PUT creator_id，32.10 通道），成功就地更新 row.creator_id/creator_username；ownerSavingId 单值 ref（Set 不触发重渲染的坑）；详情基本信息加"所有人"行（仅管理员）；onMounted 在 Promise.all 后 loadAllUsersForOwner（依赖 currentUser，仅管理员拉 /settings/users）。
+- 默认无需分：管理员建的 creator_id 自然是管理员，列上直接显示其用户名。
+- 测试 test_owner_label_3211.py 4 例：列表注入/普通用户不注入(最小权限)/详情注入/改派后标注即时更新。全量 88 passed；vue-tsc 212 持平；build OK。

@@ -835,6 +835,12 @@
                   </n-space>
                   <n-text depth="3" v-else>未分组</n-text>
                 </n-descriptions-item>
+                <!-- 32.11：所有人（仅管理员详情可见；改派入口在列表"所有人"列） -->
+                <n-descriptions-item v-if="currentUser?.is_superuser" label="所有人">
+                  <n-tag size="small" :bordered="false" :type="viewingAsset.creator_id === currentUser?.id ? 'info' : 'default'">
+                    {{ viewingAsset.creator_username || (viewingAsset.creator_id === currentUser?.id ? currentUser?.username : `用户#${viewingAsset.creator_id}`) }}
+                  </n-tag>
+                </n-descriptions-item>
                 <n-descriptions-item label="维保到期">
                   <span v-if="viewingAsset.warranty_expiry" :style="{ color: warrantyColor(viewingAsset.warranty_expiry), fontWeight: warrantyColor(viewingAsset.warranty_expiry) === '#d03050' ? 600 : 400 }">
                     {{ formatDate(viewingAsset.warranty_expiry) }}
@@ -1176,6 +1182,7 @@ import {
   NScrollbar,
   NDatePicker,
   NPopover,
+  NPopselect,
   NCollapse,
   NCollapseItem,
   NInputNumber,
@@ -1298,6 +1305,63 @@ const currentUser = ref<User | null>(null)
 const canModifyAsset = (row: Asset | null): boolean => {
   if (!row || !currentUser.value) return false
   return currentUser.value.is_superuser || row.creator_id === currentUser.value.id
+}
+
+// ============ 32.11：所有人（=creator）标注与管理员改派 ============
+// 默认：管理员创建的所有人就是管理员本身，不需手动分（creator_id 自然=管理员）。
+// 管理员可在"所有人"列点击改派给其他用户（走 32.10 的 PUT creator_id 通道）。
+const allUsers = ref<Array<{ id: number; username: string; is_superuser: boolean }>>([])
+const loadAllUsersForOwner = async () => {
+  if (!currentUser.value?.is_superuser) return
+  try {
+    const us = await apiService.get<Array<{ id: number; username: string; full_name?: string; is_superuser: boolean }>>('/settings/users')
+    allUsers.value = (us || []).map(u => ({
+      id: u.id,
+      username: u.full_name?.trim() ? `${u.username}（${u.full_name.trim()}）` : u.username,
+      is_superuser: u.is_superuser,
+    }))
+  } catch (e) {
+    console.error('加载用户列表失败（所有人改派不可用）:', e)
+  }
+}
+// 改派所有人：NPopselect 选完直接 PUT（saving 用响应式单值，保证标签 loading 态触发重渲染）
+const ownerSavingId = ref<number | null>(null)
+const handleChangeOwner = async (row: Asset, newUid: number) => {
+  if (newUid === row.creator_id) return
+  ownerSavingId.value = row.id
+  try {
+    await assetService.updateAsset(row.id, { creator_id: newUid } as any)
+    const u = allUsers.value.find(x => x.id === newUid)
+    row.creator_id = newUid
+    row.creator_username = u?.username || row.creator_username
+    message.success(`已把「${row.name}」的所有人改为 ${u?.username || newUid}`)
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '改派所有人失败')
+  } finally {
+    ownerSavingId.value = null
+  }
+}
+// 所有人列的选项（NPopselect）
+const ownerOptions = computed(() => allUsers.value.map(u => ({ label: u.username, value: u.id })))
+
+// 所有人单元格：管理员点击可改派（NPopselect），普通用户看不到该列
+const ownerDisplay = (row: Asset) =>
+  row.creator_username
+  || (currentUser.value && row.creator_id === currentUser.value.id ? currentUser.value.username : `用户#${row.creator_id}`)
+const renderOwnerCell = (row: Asset) => {
+  const saving = ownerSavingId.value === row.id
+  const isMe = currentUser.value && row.creator_id === currentUser.value.id
+  return h(NPopselect, {
+    options: ownerOptions.value,
+    value: row.creator_id,
+    disabled: saving || ownerOptions.value.length === 0,
+    'onUpdate:value': (v: number) => handleChangeOwner(row, v),
+  }, {
+    default: () => h(NTag, {
+      size: 'small', bordered: false, type: isMe ? 'info' : 'default', loading: saving,
+      style: 'cursor: pointer;',
+    }, { default: () => ownerDisplay(row) }),
+  })
 }
 
 // 分享弹窗（仅管理员）
@@ -2098,6 +2162,15 @@ const columns = computed<DataTableColumns<Asset>>(() => [
   ...colOrder.value
     .filter(k => !hiddenCols.value.includes(k) && colDefsMap.value[k])
     .map(k => ({ ...colDefsMap.value[k], align: 'center' } as NonNullable<DataTableColumns<Asset>[number]>)),
+  // 32.11：所有人列——仅管理员可见（不进列设置面板，固定位置）
+  ...(currentUser.value?.is_superuser ? [{
+    title: '所有人',
+    key: 'creator_username',
+    width: 120,
+    minWidth: 90,
+    align: 'center' as const,
+    render: renderOwnerCell,
+  } as NonNullable<DataTableColumns<Asset>[number]>] : []),
   {
     title: '操作',
     key: 'actions',
@@ -3545,6 +3618,8 @@ onMounted(async () => {
     loadNetworkLocations(),
     loadAssetGroups(),
   ])
+  // 32.11：管理员再补加载用户列表（所有人改派选项）——依赖 currentUser，放 Promise.all 后
+  loadAllUsersForOwner()
 })
 </script>
 

@@ -171,6 +171,8 @@ class Asset(AssetBase):
     # 32.4：分享状态（列表端点注入；True=至少分享给了一个用户）
     shared: Optional[bool] = None
     shared_count: Optional[int] = None
+    # 32.11：所有人用户名（=creator 的用户名，列表/详情端点注入；仅前端管理员列展示）
+    creator_username: Optional[str] = None
 
     class Config:
         from_attributes = True
