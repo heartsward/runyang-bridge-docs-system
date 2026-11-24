@@ -2948,3 +2948,12 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
   - byLabelLen/byStrLen 通用 helper（字数升序）。
 - 诊断踩坑：sqlite ORDER BY 汉字码点>拉丁，"管理员"组 asc 排末位属预期（不是 bug，测试断言别假设首位）；多次 order_by 语义不可靠→单次传双条件。
 - 验证：test_owner_filter_3212.py 5 例（管理员聚合筛选/用户名筛选/聚合排序相邻/is_superuser注入/普通用户忽略owner）；全量 93 passed；vue-tsc 212 持平；build OK。中途 shareFilterOptions 漏闭合括号致 TS1005（解析错会掩盖其余检查计数，对账时先确认无语法错再比数量）。
+
+### 步骤 32.13 — 筛选下拉动态化（按实际可见资产）+ 分享状态仅管理员（2026-11-24）
+> 陈工：设备类型/状态/部门/网络/分组筛选只显示实际资产里有的值（动态），没配进资产的看不到；普通用户不要分享状态下拉。
+- optionPool ref：loadAssets 全量加载后直接刷新；debouncedSearch 只在"无搜索无筛选"时刷新（refreshOptionPool 守卫）——防选一个筛选后其它下拉塌缩（伪级联）。
+- 五个 filterXxxOptions computed：optionPool 去重→byLabelLen；网络用 getNetworkLocationName、类型/状态用对应名称函数映射 label。筛选栏模板换绑这五个。表单/管理面板仍用全量配置（新建可选未用过的值）。
+- 所有人筛选也动态化：池里有超管资产才出"管理员"项，用户名按 creator_username 去重。
+- 分享状态下拉 v-if=showShareFilter（仅管理员）。
+- 坑：filter(Boolean) 不收窄类型(TS2345)；换 (v): v is string 又对枚举报 TS2677——谓词必须匹配参数类型（AssetType/AssetStatus）。
+- 验证：vue-tsc 212 持平、build OK；纯前端改动，后端无需动。

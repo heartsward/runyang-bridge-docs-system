@@ -96,7 +96,7 @@
           <n-select
             v-model:value="filters.asset_type"
             placeholder="设备类型"
-            :options="assetTypeOptions"
+            :options="filterTypeOptions"
             clearable
             style="width: 150px"
             @update:value="handleSearch"
@@ -104,7 +104,7 @@
           <n-select
             v-model:value="filters.status"
             placeholder="状态"
-            :options="assetStatusOptions"
+            :options="filterStatusOptions"
             clearable
             style="width: 120px"
             @update:value="handleSearch"
@@ -112,7 +112,7 @@
           <n-select
             v-model:value="filters.department"
             placeholder="部门"
-            :options="departmentOptionsForSelect"
+            :options="filterDeptOptions"
             clearable
             style="width: 120px"
             @update:value="handleDepartmentFilter"
@@ -120,7 +120,7 @@
           <n-select
             v-model:value="filters.network_location"
             placeholder="所处网络"
-            :options="networkLocationOptions"
+            :options="filterNetworkOptions"
             clearable
             style="width: 120px"
             @update:value="handleSearch"
@@ -128,13 +128,14 @@
           <n-select
             v-model:value="filters.group"
             placeholder="分组"
-            :options="groupOptionsForSelect"
+            :options="filterGroupOptions"
             clearable
             style="width: 150px"
             @update:value="handleSearch"
           />
-          <!-- 32.4：分享状态筛选（管理员视角：已分享/未分享） -->
+          <!-- 32.4：分享状态筛选（32.13：仅管理员——普通用户不需要） -->
           <n-select
+            v-if="showShareFilter"
             v-model:value="filters.share_filter"
             placeholder="分享状态"
             :options="shareFilterOptions"
@@ -1239,6 +1240,41 @@ const loading = ref(false)
 const submitting = ref(false)
 const extracting = ref(false)
 const confirming = ref(false)
+// ============ 32.13：筛选下拉按"实际可见资产"动态生成（不级联、不含未配进资产的选项）============
+// optionPool = 最近一次"无筛选全量加载"的可见资产快照（管理员=全部，普通用户=自己+被分享，
+// 由后端按 token 过滤决定）。仅在全量加载或无筛选搜索时刷新，避免选中某个筛选后其余下拉塌缩。
+const optionPool = ref<Asset[]>([])
+const refreshOptionPool = () => {
+  // 只在当前无搜索/无筛选时把 assets.value 作为全量快照
+  const noFilter = !searchQuery.value?.trim() &&
+    !filters.asset_type && !filters.status && !filters.department &&
+    !filters.network_location && !filters.group && !filters.share_filter && !filters.owner
+  if (noFilter) optionPool.value = [...assets.value]
+}
+// 去重 → byLabelLen（字数升序）。注意：filter(Boolean) 不收窄类型，用显式类型谓词
+const filterTypeOptions = computed(() => byLabelLen(
+  Array.from(new Set(optionPool.value.map(a => a.asset_type).filter((v): v is AssetType => !!v)))
+    .map(v => ({ label: assetService.getAssetTypeName(v), value: v }))
+))
+const filterStatusOptions = computed(() => byLabelLen(
+  Array.from(new Set(optionPool.value.map(a => a.status).filter((v): v is AssetStatus => !!v)))
+    .map(v => ({ label: assetService.getAssetStatusName(v), value: v }))
+))
+const filterDeptOptions = computed(() => byLabelLen(
+  Array.from(new Set(optionPool.value.map(a => a.department).filter((d): d is string => !!d && !!d.trim())))
+    .map(v => ({ label: v, value: v }))
+))
+const filterNetworkOptions = computed(() => byLabelLen(
+  Array.from(new Set(optionPool.value.map(a => a.network_location).filter((v): v is string => !!v)))
+    .map(v => ({ label: assetService.getNetworkLocationName(v), value: v }))
+))
+const filterGroupOptions = computed(() => byLabelLen(
+  Array.from(new Set(optionPool.value.flatMap(a => a.groups || []).filter((v): v is string => !!v)))
+    .map(v => ({ label: v, value: v }))
+))
+// 32.13：分享状态下拉仅管理员（普通用户不需要）
+const showShareFilter = computed(() => !!currentUser.value?.is_superuser)
+
 const assets = ref<Asset[]>([])
 const statistics = ref<AssetStatistics>({
   total_count: 0,
@@ -1384,11 +1420,14 @@ const renderOwnerCell = (row: Asset) => {
   })
 }
 
-// 32.12：所有人筛选选项（仅管理员）：'__admin__' 聚合 + 普通用户名，字数升序
+// 32.12/32.13：所有人筛选选项——只含"实际有资产"的：池里有超管建的才显示"管理员"，
+// 普通用户按 creator_username 去重；字数升序
 const OWNER_FILTER_ADMIN = '__admin__'
 const ownerFilterOptions = computed(() => byLabelLen([
-  { label: '管理员', value: OWNER_FILTER_ADMIN },
-  ...allUsers.value.filter(u => !u.is_superuser).map(u => ({ label: u.username, value: u.username })),
+  ...(optionPool.value.some(a => a.creator_is_superuser) ? [{ label: '管理员', value: OWNER_FILTER_ADMIN }] : []),
+  ...Array.from(new Set(
+    optionPool.value.filter(a => !a.creator_is_superuser).map(a => a.creator_username).filter((u): u is string => !!u)
+  )).map(u => ({ label: u, value: u })),
 ]))
 
 // 分享弹窗（仅管理员）
@@ -2375,6 +2414,8 @@ const loadAssets = async () => {
     
     assets.value = response
     pagination.itemCount = response.length
+    // 32.13：全量加载后刷新筛选下拉选项池
+    optionPool.value = [...response]
     
     if (response.length > 0) {
       console.log('第一个资产详情:', response[0])
@@ -2488,6 +2529,8 @@ const debouncedSearch = debounce(async (resetPage = true) => {
     const searchResults = await assetService.searchAssets(query)
     assets.value = searchResults
     pagination.itemCount = searchResults.length
+    // 32.13：仅当本次是无筛选查询才刷新选项池（防止选了一个筛选后其它下拉塌缩）
+    refreshOptionPool()
     
     // 更新 selectedAssets：保留之前选中的资产（可能存在于新的筛选结果中）
     const selectedIds = selectedAssetIds.value
