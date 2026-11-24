@@ -2922,3 +2922,11 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 前端：colorTagProps(raw, KNOWN) helper——已知枚举走 naive 色系，自定义值走 getDepartmentColor hash 调色板（浅底+同色字，同部门套路）；类型/网络 6 处标签（列表2+详情头2+详情descriptions2）统一改用。以后新建任何自定义类型/网络自动带底色。
 - 顺手修：搜索失败 message.error 直接塞 422 detail（数组）触发 naive "content got Array" 告警——统一转可读字符串（多错误 join）。
 - 验证：test_custom_network_329.py 4 例（互联网筛选命中/枚举仍工作/自定义类型/组合）全量 80 passed；vue-tsc 212 持平；build OK。126：git pull → 重启后端 → npm run build（后端改动必须重启才生效）。
+
+### 步骤 32.10 — 资产所有权转移（PUT creator_id）（2026-11-24）
+> 陈工：把 126 信息系统资产全部所有者改为 yyb，使其能修改编辑。系统原无转所有权通道（AssetUpdate 没有 creator_id 字段）。
+- schema：AssetUpdate 加 creator_id（Optional[int]）。
+- 端点 update_asset：creator_id 变化时——仅超管可改（403），目标用户必须存在（404）；随 update_data 正常落库。转移后新所有者按 32.1 归属模型获得可见+可编辑权。
+- 测试 test_owner_transfer_3210.py 4 例：管理员转移/被转移者可编辑/普通用户不能转/目标404。全量 84 passed。
+- 批量脚本（本机 .workbuddy/tmp/reassign_sys_to_yyb.py）：dry-run 列清单 → --apply 先"生效探测"（旧代码 PUT 会 200 但静默忽略 creator_id，探测不过即中止防假成功）→ 逐条 PUT+回读 → 最终分布核验。目标 yyb=#4。30 条待转。
+- 部署依赖：126 必须先 git pull + 重启后端（无数据库结构变化，不用跑迁移），再跑 --apply。

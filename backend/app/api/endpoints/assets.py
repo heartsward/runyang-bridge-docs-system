@@ -688,6 +688,14 @@ async def update_asset(
 
         update_data = asset_update.dict(exclude_unset=True)
 
+        # 32.10：所有权转移——仅超管可改 creator_id，且目标用户必须存在
+        if "creator_id" in update_data and update_data["creator_id"] != db_asset.creator_id:
+            if not current_user.is_superuser:
+                raise HTTPException(status_code=403, detail="只有管理员可以转移资产所有权")
+            new_owner = db.query(User).filter(User.id == update_data["creator_id"]).first()
+            if not new_owner:
+                raise HTTPException(status_code=404, detail="目标所有者用户不存在")
+
         # groups/tags 列表序列化为 JSON 字符串（Text 列）
 
         for json_field in ('groups', 'tags'):

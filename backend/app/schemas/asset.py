@@ -151,6 +151,8 @@ class AssetUpdate(BaseModel):
     tags: Optional[List[str]] = None
     groups: Optional[List[str]] = None
     confidence_score: Optional[int] = None
+    # 32.10：所有权转移（仅管理员生效，端点里校验）；普通用户传了会被拒绝
+    creator_id: Optional[int] = None
 
     @validator('serial_number')
     def empty_serial_to_none(cls, v):
