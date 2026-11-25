@@ -127,6 +127,28 @@ def _build_asset_search_filter(search: str):
     return and_(*[term_filter(t) for t in terms])
 
 
+def _find_ip_conflict(db: Session, ip: Optional[str], network: Optional[str],
+                      exclude_asset_id: Optional[int] = None):
+    """32.15：IP 唯一性 = 同一网络内唯一（不同网络可复用同一 IP）。
+
+    - ip 为空 → 无冲突（IP 可选字段）
+    - 匹配条件：ip_address 相等 且 network_location 相等（NULL 网络也视为同组：
+      两边都未设网络时按同网络处理，维持"没填网络也不让重复"的旧口径）
+    - exclude_asset_id：更新场景排除自身
+    返回冲突资产或 None。
+    """
+    if not ip:
+        return None
+    q = db.query(AssetModel).filter(AssetModel.ip_address == ip)
+    if network is None:
+        q = q.filter(AssetModel.network_location.is_(None))
+    else:
+        q = q.filter(AssetModel.network_location == network)
+    if exclude_asset_id is not None:
+        q = q.filter(AssetModel.id != exclude_asset_id)
+    return q.first()
+
+
 @router.get("/", response_model=AssetList)
 
 async def list_assets(
@@ -622,15 +644,16 @@ async def create_asset(
 
     try:
 
-        # 检查IP地址是否已存在（如果提供了IP）
+        # 32.15：IP 唯一性口径改为"同一网络内唯一"（不同网络可复用同一 IP）。
+        # 校验点统一走 _find_ip_conflict（create/PUT/提取预览三处共用）。
 
-        if asset.ip_address:
+        conflict = _find_ip_conflict(db, asset.ip_address, asset.network_location)
 
-            existing_asset = db.query(AssetModel).filter(AssetModel.ip_address == asset.ip_address).first()
+        if conflict:
 
-            if existing_asset:
+            raise HTTPException(status_code=400,
 
-                raise HTTPException(status_code=400, detail=f"IP地址 {asset.ip_address} 已被使用")
+                detail=f"IP地址 {asset.ip_address} 在网络「{asset.network_location}」中已被设备「{conflict.name}」使用")
 
         
 
@@ -731,25 +754,30 @@ async def update_asset(
 
                 
 
-        # 检查IP地址冲突（如果更新了IP）
+        # 32.15：IP 冲突检查——按"更新后的网络"判定同网络唯一。
+        # 覆盖三种情形：改IP / 改网络(IP不变) / 二者同改。排除自身。
 
-        if asset_update.ip_address and asset_update.ip_address != db_asset.ip_address:
+        update_data = asset_update.dict(exclude_unset=True)
 
-            existing_asset = db.query(AssetModel).filter(
+        update_keys = set(update_data.keys())
 
-                and_(AssetModel.ip_address == asset_update.ip_address, AssetModel.id != asset_id)
+        new_ip = update_data["ip_address"] if "ip_address" in update_keys else db_asset.ip_address
 
-            ).first()
+        new_net = update_data["network_location"] if "network_location" in update_keys else db_asset.network_location
 
-            if existing_asset:
+        if new_ip != db_asset.ip_address or new_net != db_asset.network_location:
 
-                raise HTTPException(status_code=400, detail=f"IP地址 {asset_update.ip_address} 已被使用")
+            conflict = _find_ip_conflict(db, new_ip, new_net, exclude_asset_id=asset_id)
+
+            if conflict:
+
+                raise HTTPException(status_code=400,
+
+                    detail=f"IP地址 {new_ip} 在网络「{new_net}」中已被设备「{conflict.name}」使用")
 
         
 
         # 更新字段
-
-        update_data = asset_update.dict(exclude_unset=True)
 
         # 32.10：所有权转移——仅超管可改 creator_id，且目标用户必须存在
         if "creator_id" in update_data and update_data["creator_id"] != db_asset.creator_id:
@@ -1855,11 +1883,17 @@ async def extract_assets_from_file(
 
                 try:
 
-                    existing_asset = db.query(AssetModel).filter(AssetModel.ip_address == asset_data.get('ip_address')).first()
+                    # 32.15：同网络内唯一（不同网络同 IP 不再报冲突）
+
+                    existing_asset = _find_ip_conflict(
+
+                        db, asset_data.get('ip_address'), asset_data.get('network_location'))
 
                     if existing_asset:
 
-                        asset_data['conflicts'].append(f"IP地址 {asset_data.get('ip_address')} 已被设备 '{existing_asset.name}' 使用")
+                        asset_data['conflicts'].append(
+
+                            f"IP地址 {asset_data.get('ip_address')} 在网络「{asset_data.get('network_location')}」中已被设备 '{existing_asset.name}' 使用")
 
                     # 检查设备名称冲突（用于逐条确认）
 

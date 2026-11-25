@@ -2973,3 +2973,11 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 预处理只折叠 **连续空段 ≥4**（MIN_MERGE_RUN）：合并单元格/大标题都是长空段照旧折叠；数据里短空段（1-3个）保留独立空格占位，窄列交给 CSS :empty（~16px）。
 - POC（阈值4）：10.md 标题行仍 1格colspan17；130.md 数据行原样20格不被破坏。vue-tsc 212 持平、build OK。
 - 依赖已在自动安装体系：update.bat/sh 每次跑 npm install（package.json 驱动）、install-complete.bat 首次 npm install——无需单独加脚本。
+
+### 步骤 32.15 — IP 唯一性改为"同网络内唯一"（2026-11-25）
+> 陈工：不同网络可以用同一 IP；同一网络（如办公网）内 IP 必须唯一。
+- 模型无 DB 级 UNIQUE（只有 index），仅应用层三处校验：create / PUT / 提取预览。统一抽 _find_ip_conflict(db, ip, network, exclude_id)：ip 相等 且 network_location 相等（NULL 网络两边都 NULL 视为同组维持旧口径）。
+- PUT 增强：原逻辑只在"改IP"时查，漏"IP不变但改网络"→ 现按 update_data 计算 new_ip/new_net，任一变化即查（排除自身），覆盖改IP/改网络/同改三种情形。
+- 错误消息带网络与设备名："IP地址 x 在网络「办公网」中已被设备「y」使用"。
+- confirm_single_asset 落库不校验（沿用旧设计：提取预览标记靠用户确认）。
+- 测试 test_ip_network_scoped_3215.py 5 例（同网拒/异网通过/迁移冲突/改IP通过/NULL网络组唯一）。全量 98 passed。无库结构变化，126 重启即可。
