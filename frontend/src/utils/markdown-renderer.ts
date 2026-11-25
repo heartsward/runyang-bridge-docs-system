@@ -119,7 +119,13 @@ function placeholdersToMark(html: string): string {
  * MultiMarkdown 的 `||` 合并语法，交给 markdown-it-multimd-table 解析为 colspan。
  * 解决合并单元格变 16 列幽灵空列、把有内容的列挤窄的问题（POC 用 wiki/10.md 实测）。
  * 仅处理表格行（首尾都是 |），跳过围栏代码块内部。
+ *
+ * 32.14.1 修（陈工反馈"留空的格子被并入相邻格，而不是空格占位"）：
+ * 只有 **连续空段 ≥ MIN_MERGE_RUN（4）** 才折叠——Excel 合并单元格/整行大标题
+ * 的幽灵空列都是长段；数据里真空字段（如经度/纬度两列留空）保持独立占位，
+ * 其窄列由 CSS（:empty 压到 ~16px）处理，不再误合并。
  */
+const MIN_MERGE_RUN = 4
 function preprocessTableEmptyRuns(mdSrc: string): string {
   const lines = mdSrc.split('\n')
   let inFence = false
@@ -136,11 +142,16 @@ function preprocessTableEmptyRuns(mdSrc: string): string {
     let i = 0
     while (i < cells.length) {
       const cur = cells[i]
-      // 连续空段并入当前单元格：cur 后跟 N 个空 → cur + N 个额外 '|'（即 ||语法）
+      // 连续空段达到阈值才并入当前单元格（||语法）；不足阈值原样占位
       let empties = 0
       while (i + 1 + empties < cells.length && cells[i + 1 + empties].trim() === '') empties++
-      parts.push('|' + cur + '|'.repeat(empties))
-      i += 1 + empties
+      if (empties >= MIN_MERGE_RUN) {
+        parts.push('|' + cur + '|'.repeat(empties))
+        i += 1 + empties
+      } else {
+        parts.push('|' + cur)
+        i += 1
+      }
     }
     // 末尾若原行以 | 结束（我们已 slice 掉），补回闭合 |
     const merged = parts.join('')

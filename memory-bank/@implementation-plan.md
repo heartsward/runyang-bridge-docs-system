@@ -2967,3 +2967,9 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - CSS：空格 max-width:16px 压缩、去 word-break（防 G4011 词内硬切）、单列 max-width:420、:has 隐藏全空幽灵表头（@supports 兜底）。
 - 环境：npmmirror 被路由器防火墙拒连（ECONNREFUSED 58.218.208.7，同 115 套路），--registry=npmjs.org 装成功。以后 npm 装包npmmirror不通直接官方源。
 - 验证：真实 wiki POC 前后对比；vue-tsc 212 持平；build OK；DOMPurify 白名单已有 colspan。纯前端，126 只需 npm i + build。
+
+### 步骤 32.14.1 — 空列合并阈值修（2026-11-25）
+> 陈工反馈：留空的格子被并入相邻格而不是空格占位（10.md 数据行经纬度两个真空字段被吞进9列合并段）。
+- 预处理只折叠 **连续空段 ≥4**（MIN_MERGE_RUN）：合并单元格/大标题都是长空段照旧折叠；数据里短空段（1-3个）保留独立空格占位，窄列交给 CSS :empty（~16px）。
+- POC（阈值4）：10.md 标题行仍 1格colspan17；130.md 数据行原样20格不被破坏。vue-tsc 212 持平、build OK。
+- 依赖已在自动安装体系：update.bat/sh 每次跑 npm install（package.json 驱动）、install-complete.bat 首次 npm install——无需单独加脚本。
