@@ -236,6 +236,17 @@
   overflow-wrap: break-word;
   max-width: 420px;
 }
+/* 32.16：宽表"一字一行"根因——table-layout:auto 下 CJK 列的 min-content=1 字，
+   列一多（如 13 列 IP 分配表）整表被 max-width:100% 压窄，每列塌到 1 字宽。
+   解法：表头不换行（保证列至少表头那么宽）+ 非空格 min-width 兜底，
+   使表 min-content 超过容器时走横向滚动而不是塌列。 */
+.markdown-content table th {
+  white-space: nowrap;
+}
+.markdown-content table th:not(:empty),
+.markdown-content table td:not(:empty) {
+  min-width: 56px;
+}
 /* 32.14：Excel 合并单元格/空栏转 MD 留下的"幽灵空列"——空单元格压到极小宽度，
    把空间让给有内容的列（缓解"字多的格子被强制分行、字少的格子拉很长"） */
 .markdown-content table th:empty,

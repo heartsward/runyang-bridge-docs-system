@@ -58,6 +58,9 @@ function getMd(): MarkdownIt {
       autolabel: false,
     })
 
+    // 32.16：宽表列被压到一字一行——根因是 CSS（CJK 列 min-content=1字），
+    // 见 markdown.css 的 th{white-space:nowrap} + 单元格 min-width 修复，此处无需改渲染。
+
     // 29.1：装 anchor 插件 → 自动给 heading 加 id（[text](#anchor) 跳转锚点的前提）
     // 默认 slugify 已够用（中文用 pinyin 或去特殊字符；GitHub 风格）
     _mdInstance.use(markdownItAnchor, {

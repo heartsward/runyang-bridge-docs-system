@@ -2981,3 +2981,10 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 错误消息带网络与设备名："IP地址 x 在网络「办公网」中已被设备「y」使用"。
 - confirm_single_asset 落库不校验（沿用旧设计：提取预览标记靠用户确认）。
 - 测试 test_ip_network_scoped_3215.py 5 例（同网拒/异网通过/迁移冲突/改IP通过/NULL网络组唯一）。全量 98 passed。无库结构变化，126 重启即可。
+
+### 步骤 32.16 — IP 分配表"一字一行"塌列修（2026-11-25）
+> 陈工：扬溧改扩建IP分配表预览里文字/数字一个字占一行。
+- 先按"单元格内换行(breaks:true)"猜→POC 证伪：wiki/9.md 每格单行、td 内 <br>=0。根因是 CSS table-layout:auto 下 CJK 列 min-content=1字，13 列宽表被 max-width:100% 压到每列塌成1字宽。
+- 修 markdown.css：th{white-space:nowrap}（列至少表头宽）+ th/td :not(:empty) min-width:56px 兜底，表 min-content 超容器走横向滚动而非塌列。空格仍走 :empty 压窄(32.14)。
+- 教训：渲染问题先拿真实数据 POC 定位(<br>计数)，别按直觉改渲染层——本次若没 POC 就去改 breaks/inline 规则全白做。
+- POC：9.md 全文 <br>=6 全在正文、td 内 0。vue-tsc 212 持平、build OK。纯 CSS，126 只需 build。
