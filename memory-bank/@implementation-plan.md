@@ -2988,3 +2988,10 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 修 markdown.css：th{white-space:nowrap}（列至少表头宽）+ th/td :not(:empty) min-width:56px 兜底，表 min-content 超容器走横向滚动而非塌列。空格仍走 :empty 压窄(32.14)。
 - 教训：渲染问题先拿真实数据 POC 定位(<br>计数)，别按直觉改渲染层——本次若没 POC 就去改 breaks/inline 规则全白做。
 - POC：9.md 全文 <br>=6 全在正文、td 内 0。vue-tsc 212 持平、build OK。纯 CSS，126 只需 build。
+
+### 步骤 32.17 — 原子词硬切修（IP/K30+060）（2026-11-25）
+> 陈工：32.16 后仍 IP 切4行、K30+060 切3行、带符号字被切。
+- 根因：单元格仍带 overflow-wrap:break-word（且 .markdown-content 第32行的 break-word 会继承进 td/th）——列宽不足时把"无断点原子词"（IP、K30+060、设备编号）硬切。
+- 修：单元格显式 overflow-wrap:normal + word-break:normal。浏览器按 UAX#14 把 IP/带+桩号视为不可断整体 → 列宽地板=最长原子词（IP列≈90px），整表超容器走横向滚动。CJK 在 normal 下仍字间换行（长中文列不受影响）。
+- ⚠️ CSS 坑：仅"删掉属性"不够——外层 .markdown-content 的 overflow-wrap:break-word 继承进单元格，必须显式 normal 覆盖。
+- 代价：单个超长 token（>100位）撑宽列——可接受。min-width:56px 保留（短列兜底）。vue-tsc 212 持平、build OK。纯 CSS。

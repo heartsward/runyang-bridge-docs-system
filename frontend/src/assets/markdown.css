@@ -231,9 +231,13 @@
   border: 1px solid #d0d7de;
   text-align: left;
   vertical-align: top;
-  /* 32.14：去掉 word-break:break-word（会在英文单词/编号中间硬切，如 G4011 被拆）；
-     保留 overflow-wrap:break-word 兜超长单词；max-width 防个别长文本列无限撑宽挤崩其它列 */
-  overflow-wrap: break-word;
+  /* 32.14 去掉 word-break、32.17 去掉 overflow-wrap（陈工：IP 切 4 行、K30+060 切 3 行）。
+     IP/桩号/编号是"无断点原子词"，break-word 会在列宽不足时硬切它们；
+     normal 下浏览器自动把"最长原子词"当列宽地板（IP 列≈90px），整表超宽走横向滚动。
+     ⚠️ 必须显式 normal——.markdown-content(第32行) 的 overflow-wrap:break-word 会继承进单元格。
+     代价：单个超长 token（如 40 位密码）会把列撑宽——可接受，滚动比切碎诚实。 */
+  overflow-wrap: normal;
+  word-break: normal;
   max-width: 420px;
 }
 /* 32.16：宽表"一字一行"根因——table-layout:auto 下 CJK 列的 min-content=1 字，
