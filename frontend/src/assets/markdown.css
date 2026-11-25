@@ -237,8 +237,12 @@
      ⚠️ 必须显式 normal——.markdown-content(第32行) 的 overflow-wrap:break-word 会继承进单元格。
      代价：单个超长 token（如 40 位密码）会把列撑宽——可接受，滚动比切碎诚实。 */
   overflow-wrap: normal;
-  word-break: normal;
-  max-width: 420px;
+  /* 32.18：汉字切行修（陈工："自愈环网链路/方向/上下行/分布式远端供电"被逐字拆）。
+     normal 下 CJK 字符之间仍是合法断点。keep-all = CJK 之间禁止换行，
+     只在空格/英文词边界断行——"IP地址段：… 子网掩码：…"这类带空格的长说明格仍可自然折行，
+     无空格的中文词组整体一行（Chrome/Edge/Firefox 均支持）。不用 nowrap：
+     它连空格处也不断，超长说明格会把表撑到失控。 */
+  word-break: keep-all;
 }
 /* 32.16：宽表"一字一行"根因——table-layout:auto 下 CJK 列的 min-content=1 字，
    列一多（如 13 列 IP 分配表）整表被 max-width:100% 压窄，每列塌到 1 字宽。

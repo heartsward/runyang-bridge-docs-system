@@ -2995,3 +2995,9 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 修：单元格显式 overflow-wrap:normal + word-break:normal。浏览器按 UAX#14 把 IP/带+桩号视为不可断整体 → 列宽地板=最长原子词（IP列≈90px），整表超容器走横向滚动。CJK 在 normal 下仍字间换行（长中文列不受影响）。
 - ⚠️ CSS 坑：仅"删掉属性"不够——外层 .markdown-content 的 overflow-wrap:break-word 继承进单元格，必须显式 normal 覆盖。
 - 代价：单个超长 token（>100位）撑宽列——可接受。min-width:56px 保留（短列兜底）。vue-tsc 212 持平、build OK。纯 CSS。
+
+### 步骤 32.18 — 汉字逐字换行修（keep-all）（2026-11-25）
+> 陈工：同文件汉字也切几行——自愈环网链路/方向/上下行/登录方式为：IP地址/分布式远端供电/扬州-上行。
+- 根因：32.17 的 word-break:normal 只保英文数字原子词，CJK 字符之间 UAX 仍是合法断点，窄列逐字换行。
+- 修：单元格 word-break:keep-all（CJK 之间禁换行，仅在空格/词边界断）。"分布式远端供电"等无空格词组整体一行；"IP地址段：… 子网掩码：…"带空格长说明格仍按空格折行不失控。弃 nowrap（连空格也不断会撑爆长格）。overflow-wrap:normal 保留（IP 原子词）。
+- 教训：CJK 换行是断点问题不是原子词问题，normal≠CJK不换行；keep-all 才是中文词组保护。max-width 删除（原子词定地板后无意义，超宽靠横向滚动）。build OK。
