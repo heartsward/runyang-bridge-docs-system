@@ -130,6 +130,11 @@ echo Installing frontend dependencies...
 cd ..\frontend
 npm install
 if errorlevel 1 (
+    REM npmmirror 可能被路由器防火墙拦（ECONNREFUSED 58.218.208.7）——自动换官方源重试
+    echo Default registry failed, retrying with registry.npmjs.org...
+    npm install --registry=https://registry.npmjs.org
+)
+if errorlevel 1 (
     echo ERROR: Frontend installation failed
     pause
     exit /b 1
@@ -140,7 +145,7 @@ REM 锚链接跳转 / 代码块语法高亮。装完断言一下，让脚本读�
 call node -e "require('markdown-it-anchor'); require('highlight.js'); console.log('OK markdown preview deps')" 2>nul
 if errorlevel 1 (
     echo [WARN] markdown-it-anchor or highlight.js missing, installing...
-    call npm install markdown-it-anchor@^9.2.0 highlight.js@^11.10.0 --no-audit --no-fund -q
+    call npm install markdown-it-anchor@^9.2.0 highlight.js@^11.10.0 --no-audit --no-fund -q || call npm install markdown-it-anchor@^9.2.0 highlight.js@^11.10.0 --registry=https://registry.npmjs.org --no-audit --no-fund -q
 )
 
 echo.

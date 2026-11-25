@@ -82,6 +82,10 @@ cd /d "%~dp0frontend"
 if exist "node_modules" (
     echo       npm install
     call npm install --no-audit --no-fund -q
+    if errorlevel 1 (
+        echo       默认源失败（可能被防火墙拦），换官方源 npmjs.org 重试...
+        call npm install --registry=https://registry.npmjs.org --no-audit --no-fund -q
+    )
 ) else (
     echo       node_modules 不存在，跳过（首次部署请先运行 install-complete.bat 或 start-services.bat）
 )

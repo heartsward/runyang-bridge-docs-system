@@ -79,7 +79,12 @@ echo "[4/5] 检查前端依赖..."
 cd "$ROOT/frontend"
 if [ -d "node_modules" ]; then
     echo "      npm install（仅补缺，不全量）"
-    npm install --no-audit --no-fund -q 2>&1 | tail -3
+    if npm install --no-audit --no-fund -q; then
+        :
+    else
+        echo "      默认源失败（可能被防火墙拦），换官方源 npmjs.org 重试..."
+        npm install --registry=https://registry.npmjs.org --no-audit --no-fund -q 2>&1 | tail -3
+    fi
 else
     echo "      node_modules 不存在，跳过（首次部署请先运行 install-complete.bat 或 ./start-services.sh）"
 fi

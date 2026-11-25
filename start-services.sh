@@ -69,7 +69,7 @@ echo $! > "$LOG_DIR/backend.pid"
 cd "$FRONTEND"
 if [ ! -d node_modules ]; then
     echo "Installing frontend dependencies..."
-    npm install || { echo "ERROR: Frontend dependency installation failed"; exit 1; }
+    npm install || npm install --registry=https://registry.npmjs.org || { echo "ERROR: Frontend dependency installation failed"; exit 1; }
 fi
 echo "Starting frontend on :5173 ..."
 nohup npm run dev > "$LOG_DIR/frontend.log" 2>&1 &

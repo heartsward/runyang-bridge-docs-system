@@ -106,6 +106,10 @@ if not exist "node_modules" (
     echo node_modules not found, installing frontend dependencies...
     call npm install
     if errorlevel 1 (
+        echo Default registry failed, retrying with registry.npmjs.org...
+        call npm install --registry=https://registry.npmjs.org
+    )
+    if errorlevel 1 (
         echo ERROR: Frontend dependency installation failed.
         pause
         exit /b 1
