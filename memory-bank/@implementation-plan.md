@@ -2957,3 +2957,13 @@ _本文件会被持续更新；每次新增任务前先把对应子步骤补到�
 - 分享状态下拉 v-if=showShareFilter（仅管理员）。
 - 坑：filter(Boolean) 不收窄类型(TS2345)；换 (v): v is string 又对枚举报 TS2677——谓词必须匹配参数类型（AssetType/AssetStatus）。
 - 验证：vue-tsc 212 持平、build OK；纯前端改动，后端无需动。
+
+### 步骤 32.14 — MD 预览表格渲染优化（Excel/Word 转换产物）（2026-11-25）
+> 陈工：Excel 转 MD 的表格"字少的格子拉很长、字多的格子被强制分行"；要求先调研现成方案。
+- 根因：Excel 合并单元格转 MD 成"幽灵空列"（1格+16空列，每空列占30px挤窄内容列）+ 旧 CSS display:block/word-break 加剧词内硬切。光调 CSS 治不了空列，必须解析层 colspan 合并。
+- 选型：markdown-it-multimd-table 4.2.3（MIT、零依赖）——直接接现有 markdown-it 管线；marked 换引擎不值得；Grid.js 太重。
+- ⚠️ 兼容坑：插件用 md.utils.assign，markdown-it 15 已移除 → 2行垫片补 Object.assign（POC 实测崩溃抓到）。
+- 插件对"空单元格"不做 colspan（|| 是语法显式合并非空即并）→ 加 preprocessTableEmptyRuns：表格行连续空格折叠成 || 语法（跳围栏块）。真实样例 POC：10.md 标题行 17格→1格colspan17、数据行 14/6/7 格；130/16 同样效。
+- CSS：空格 max-width:16px 压缩、去 word-break（防 G4011 词内硬切）、单列 max-width:420、:has 隐藏全空幽灵表头（@supports 兜底）。
+- 环境：npmmirror 被路由器防火墙拒连（ECONNREFUSED 58.218.208.7，同 115 套路），--registry=npmjs.org 装成功。以后 npm 装包npmmirror不通直接官方源。
+- 验证：真实 wiki POC 前后对比；vue-tsc 212 持平；build OK；DOMPurify 白名单已有 colspan。纯前端，126 只需 npm i + build。

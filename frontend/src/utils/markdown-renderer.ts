@@ -13,6 +13,7 @@
  */
 import MarkdownIt from 'markdown-it'
 import markdownItAnchor from 'markdown-it-anchor'
+import markdownItMultimdTable from 'markdown-it-multimd-table'
 import hljs from 'highlight.js'
 import { sanitizeDocumentHtml } from './xss-protection'
 
@@ -40,6 +41,21 @@ function getMd(): MarkdownIt {
         // 无 lang 或语言不支持 → 转义后包裹（防止 XSS 注入）
         return `<pre class="hljs"><code>${_mdInstance!.utils.escapeHtml(str)}</code></pre>`
       },
+    })
+
+    // 32.14：MultiMarkdown 表格插件——Excel/Word 转 MD 的表格救星：
+    // - 连续空单元格自动 colspan 合并（合并单元格/长标题不再拖出一排幽灵空列）
+    // - headerless: 无表头表也能解析；multibody: 空行分隔的多段表体保留
+    // - rowspan 不开（'^^' 语法与转换产物无关，开了反而可能误判普通空单元格）
+    // 兼容垫片：插件 4.2.3 内部用 md.utils.assign，markdown-it 15 已移除该工具（POC 实测崩溃）
+    const anyUtils = _mdInstance.utils as unknown as Record<string, unknown>
+    if (typeof anyUtils.assign !== 'function') anyUtils.assign = Object.assign
+    _mdInstance.use(markdownItMultimdTable, {
+      multiline: false,
+      rowspan: false,
+      headerless: true,
+      multibody: true,
+      autolabel: false,
     })
 
     // 29.1：装 anchor 插件 → 自动给 heading 加 id（[text](#anchor) 跳转锚点的前提）
@@ -99,12 +115,46 @@ function placeholdersToMark(html: string): string {
 }
 
 /**
+ * 32.14：Excel/Word 转 MD 的表格预处理——把行内"连续空单元格"折叠成
+ * MultiMarkdown 的 `||` 合并语法，交给 markdown-it-multimd-table 解析为 colspan。
+ * 解决合并单元格变 16 列幽灵空列、把有内容的列挤窄的问题（POC 用 wiki/10.md 实测）。
+ * 仅处理表格行（首尾都是 |），跳过围栏代码块内部。
+ */
+function preprocessTableEmptyRuns(mdSrc: string): string {
+  const lines = mdSrc.split('\n')
+  let inFence = false
+  return lines.map(line => {
+    const t = line.trim()
+    if (t.startsWith('```') || t.startsWith('~~~')) { inFence = !inFence; return line }
+    if (inFence) return line
+    if (!t.startsWith('|') || !t.endsWith('|')) return line
+    // 至少 3 列才处理（两列的普通小表没必要动）
+    const inner = t.slice(1, -1)
+    const cells = inner.split('|')
+    if (cells.length < 3) return line
+    const parts: string[] = []
+    let i = 0
+    while (i < cells.length) {
+      const cur = cells[i]
+      // 连续空段并入当前单元格：cur 后跟 N 个空 → cur + N 个额外 '|'（即 ||语法）
+      let empties = 0
+      while (i + 1 + empties < cells.length && cells[i + 1 + empties].trim() === '') empties++
+      parts.push('|' + cur + '|'.repeat(empties))
+      i += 1 + empties
+    }
+    // 末尾若原行以 | 结束（我们已 slice 掉），补回闭合 |
+    const merged = parts.join('')
+    return '|' + merged.slice(1) + '|'
+  }).join('\n')
+}
+
+/**
  * 直接渲染 Markdown 为 HTML（不做 sanitize）
  */
 export function renderMarkdown(md: string): string {
   if (!md) return ''
   try {
-    return getMd().render(md)
+    return getMd().render(preprocessTableEmptyRuns(md))
   } catch (e) {
     console.error('Markdown render failed:', e)
     return md
@@ -134,7 +184,8 @@ export function renderDocumentMarkdown(
 
   let html: string
   try {
-    html = getMd().render(source)
+    // 32.14：同 renderMarkdown——表格空列折叠预处理
+    html = getMd().render(preprocessTableEmptyRuns(source))
   } catch (e) {
     console.error('Markdown render failed:', e)
     html = source
